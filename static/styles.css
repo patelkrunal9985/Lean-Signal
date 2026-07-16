@@ -423,6 +423,26 @@ main {
 }
 .setting-row input:focus { outline: none; border-color: var(--accent); }
 
+/* -- Mini-dashboard row on signal cards -- */
+.signal-card .row-mini {
+  display: flex;
+  gap: 14px;
+  margin-top: 4px;
+  padding: 5px 10px;
+  background: rgba(0,0,0,0.2);
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  align-items: center;
+  flex-wrap: wrap;
+}
+.signal-card .row-mini strong {
+  color: var(--text-primary);
+  font-family: 'Consolas', 'Monaco', monospace;
+}
+.signal-card .row-mini strong.accent { color: var(--accent); }
+.signal-card .row-mini strong.danger { color: var(--danger); }
+
 /* -- New 0DTE card rows -- */
 .signal-card .option-strike {
   border-top: 1px dashed rgba(124,77,255,0.3);

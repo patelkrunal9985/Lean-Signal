@@ -187,6 +187,23 @@ function createSignalCard(signal, cycle) {
       (posLine ? '<div class="row3 option-size">' + posLine + '</div>' : '') +
       (metaLine ? '<div class="row3 option-meta">' + metaLine + '</div>' : '');
   }
+  // Mini-dashboard for option signals: key metrics at a glance
+  var miniDash = signal.market_dashboard || {};
+  var miniDashHtml = '';
+  if (Object.keys(miniDash).length > 0 && signal.instrument_type === 'option') {
+    var breadthLabel = miniDash.breadth_state || '—';
+    var breadthClass = breadthLabel === 'bullish' || breadthLabel === 'slightly_bullish' ? 'accent'
+      : breadthLabel === 'bearish' || breadthLabel === 'slightly_bearish' ? 'danger' : '';
+    var thrustIcon = miniDash.breadth_thrust ? ' ⚡' : '';
+    miniDashHtml =
+      '<div class="row-mini">' +
+        '<span>IV <strong>' + (miniDash.iv || 0).toFixed(1) + '%</strong></span>' +
+        '<span>P/C <strong>' + (miniDash.pc_ratio != null ? miniDash.pc_ratio : '—') + '</strong></span>' +
+        '<span>VIX <strong>' + (miniDash.vix_spot != null ? miniDash.vix_spot : '—') + '</strong></span>' +
+        '<span>Breadth <strong class="' + breadthClass + '">' + breadthLabel + thrustIcon + '</strong></span>' +
+        '<span>DTE <strong>' + (miniDash.dte != null ? miniDash.dte : '—') + '</strong></span>' +
+      '</div>';
+  }
   card.innerHTML =
     '<div class="row1">' +
       '<div><span class="ticker-name">' + signal.ticker + '</span>' +
@@ -200,6 +217,7 @@ function createSignalCard(signal, cycle) {
       '<span>Regime: <strong>' + signal.regime + '</strong></span>' +
       '<span>Price: <strong>$' + (signal.current_price || 0).toFixed(2) + '</strong></span>' +
     '</div>' +
+    miniDashHtml +
     levelsHtml;
   card.addEventListener('click', function() { showSignalPopup(signal, cycle); });
   return card;

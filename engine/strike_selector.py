@@ -28,6 +28,7 @@ STRIKE_SPACING: dict[str, float] = {
     "SPX": 5.0,
     "SPY": 1.0,
     "QQQ": 1.0,
+    "NDX": 25.0,
 }
 
 # -- OTM distance presets (in number of strikes) --

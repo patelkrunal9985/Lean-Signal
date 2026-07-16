@@ -20,8 +20,12 @@ logger = get_logger("kronos.skills.subscription_manager")
 # Slot allocation optimized: futures need 3+ dynamic slots for next-month contracts
 # (carry_yield, calendar_spread, vix_term_structure all require next-month prices).
 # Reduced option slots from 77→74 to free 3 slots for futures.
+# Fixed tickers: 4 stocks + 13 futures = 17 lines
+# Options: 83 lines / 3 underlyings = 27 per underlying = 13 strikes each (calls+puts)
+# With Quote Booster: 183 lines / 3 = 61 per = 30 strikes each
 SLOT_LIMITS = {"stock": 8, "future": 17, "option": 74}
 TOTAL_SLOTS = 100
+OPTION_LINES_PER_UNDERLYING = 27  # adjustable when booster added
 SPARE = 1
 SLOT_WARN_THRESHOLD = 0.80  # warn when any type exceeds 80% capacity
 
@@ -89,7 +93,7 @@ _slot_usage: dict[str, int] = {"stock": 0, "future": 0, "option": 0}
 _last_slot_warning: float = 0.0  # rate-limit warnings to once per 60s
 
 # ── Fixed tickers: never evicted, never scored ────────────────────
-FIXED_STOCKS = frozenset({"SPY", "QQQ", "SPX"})
+FIXED_STOCKS = frozenset({"SPY", "QQQ", "SPX", "NDX"})
 FIXED_FUTURES = frozenset({
     "ES=F", "NQ=F", "YM=F", "RTY=F",
     "MES=F", "MNQ=F", "MYM=F", "M2K=F", "MGC=F", "MCL=F",

@@ -114,7 +114,10 @@ REGIME_TREND_DIR: dict[str, str | None] = {
 }
 
 COUNTER_TREND_PENALTY = 0.25
+# Base threshold: requires meaningful directional tilt
+# Options get stricter threshold (0.40) — 0DTE gamma whipsaw demands strong confluence
 CONSENSUS_THRESHOLD = 0.20
+CONSENSUS_THRESHOLD_OPTION = 0.40
 COUNTER_TREND_CONSENSUS_THRESHOLD = 0.50
 
 # Minimum total weight required for a signal to pass.
@@ -289,7 +292,8 @@ def compute_consensus(
     meta["consensus_net_score"] = round(net, 4)
 
     # ── Determine direction with adaptive threshold ──
-    threshold = CONSENSUS_THRESHOLD
+    # Options use stricter threshold (0.40) — 0DTE gamma demands strong confluence
+    threshold = CONSENSUS_THRESHOLD_OPTION if instr_type == "option" else CONSENSUS_THRESHOLD
     if trend_dir is not None:
         inferred = "long" if net > 0 else "short"
         if inferred != trend_dir:

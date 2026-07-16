@@ -48,22 +48,22 @@ def compute_option_metrics(ticker: str, underlying_price: float, ticker_data_map
     expirations = chain_struct["expirations"]
     strikes = chain_struct["strikes"]
 
-    # Skip 0-DTE expiries (no live prices for expiring-today options)
-    valid_expirations = [e for e in expirations if _dte(e) >= 1]
-    if not valid_expirations:
-        logger.warning("compute_option_metrics(%s): no valid expiries (all 0-DTE)", ticker)
-        return None
-    nearest_exp = min(valid_expirations, key=lambda e: _dte(e))
-    dte = _dte(nearest_exp)
+    # Allow 0DTE expiries — use nearest expiry even if DTE=0
+    # Previously skipped DTE<1 but 0DTE gamma scalping requires expiry-day data
+    nearest_exp = min(expirations, key=lambda e: _dte(e))
+    dte = max(_dte(nearest_exp), 0)  # 0 for expiry day
     logger.debug("compute_option_metrics(%s): using expiry %s (DTE=%d)", ticker, nearest_exp, dte)
 
-    # Limit strikes to ATM ± 15 to stay under IBKR market data lines limit
+    # Strike window: configurable based on IBKR market data line budget
+    # Default half=6 (13 strikes = 26 lines per underlying × 3 underlyings = 78 lines)
+    # With Quote Booster (+100 lines): set OPTION_STRIKE_HALF=15 in .env (31 strikes = 62 lines each)
+    import os
+    half = int(os.getenv("OPTION_STRIKE_HALF", "6"))
     atm_idx = min(range(len(strikes)), key=lambda i: abs(strikes[i] - underlying_price))
-    half = 15
     strikes = strikes[max(0, atm_idx - half):min(len(strikes), atm_idx + half + 1)]
-    logger.debug("compute_option_metrics(%s): limited to %d strikes around ATM", ticker, len(strikes))
+    logger.debug("compute_option_metrics(%s): limited to %d strikes around ATM (half=%d)", ticker, len(strikes), half)
 
-    live_prices = fetch_live_option_prices(ticker, nearest_exp, strikes, max_strikes=31)
+    live_prices = fetch_live_option_prices(ticker, nearest_exp, strikes, max_strikes=len(strikes))
     if not live_prices:
         logger.warning("compute_option_metrics(%s): no live prices for expiry %s", ticker, nearest_exp)
         return None
@@ -205,6 +205,37 @@ def compute_option_metrics(ticker: str, underlying_price: float, ticker_data_map
         oi = c.get("openInterest", 0) or 0
         delta_positioning += d * oi
 
+    # ── Vanna/Charm exposure (dealer hedging flow prediction) ──
+    # Vanna = dDelta/dVol: dealer delta change as IV moves
+    # Charm = dDelta/dTime: dealer delta change from time decay
+    # On 0DTE Charm dominates final hours — dealers MUST hedge this flow
+    total_vanna = 0.0; total_charm = 0.0
+    call_vanna = 0.0; put_vanna = 0.0
+    call_charm = 0.0; put_charm = 0.0
+    t_years = max(dte / 365.0, 1.0 / (365.0 * 24.0))
+    for c in all_contracts:
+        stk = c.get("strike", 0) or 0
+        iv_c = (c.get("impliedVolatility", atm_iv) or atm_iv)
+        if iv_c <= 0 or stk <= 0 or underlying_price <= 0:
+            continue
+        sigma = iv_c
+        try:
+            d1 = (math.log(underlying_price / stk) + (0.5 * sigma**2) * t_years) / (sigma * math.sqrt(t_years))
+        except (ValueError, ZeroDivisionError):
+            continue
+        gamma_c = c.get("gamma", 0) or 0
+        oi_c = c.get("openInterest", 0) or 0
+        vanna_contrib = -d1 * gamma_c * oi_c / max(sigma, 0.01)
+        theta_c = c.get("theta", 0) or 0
+        charm_contrib = -theta_c * oi_c / max(underlying_price, 0.01)
+        total_vanna += vanna_contrib; total_charm += charm_contrib
+        if c in option_chain.get("calls", []):
+            call_vanna += vanna_contrib; call_charm += charm_contrib
+        else:
+            put_vanna += vanna_contrib; put_charm += charm_contrib
+    charm_direction = "long" if total_charm > 0 else "short" if total_charm < 0 else "neutral"
+    charm_magnitude = abs(total_charm) / max(underlying_price, 0.01)
+
     # ── Put/Call ratio history ──
     if ticker not in _pcr_history:
         _pcr_history[ticker] = []
@@ -263,7 +294,7 @@ def compute_option_metrics(ticker: str, underlying_price: float, ticker_data_map
         otm_call_iv = option_chain["calls"][-1].get("impliedVolatility", 0) or 0
         skew_term_1m = otm_put_iv - otm_call_iv
 
-    logger.info("compute_option_metrics(%s): done — pc_ratio=%.3f, atm_iv=%.1f%%, gamma_flip=%.2f", ticker, pc_ratio, atm_iv * 100, gamma_flip)
+    logger.info("compute_option_metrics(%s): done — pc_ratio=%.3f, atm_iv=%.1f%%, gamma_flip=%.2f, charm=%s", ticker, pc_ratio, atm_iv * 100, gamma_flip, charm_direction)
     return {
         "ticker": f"{ticker}_OPT",
         "instrument_type": "option",
@@ -294,6 +325,14 @@ def compute_option_metrics(ticker: str, underlying_price: float, ticker_data_map
         "vix_2m": vix_2m,
         "atm_straddle_price": atm_straddle_price,
         "skew_term_1m": skew_term_1m,
+        "total_vanna": round(total_vanna, 2),
+        "total_charm": round(total_charm, 2),
+        "call_vanna": round(call_vanna, 2),
+        "put_vanna": round(put_vanna, 2),
+        "call_charm": round(call_charm, 2),
+        "put_charm": round(put_charm, 2),
+        "charm_direction": charm_direction,
+        "charm_magnitude": round(charm_magnitude, 6),
         "ohlcv": ohlcv,
         "current_price": underlying_price,
         "data_source": "ibkr",

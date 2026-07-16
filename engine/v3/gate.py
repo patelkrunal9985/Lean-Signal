@@ -57,12 +57,12 @@ ALIGNMENT_MATRIX: dict[str, dict[str, str]] = {
 # ═══════════════════════════════════════════════════════════════
 CONVICTION_GATE = {
     "gate_min_strategies_agree": 1,
-    "gate_min_strategies_agree_option": 1,
+    "gate_min_strategies_agree_option": 3,
     "gate_strategy_confidence_min": 0.12,
-    "gate_strategy_confidence_min_option": 0.10,
+    "gate_strategy_confidence_min_option": 0.20,
     "gate_min_confidence_stock": 0.25,
     "gate_min_confidence_future": 0.12,
-    "gate_min_confidence_option": 0.10,
+    "gate_min_confidence_option": 0.20,
     "gate_bonus_4plus_strategies": 1.10,
     "gate_bonus_6plus_strategies": 1.20,
 }

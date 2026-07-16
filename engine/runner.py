@@ -232,7 +232,7 @@ def run_cycle() -> dict:
 
         # ── Options processing ──
         from engine.option_metrics import compute_option_metrics
-        for opt_underlying in ["SPY", "QQQ", "SPX"]:
+        for opt_underlying in ["SPY", "QQQ", "SPX", "NDX"]:
             try:
                 underlying_data = ticker_data_map.get(opt_underlying, {})
                 underlying_price = underlying_data.get("current_price", 0)

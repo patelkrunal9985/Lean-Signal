@@ -15,7 +15,7 @@ IBKR_CLIENT_ID = int(os.getenv("IBKR_CLIENT_ID", "1"))
 
 FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY", "")
 
-FIXED_STOCKS = ["SPY", "QQQ", "SPX"]
+FIXED_STOCKS = ["SPY", "QQQ", "SPX", "NDX"]
 FIXED_FUTURES = [
     "ES=F", "NQ=F", "YM=F", "RTY=F",
     "MES=F", "MNQ=F", "MYM=F", "M2K=F", "MGC=F", "MCL=F",

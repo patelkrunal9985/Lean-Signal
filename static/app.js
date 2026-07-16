@@ -230,7 +230,6 @@ function showSignalPopup(signal, cycle) {
   document.getElementById('popup-direction').textContent = signal.direction.toUpperCase();
   document.getElementById('popup-direction').className = 'direction-badge ' + dirClass;
   document.getElementById('popup-confidence').textContent = (signal.confidence * 100).toFixed(1) + '%';
-  document.getElementById('popup-score').textContent = (signal.composite_score * 100).toFixed(1) + '%';
   document.getElementById('popup-regime').textContent = signal.regime + ' (' + (signal.regime_confidence * 100).toFixed(0) + '%)';
   document.getElementById('popup-price').textContent = '$' + (signal.current_price || 0).toFixed(2);
 

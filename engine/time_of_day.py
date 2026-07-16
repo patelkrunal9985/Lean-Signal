@@ -58,6 +58,7 @@ STRATEGY_TIME_WEIGHTS: dict[str, dict[str, float]] = {
     },
     "power_hour": {
         "zero_dte_gamma": 2.5,
+        "vanna_charm_flow": 2.2,
         "gamma_flip_acceleration": 2.0,
         "max_pain": 1.8,
         "gamma_flip_levels": 1.5,
@@ -66,6 +67,7 @@ STRATEGY_TIME_WEIGHTS: dict[str, dict[str, float]] = {
         "expected_vs_actual": 0.3,
     },
     "closing_pin": {
+        "vanna_charm_flow": 2.8,
         "max_pain": 2.5,
         "zero_dte_gamma": 1.5,
         "gamma_flip_acceleration": 1.5,

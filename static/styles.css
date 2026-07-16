@@ -402,7 +402,7 @@ main {
 .history-cycle .cycle-body { padding: 8px 16px; }
 
 .settings-panel {
-  max-width: 500px;
+  max-width: 350px;
 }
 .setting-row {
   display: flex;
@@ -503,6 +503,18 @@ main {
   transition: transform 0.2s;
 }
 .collapsible-body { overflow: hidden; }
+.collapsed-summary {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-secondary);
+  margin-left: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 350px;
+  display: inline-block;
+  vertical-align: middle;
+}
 .dashboard-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));

@@ -96,6 +96,7 @@
       <div id="popup-market-dashboard" class="popup-dashboard collapsible-section" style="display:none">
         <h4 class="collapsible-header" onclick="toggleCollapse('dashboard-body', this)">
           📊 Market Dashboard <span class="collapse-icon">▼</span>
+          <span id="dashboard-summary" class="collapsed-summary"></span>
         </h4>
         <div id="dashboard-body" class="collapsible-body" style="display:none">
           <div class="dashboard-grid" id="dashboard-grid"></div>
@@ -139,6 +140,7 @@
       <div id="popup-consensus-meta" class="consensus-meta collapsible-section" style="display:none">
         <h4 class="collapsible-header" onclick="toggleCollapse('consensus-body', this)">
           📈 Consensus Detail <span class="collapse-icon">▼</span>
+          <span id="consensus-summary" class="collapsed-summary"></span>
         </h4>
         <div id="consensus-body" class="collapsible-body" style="display:none">
           <div class="dashboard-grid" id="consensus-grid"></div>

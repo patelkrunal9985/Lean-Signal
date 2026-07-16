@@ -334,6 +334,17 @@ function showSignalPopup(signal, cycle) {
     dashGrid.innerHTML = dashItems.map(function(p) {
       return '<div class="dash-metric"><label>' + p[0] + '</label><span>' + p[1] + '</span></div>';
     }).join('');
+    // Inline summary: always visible in the header (even when collapsed)
+    var dashSummary = document.getElementById('dashboard-summary');
+    if (dashSummary) {
+      var breadthLabel = dash.breadth_state || '—';
+      dashSummary.textContent =
+        'IV ' + (dash.iv || 0).toFixed(1) + '% · ' +
+        'P/C ' + (dash.pc_ratio != null ? dash.pc_ratio : '—') + ' · ' +
+        'VIX ' + (dash.vix_spot != null ? dash.vix_spot : '—') + ' · ' +
+        'Breadth ' + breadthLabel + ' · ' +
+        'DTE ' + (dash.dte != null ? dash.dte : '—');
+    }
   } else {
     dashSection.style.display = 'none';
   }
@@ -404,6 +415,19 @@ function showSignalPopup(signal, cycle) {
     consGrid.innerHTML = consItems.map(function(p) {
       return '<div class="dash-metric"><label>' + p[0] + '</label><span>' + p[1] + '</span></div>';
     }).join('');
+    // Inline summary: always visible in the header
+    var consSummary = document.getElementById('consensus-summary');
+    if (consSummary) {
+      var netScore = (consMeta.consensus_net_score != null ? consMeta.consensus_net_score : 0).toFixed(2);
+      var activeVotes = consMeta.consensus_active_votes || 0;
+      var counterTrend = consMeta.consensus_counter_trend || 'no';
+      var action = consMeta.consensus_action || '—';
+      consSummary.textContent =
+        'Net ' + (netScore > 0 ? '+' : '') + netScore + ' · ' +
+        activeVotes + ' active · ' +
+        'Counter: ' + counterTrend + ' · ' +
+        'Action: ' + action;
+    }
     // Vote breakdown list
     var voteSection = document.getElementById('vote-breakdown');
     if (consVotes.length > 0) {

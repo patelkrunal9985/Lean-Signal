@@ -358,12 +358,18 @@ function showSignalPopup(signal, cycle) {
     });
   }
 
-  // ── Consensus Meta ──
+  // ── Consensus Meta (collapsed by default) ──
   var consSection = document.getElementById('popup-consensus-meta');
   var consMeta = signal.consensus_meta || {};
   var consVotes = consMeta.consensus_votes || [];
   if (consVotes.length > 0 || consMeta.consensus_net_score != null) {
     consSection.style.display = 'block';
+    // Reset to collapsed state
+    var consBody = document.getElementById('consensus-body');
+    consBody.style.display = 'none';
+    var consIcon = consSection.querySelector('.collapse-icon');
+    if (consIcon) consIcon.textContent = '▼';
+    // Aggregate grid
     var consGrid = document.getElementById('consensus-grid');
     var consItems = [
       ['Net Score', (consMeta.consensus_net_score || 0).toFixed(2)],
@@ -380,6 +386,28 @@ function showSignalPopup(signal, cycle) {
     consGrid.innerHTML = consItems.map(function(p) {
       return '<div class="dash-metric"><label>' + p[0] + '</label><span>' + p[1] + '</span></div>';
     }).join('');
+    // Vote breakdown list
+    var voteSection = document.getElementById('vote-breakdown');
+    if (consVotes.length > 0) {
+      consVotes.sort(function(a, b) { return b.contribution - a.contribution; });
+      var voteHtml = '<h5>Vote Breakdown</h5><div class="vote-list">';
+      consVotes.forEach(function(v) {
+        var vDirClass = v.direction === 'long' ? 'long' : v.direction === 'short' ? 'short' : 'neutral';
+        voteHtml +=
+          '<div class="vote-item">' +
+            '<span class="vote-name">' + v.name + ' <em>' + (v.type || '') + '</em></span>' +
+            '<span class="direction-badge ' + vDirClass + '" style="font-size:9px">' + v.direction.toUpperCase() + '</span>' +
+            '<span class="vote-conf">' + ((v.confidence || 0) * 100).toFixed(0) + '%</span>' +
+            '<span class="vote-weight">×' + (v.weight || 0).toFixed(2) + '</span>' +
+            '<span class="vote-contrib">=' + (v.contribution || 0).toFixed(3) + '</span>' +
+          '</div>';
+      });
+      voteHtml += '</div>';
+      voteSection.innerHTML = voteHtml;
+      voteSection.style.display = 'block';
+    } else {
+      voteSection.style.display = 'none';
+    }
   } else {
     consSection.style.display = 'none';
   }

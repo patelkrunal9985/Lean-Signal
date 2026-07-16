@@ -136,9 +136,14 @@
       </div>
       <h4>Strategy Breakdown</h4>
       <div id="popup-strategies" class="strategy-list"></div>
-      <div id="popup-consensus-meta" class="consensus-meta" style="display:none">
-        <h4>📈 Consensus Detail</h4>
-        <div class="dashboard-grid" id="consensus-grid"></div>
+      <div id="popup-consensus-meta" class="consensus-meta collapsible-section" style="display:none">
+        <h4 class="collapsible-header" onclick="toggleCollapse('consensus-body', this)">
+          📈 Consensus Detail <span class="collapse-icon">▼</span>
+        </h4>
+        <div id="consensus-body" class="collapsible-body" style="display:none">
+          <div class="dashboard-grid" id="consensus-grid"></div>
+          <div id="vote-breakdown" class="vote-breakdown"></div>
+        </div>
       </div>
       <h4>News & Sentiment</h4>
       <div id="popup-news" class="news-list"></div>

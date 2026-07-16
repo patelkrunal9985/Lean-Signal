@@ -538,3 +538,60 @@ main {
 
 /* -- Consensus Meta -- */
 .consensus-meta { margin-top: 4px; }
+
+/* -- Vote Breakdown -- */
+.vote-breakdown { margin-top: 8px; }
+.vote-breakdown h5 {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+.vote-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.vote-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 8px;
+  background: var(--bg-card);
+  border-radius: 4px;
+  font-size: 11px;
+}
+.vote-name {
+  flex: 1;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vote-name em {
+  font-style: normal;
+  color: var(--text-muted);
+  font-size: 9px;
+  margin-left: 4px;
+}
+.vote-conf {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-family: 'Consolas', 'Monaco', monospace;
+  min-width: 32px;
+  text-align: right;
+}
+.vote-weight {
+  color: var(--text-muted);
+  font-family: 'Consolas', 'Monaco', monospace;
+  min-width: 40px;
+  text-align: right;
+}
+.vote-contrib {
+  font-weight: 700;
+  color: var(--accent);
+  font-family: 'Consolas', 'Monaco', monospace;
+  min-width: 48px;
+  text-align: right;
+}

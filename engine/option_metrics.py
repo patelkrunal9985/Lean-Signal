@@ -54,13 +54,14 @@ def compute_option_metrics(ticker: str, underlying_price: float, ticker_data_map
     dte = max(_dte(nearest_exp), 0)  # 0 for expiry day
     logger.debug("compute_option_metrics(%s): using expiry %s (DTE=%d)", ticker, nearest_exp, dte)
 
-    # Strike window: per-underlying allocation within 83-line IBKR budget
-    # 4 stocks + 13 futures = 17 lines, 83 remaining for options
-    # SPX prioritized (widest cash-settled 0DTE window)
-    # Budget: SPX=26(13str) + SPY=18(9str) + QQQ=18(9str) + NDX=18(9str) = 80 lines (3 spare)
+    # Strike window: SEQUENTIAL full-budget allocation
+    # Each underlying gets the entire 83-line IBKR budget since only one
+    # option chain is live at a time (subscriptions cancelled between underlyings).
+    # Budget: 4 stocks + 13 futures = 17 lines, 83 remaining for ONE option chain.
+    # half=20 → 41 strikes → 82 lines (1 spare)
+    # Override via OPTION_STRIKE_HALF env var if needed.
     import os
-    _PER_TICKER_HALF = {"SPX": 6, "SPY": 4, "QQQ": 4, "NDX": 4}
-    half = int(os.getenv("OPTION_STRIKE_HALF", str(_PER_TICKER_HALF.get(ticker, 5))))
+    half = int(os.getenv("OPTION_STRIKE_HALF", "20"))
     atm_idx = min(range(len(strikes)), key=lambda i: abs(strikes[i] - underlying_price))
     strikes = strikes[max(0, atm_idx - half):min(len(strikes), atm_idx + half + 1)]
     logger.debug("compute_option_metrics(%s): %d strikes ATM+-%d (budget: %d lines)", ticker, len(strikes), half, len(strikes) * 2)

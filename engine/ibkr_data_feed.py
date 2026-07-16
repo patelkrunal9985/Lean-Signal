@@ -959,10 +959,10 @@ def fetch_option_chain_ibkr(ticker: str) -> Optional[dict]:
                 return
 
             expirations = sorted(valid_expirations)[:10]
+            # Return ALL strikes — the caller (option_metrics.py) slices to
+            # its budget.  With sequential full-chain mode, we need 41+ strikes
+            # available per underlying (half=20 → 41 strikes).
             strikes = sorted(params.strikes)
-            mid = len(strikes) // 2
-            half = 5
-            strikes = strikes[max(0, mid - half):min(len(strikes), mid + half)]
             result_container = {
                 "ticker": ticker,
                 "expirations": expirations,
@@ -1244,6 +1244,44 @@ def clear_live_option_prices():
     """Clear the live option price cache. Called when chain expires."""
     with _live_prices_lock:
         _live_option_prices.clear()
+
+
+def cancel_all_option_subscriptions():
+    """Safety blanket: cancel any lingering option market-data subscriptions.
+
+    fetch_live_option_prices already cancels its contracts before returning,
+    but this provides defense-in-depth when cycling between underlyings in
+    sequential full-chain mode.  Cancellations are dispatched onto the
+    streamer's event loop (thread-safe).  Does NOT touch stock/futures subs.
+    """
+    streamer = get_streamer()
+    if not streamer or not streamer._ib or not streamer._ib.isConnected():
+        return
+    if not streamer._loop or streamer._loop.is_closed():
+        return
+    cancelled = [0]  # mutable to capture from async
+    cancel_event = threading.Event()
+
+    async def _cancel_async():
+        try:
+            if hasattr(streamer._ib, 'tickers'):
+                for ticker in list(streamer._ib.tickers()):
+                    ct = ticker.contract
+                    if ct.secType in ('OPT', 'FOP'):
+                        try:
+                            streamer._ib.cancelMktData(ct)
+                            cancelled[0] += 1
+                        except Exception:
+                            pass
+        except Exception as e:
+            logger.debug(f"cancel_all_option_subscriptions: {e}")
+        finally:
+            cancel_event.set()
+
+    asyncio.run_coroutine_threadsafe(_cancel_async(), streamer._loop)
+    cancel_event.wait(timeout=3)
+    if cancelled[0]:
+        logger.debug(f"cancel_all_option_subscriptions: cancelled {cancelled[0]} option contracts")
 
 
 def subscribe_ticker(ticker: str):

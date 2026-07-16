@@ -230,8 +230,13 @@ def run_cycle() -> dict:
                 "session_context": session_context,
             }
 
-        # ── Options processing ──
+        # ── Options processing (sequential full-chain mode) ──
+        # Each underlying gets the full 83-line IBKR budget since only one
+        # chain is live at a time.  fetch_live_option_prices cancels all
+        # subscriptions before returning; we add a small safety delay and
+        # force-cancel between underlyings for defense-in-depth.
         from engine.option_metrics import compute_option_metrics
+        from engine.ibkr_data_feed import cancel_all_option_subscriptions
         for opt_underlying in ["SPY", "QQQ", "SPX", "NDX"]:
             try:
                 underlying_data = ticker_data_map.get(opt_underlying, {})
@@ -246,6 +251,11 @@ def run_cycle() -> dict:
                     all_tickers.append((opt_ctx["ticker"], "option"))
             except Exception as exc:
                 logger.warning("Option metrics for %s failed: %s", opt_underlying, exc)
+            # Free IBKR market data lines before processing next underlying.
+            # fetch_live_option_prices cancels its own contracts, but a safety
+            # blanket + 1.5s delay ensures IBKR has processed the cancellations.
+            cancel_all_option_subscriptions()
+            time.sleep(1.5)
 
         signals = []
         v2_registry = V2StrategyRegistry()

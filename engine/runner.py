@@ -257,6 +257,21 @@ def run_cycle() -> dict:
             cancel_all_option_subscriptions()
             time.sleep(1.5)
 
+        # ── Market breadth computation ──
+        # Compute market breadth context from existing data (ES, NQ, YM, RTY
+        # futures + VIX + index performance). Inject into option contexts
+        # so breadth confirmation strategy can detect divergences.
+        breadth_ctx = {}
+        try:
+            from engine.market_breadth import compute_market_breadth
+            breadth_ctx = compute_market_breadth(ticker_data_map)
+            # Inject into all option contexts
+            for key, data in ticker_data_map.items():
+                if data.get("instrument_type") == "option":
+                    data["market_breadth"] = breadth_ctx
+        except Exception as exc:
+            logger.warning("Market breadth computation failed: %s", exc)
+
         signals = []
         v2_registry = V2StrategyRegistry()
         gate = SignalQualityGate()

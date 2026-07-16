@@ -93,6 +93,7 @@ STRATEGY_TAXONOMY: dict[str, str] = {
     "oi_change_rate": "flow",
     "vol_smile_curvature": "volatility",
     "delta_gamma_imbalance": "volatility",
+    "breadth_confirmation": "flow",
 }
 
 REGIME_WEIGHTS: dict[str, dict[str, float]] = {

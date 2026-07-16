@@ -72,6 +72,7 @@ def _import_all():
     from engine.v3.options.oi_change_rate import OIChangeRate
     from engine.v3.options.vol_smile_curvature import VolSmileCurvature
     from engine.v3.options.delta_gamma_imbalance import DeltaGammaImbalance
+    from engine.v3.options.breadth_confirmation import BreadthConfirmation
     all_strategies = [
         PremarketGapper(), SectorRotation(), ShortSqueeze(), InsiderFlow(),
         EarningsMomentum(), DarkPoolProxy(), PairsTrading(), OrderImbalance(), COTSentiment(),
@@ -88,7 +89,7 @@ def _import_all():
         VWAPOptionFlow(), CallPutWallBreakout(), UnusualWhaleFlow(), GammaFlipAcceleration(),
         StrikeVolumeSurge(), SectorETFOptionRotation(), VIXSPXConvexityArbitrage(),
         VannaCharmFlow(), PriorHLMagnetism(), OIChangeRate(),
-        VolSmileCurvature(), DeltaGammaImbalance(),
+        VolSmileCurvature(), DeltaGammaImbalance(), BreadthConfirmation(),
     ]
     for s in all_strategies:
         for instr in s.applies_to:

@@ -17,8 +17,12 @@ Distinguishes:
 
 The net OI change direction (calls building vs puts building) gives the
 signal direction.  The magnitude and volume/OI ratio give confidence.
+
+Strikes are weighted by proximity to the underlying price — OI building
+at ATM strikes is far more significant than far OTM positioning.
 """
 from __future__ import annotations
+import math
 from kronos.strategies.v3.base import BaseV3Strategy
 from utils.logger import get_logger
 
@@ -30,6 +34,24 @@ OI_DELTA_PCT_MIN = 0.15         # Minimum % change at individual strike to count
 OI_VOLUME_RATIO_MAX = 5.0       # Volume/OI delta ratio: above this = noise, not positioning
 SMART_VOL_RATIO = 2.0           # Volume/OI delta: below this = smart positioning
 STRIKE_WEIGHT_MIN = 3           # Minimum strikes with confirmed OI building
+
+# ── Proximity-to-ATM weighting ──
+# OI building at ATM is far more significant than far-OTM positioning.
+# Weight decays exponentially: weight = exp(-PROXIMITY_DECAY * dist_pct)
+#   ATM (0%):  1.00
+#   2% OTM:    0.55
+#   5% OTM:    0.22
+#   10% OTM:   0.05
+PROXIMITY_DECAY = 30
+PROXIMITY_FLOOR = 0.05           # Minimum weight for far-OTM strikes
+
+
+def _proximity_weight(strike: float, underlying: float) -> float:
+    """Weight OI changes by distance from underlying — ATM matters most."""
+    if underlying <= 0:
+        return 1.0
+    dist_pct = abs(strike - underlying) / underlying
+    return max(PROXIMITY_FLOOR, math.exp(-PROXIMITY_DECAY * dist_pct))
 
 
 def _compute_oi_deltas(chain_current: dict, chain_prev: dict, underlying: float) -> dict:
@@ -50,6 +72,10 @@ def _compute_oi_deltas(chain_current: dict, chain_prev: dict, underlying: float)
         "smart_put_oi": 0,
         "noise_call_vol": 0,
         "noise_put_vol": 0,
+        # Weighted by proximity to ATM (diagnostic)
+        "weighted_smart_call": 0.0,
+        "weighted_smart_put": 0.0,
+        "total_proximity_weight": 0.0,
     }
 
     # Index previous contracts by side+strike for O(log n) lookup
@@ -81,22 +107,27 @@ def _compute_oi_deltas(chain_current: dict, chain_prev: dict, underlying: float)
 
             if oi_delta > 0:
                 vol_oi_ratio = abs(vol_delta) / oi_delta if oi_delta > 0 else 999
+                prox_w = _proximity_weight(stk, underlying)
                 if side_label == "call":
                     result["call_oi_delta"] += oi_delta
                     result["call_vol_delta"] += vol_delta
                     result["call_delta_strikes"] += 1
                     if vol_oi_ratio < SMART_VOL_RATIO:
                         result["smart_call_oi"] += oi_delta
+                        result["weighted_smart_call"] += oi_delta * prox_w
+                        result["total_proximity_weight"] += prox_w
                     elif vol_oi_ratio > OI_VOLUME_RATIO_MAX:
-                        result["noise_call_vol"] += vol_delta
+                        result["noise_call_vol"] += vol_delta * prox_w
                 else:
                     result["put_oi_delta"] += oi_delta
                     result["put_vol_delta"] += vol_delta
                     result["put_delta_strikes"] += 1
                     if vol_oi_ratio < SMART_VOL_RATIO:
                         result["smart_put_oi"] += oi_delta
+                        result["weighted_smart_put"] += oi_delta * prox_w
+                        result["total_proximity_weight"] += prox_w
                     elif vol_oi_ratio > OI_VOLUME_RATIO_MAX:
-                        result["noise_put_vol"] += vol_delta
+                        result["noise_put_vol"] += vol_delta * prox_w
 
     return result
 
@@ -133,13 +164,19 @@ class OIChangeRate(BaseV3Strategy):
         if total_strikes < STRIKE_WEIGHT_MIN:
             return {"direction": "neutral", "confidence": 0.0, "strategy": self.name}
 
-        # ── Smart money OI analysis ──
+        # ── Smart money OI analysis (proximity-weighted) ──
         smart_call = deltas["smart_call_oi"]
         smart_put = deltas["smart_put_oi"]
         smart_total = smart_call + smart_put
+        weighted_smart_call = deltas["weighted_smart_call"]
+        weighted_smart_put = deltas["weighted_smart_put"]
+        weighted_total = weighted_smart_call + weighted_smart_put
 
         noise_call_vol = deltas["noise_call_vol"]
         noise_put_vol = deltas["noise_put_vol"]
+
+        # ── ATM concentration: OI-weighted average proximity (1.0 = all ATM, ~0.05 = all far OTM) ──
+        avg_proximity = weighted_total / max(smart_total, 1) if smart_total > 0 else 0.0
 
         # ── Determine signal ──
         # Net smart OI building direction
@@ -148,8 +185,8 @@ class OIChangeRate(BaseV3Strategy):
         if net_smart == 0:
             return {"direction": "neutral", "confidence": 0.0, "strategy": self.name}
 
-        # Confidence: scales with smart OI magnitude and smart-to-noise ratio
-        smart_magnitude_score = min(smart_total / 20000.0, 0.45)
+        # Confidence: scales with proximity-weighted smart OI magnitude and smart-to-noise ratio
+        smart_magnitude_score = min(weighted_total / 15000.0, 0.45)
         noise_total = noise_call_vol + noise_put_vol
         smart_noise_ratio = smart_total / max(noise_total, 1)
         ratio_score = min(smart_noise_ratio / 3.0, 0.25) if noise_total > 0 else 0.25
@@ -181,10 +218,13 @@ class OIChangeRate(BaseV3Strategy):
             "action": "buy",
             "smart_call_oi_delta": int(smart_call),
             "smart_put_oi_delta": int(smart_put),
+            "weighted_smart_call": int(weighted_smart_call),
+            "weighted_smart_put": int(weighted_smart_put),
             "noise_call_vol": int(noise_call_vol),
             "noise_put_vol": int(noise_put_vol),
             "smart_noise_ratio": round(smart_noise_ratio, 2),
             "strike_breadth": total_strikes,
             "net_smart_delta": int(net_smart),
+            "avg_proximity": round(avg_proximity, 2),
             "signal_quality": "positioning" if smart_noise_ratio > 2.0 else "mixed",
         }

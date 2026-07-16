@@ -201,7 +201,9 @@ class SignalQualityGate:
         confidence_mult = 1.0
 
         # -- Check if new entries are allowed at this time --
-        allowed, reason = can_enter_new_trade(ticker, dte)
+        # Globex futures (instr_type="future") bypass the cash-session close
+        # buffer in can_enter_new_trade.
+        allowed, reason = can_enter_new_trade(ticker, dte, instr_type=instr_type)
         if not allowed:
             return {"passed": False, "reason": reason, "window": window,
                     "vwap_position": "unknown", "confidence_multiplier": 1.0}

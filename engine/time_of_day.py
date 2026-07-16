@@ -175,12 +175,18 @@ def get_min_confidence() -> float:
     return MIN_CONFIDENCE.get(window, 0.15)
 
 
-def can_enter_new_trade(ticker: str, dte: int = 0) -> tuple[bool, str]:
+def can_enter_new_trade(
+    ticker: str, dte: int = 0, *, instr_type: str = ""
+) -> tuple[bool, str]:
     """Check if new entries are allowed at this time.
 
     Returns (allowed, reason).
     For 0DTE options: blocks new entries in closing_pin or within
     MIN_MINUTES_BEFORE_CLOSE of expiry.
+
+    Futures trade via Globex 24/5 (Sun 17:00 ET → Fri 16:00 ET) so the
+    cash-session close-minus-N buffer is skipped for ``instr_type="future"``.
+    Stocks and equity options keep the original 15-minute pre-close block.
     """
     window = get_time_window()
 
@@ -189,17 +195,18 @@ def can_enter_new_trade(ticker: str, dte: int = 0) -> tuple[bool, str]:
         if window == "closing_pin":
             return False, "blocked_closing_pin_0dte"
 
-    # Block within N minutes of close for all instruments
+    # Cash-session instruments: block within N minutes of close.
+    # Globex futures (ES/NQ/RTY/YM/CL/GC/VX + micros) trade 24/5 → skip.
     now_min = _current_et_minutes()
     if now_min < 570:
         return False, "pre_market"
 
-    close_min = 960  # 16:00 ET default
-    if ticker in LATE_CLOSE_TICKERS:
-        close_min = 975  # 16:15 ET for SPXW
-
-    if now_min >= close_min - MIN_MINUTES_BEFORE_CLOSE:
-        return False, f"within_{MIN_MINUTES_BEFORE_CLOSE}min_of_close"
+    if instr_type != "future":
+        close_min = 960  # 16:00 ET default
+        if ticker in LATE_CLOSE_TICKERS:
+            close_min = 975  # 16:15 ET for SPXW
+        if now_min >= close_min - MIN_MINUTES_BEFORE_CLOSE:
+            return False, f"within_{MIN_MINUTES_BEFORE_CLOSE}min_of_close"
 
     # Midday lull: allow but mark as reduced conviction
     if window == "midday_lull":

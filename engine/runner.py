@@ -11,6 +11,7 @@ On each cycle:
 """
 import time
 import json
+import re
 import threading
 import traceback
 from datetime import datetime
@@ -62,6 +63,36 @@ def _save_history():
         logger.warning(f"Failed to save history: {e}")
 
 
+# Strip "_<digit>..." suffixes from gate reasons so variable numerics (e.g.
+# "within_15min_of_close", "atr_too_high_0.0821", "stale_price_5s") collapse
+# into a single bucket per failure mode without colliding on the first word.
+_GATE_REASON_BUCKET_RE = re.compile(r"_\d.*$")
+
+
+def _summarize_gate_rejections(rejections: list) -> dict:
+    """Group gate rejections by reason prefix for an at-a-glance summary.
+
+    Bucket key construction
+    ------------------------
+    Strip any "_<digit>..." suffix so variable numerics don't split buckets.
+    Reasons without any numeric suffix keep their full text.
+
+    Examples
+    --------
+    "incomplete_data_cot_empty" → "incomplete_data_cot_empty"
+    "too_close_to_close"        → "too_close_to_close"
+    "within_15min_of_close"     → "within"
+    "atr_too_high_0.0821"       → "atr_too_high"
+    "stale_price_5s"            → "stale_price"
+    """
+    summary: dict[str, int] = {}
+    for r in rejections:
+        reason = r.get("gate_reason") or "unknown"
+        bucket = _GATE_REASON_BUCKET_RE.sub("", reason)
+        summary[bucket] = summary.get(bucket, 0) + 1
+    return summary
+
+
 def get_status() -> dict:
     return {
         "cycle_in_progress": _cycle_in_progress,
@@ -96,6 +127,9 @@ def run_cycle() -> dict:
                 "reason": "ibkr_not_connected",
                 "timestamp": now_iso(),
                 "signals": [],
+                "gate_evaluations": [],
+                "gate_rejections": [],
+                "gate_rejection_breakdown": {},
             }
             _last_cycle_result = result
             _cycle_history.insert(0, result)
@@ -273,6 +307,7 @@ def run_cycle() -> dict:
             logger.warning("Market breadth computation failed: %s", exc)
 
         signals = []
+        gate_evaluations: list[dict] = []  # per-ticker audit trail of gate decisions
         v2_registry = V2StrategyRegistry()
         gate = SignalQualityGate()
 
@@ -346,6 +381,19 @@ def run_cycle() -> dict:
                 regime=regime,
                 consensus_meta=consensus_meta,
             )
+
+            # ── Capture per-ticker gate decision for /api/run-cycle + cycle_history ──
+            gate_evaluations.append({
+                "ticker": ticker,
+                "instrument_type": instr_type,
+                "direction": direction,
+                "consensus_confidence": round(conf, 4),
+                "regime": regime.get("primary_regime", "unknown"),
+                "gate_passed": gate_result.get("passed", False),
+                "gate_reason": gate_result.get("reason", "unknown"),
+                "time_window": gate_result.get("time_window", "unknown"),
+                "vwap_position": gate_result.get("vwap_position", "unknown"),
+            })
 
             # ── Entry/Exit levels ──
             levels = {}
@@ -470,6 +518,7 @@ def run_cycle() -> dict:
         slot_refresh = refresh()
 
         elapsed = time.time() - start_time
+        gate_rejections = [e for e in gate_evaluations if not e["gate_passed"]]
         result = {
             "cycle_id": cycle_id,
             "status": "completed",
@@ -483,6 +532,9 @@ def run_cycle() -> dict:
                 "future": [s for s in signals if s["instrument_type"] == "future"],
                 "option": [s for s in signals if s["instrument_type"] == "option"],
             },
+            "gate_evaluations": gate_evaluations,
+            "gate_rejections": gate_rejections,
+            "gate_rejection_breakdown": _summarize_gate_rejections(gate_rejections),
         }
 
         _last_cycle_result = result
@@ -503,6 +555,9 @@ def run_cycle() -> dict:
             "reason": str(e),
             "timestamp": now_iso(),
             "signals": [],
+            "gate_evaluations": [],
+            "gate_rejections": [],
+            "gate_rejection_breakdown": {},
         }
         _last_cycle_result = result
         _cycle_history.insert(0, result)

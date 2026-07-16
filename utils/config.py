@@ -26,27 +26,10 @@ FEATURE_CACHE_DIR = PROJECT_ROOT / "data" / "feature_cache"
 MODEL_DIR = PROJECT_ROOT / "data" / "models"
 ML_PIPELINE_ENABLED = True
 
-SLOT_LIMITS = {"stock": 8, "future": 17, "option": 74}
-TOTAL_SLOTS = 100
-
-INITIAL_CAPITAL = 50000.0
-TARGET_CAPITAL = 250000.0
-
-
-def get_initial_capital():
-    return INITIAL_CAPITAL
-
-
-def get_target_capital():
-    return TARGET_CAPITAL
 
 
 def get_currency_code():
     return "USD"
-
-
-def format_currency(amount):
-    return f"${amount:,.2f}"
 
 
 def get_country_setting(key, default=None):

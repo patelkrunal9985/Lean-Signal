@@ -224,6 +224,7 @@ function createSignalCard(signal, cycle) {
 }
 
 function showSignalPopup(signal, cycle) {
+  try {
   var overlay = document.getElementById('signal-popup-overlay');
   var dirClass = signal.direction === 'long' ? 'long' : signal.direction === 'short' ? 'short' : 'neutral';
   document.getElementById('popup-title').textContent = signal.ticker + ' — Signal Detail';
@@ -470,6 +471,9 @@ function showSignalPopup(signal, cycle) {
   }
 
   overlay.style.display = 'flex';
+  } catch(e) {
+    console.error('showSignalPopup crashed:', e.message, e.stack);
+  }
 }
 
 function closePopup(e) {

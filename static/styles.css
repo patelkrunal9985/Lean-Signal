@@ -468,6 +468,21 @@ main {
 
 /* -- Market Dashboard -- */
 .popup-dashboard { margin-bottom: 4px; }
+.collapsible-header {
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: color 0.15s;
+}
+.collapsible-header:hover { color: var(--accent); }
+.collapse-icon {
+  font-size: 10px;
+  color: var(--text-muted);
+  transition: transform 0.2s;
+}
+.collapsible-body { overflow: hidden; }
 .dashboard-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));

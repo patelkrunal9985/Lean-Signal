@@ -21,6 +21,19 @@ function formatTinyNum(n) {
   return n.toFixed(4);
 }
 
+function toggleCollapse(bodyId, headerEl) {
+  var body = document.getElementById(bodyId);
+  if (!body) return;
+  var icon = headerEl.querySelector('.collapse-icon');
+  if (body.style.display === 'none') {
+    body.style.display = 'block';
+    if (icon) icon.textContent = '▲';
+  } else {
+    body.style.display = 'none';
+    if (icon) icon.textContent = '▼';
+  }
+}
+
 document.addEventListener('DOMContentLoaded', function() {
   loadStatus();
   _pollTimer = setInterval(loadStatus, 5000);
@@ -266,11 +279,16 @@ function showSignalPopup(signal, cycle) {
     metaSection.style.display = 'none';
   }
 
-  // ── Market Dashboard (option signals only) ──
+  // ── Market Dashboard (option signals only, collapsed by default) ──
   var dashSection = document.getElementById('popup-market-dashboard');
   var dash = signal.market_dashboard || {};
   if (Object.keys(dash).length > 0 && signal.instrument_type === 'option') {
     dashSection.style.display = 'block';
+    // Reset to collapsed state
+    var dashBody = document.getElementById('dashboard-body');
+    dashBody.style.display = 'none';
+    var dashIcon = dashSection.querySelector('.collapse-icon');
+    if (dashIcon) dashIcon.textContent = '▼';
     var dashGrid = document.getElementById('dashboard-grid');
     var dashItems = [
       ['Underlying', '$' + (dash.underlying_price || 0).toFixed(2)],

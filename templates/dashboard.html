@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lean Signals</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="logo">
+      <h1>Lean Signals</h1>
+      <span class="subtitle">Signal-Only Trading Intelligence</span>
+    </div>
+    <div class="header-controls">
+      <div id="ibkr-status" class="status-badge disconnected">IBKR Disconnected</div>
+      <div id="cycle-status" class="status-badge idle">Idle</div>
+      <button id="run-cycle-btn" class="btn btn-primary" onclick="runCycle()">Run Cycle</button>
+      <button id="auto-run-btn" class="btn btn-secondary" onclick="toggleAutoRun()">Auto-Run</button>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="signals" onclick="switchTab('signals')">Active Signals</button>
+    <button class="tab" data-tab="history" onclick="switchTab('history')">History</button>
+    <button class="tab" data-tab="watchlist" onclick="switchTab('watchlist')">Watchlist</button>
+    <button class="tab" data-tab="settings" onclick="switchTab('settings')">Settings</button>
+  </nav>
+
+  <main>
+    <div id="tab-signals" class="tab-content active">
+      <div class="sub-tabs">
+        <button class="sub-tab active" data-subtab="stock" onclick="switchSubTab('signals', 'stock')">Stock Signals</button>
+        <button class="sub-tab" data-subtab="future" onclick="switchSubTab('signals', 'future')">Futures Signals</button>
+        <button class="sub-tab" data-subtab="option" onclick="switchSubTab('signals', 'option')">Options Signals</button>
+      </div>
+      <div id="signal-summary" class="summary-bar">
+        <span id="total-scanned">Scanned: 0</span>
+        <span id="total-signals">Signals: 0</span>
+        <span id="cycle-elapsed">Last cycle: --</span>
+      </div>
+      <div id="signals-stock" class="signals-group active"></div>
+      <div id="signals-future" class="signals-group"></div>
+      <div id="signals-option" class="signals-group"></div>
+    </div>
+
+    <div id="tab-history" class="tab-content">
+      <div class="sub-tabs">
+        <button class="sub-tab active" data-subtab="stock" onclick="switchSubTab('history', 'stock')">Stock</button>
+        <button class="sub-tab" data-subtab="future" onclick="switchSubTab('history', 'future')">Futures</button>
+        <button class="sub-tab" data-subtab="option" onclick="switchSubTab('history', 'option')">Options</button>
+      </div>
+      <div id="history-list"></div>
+    </div>
+
+    <div id="tab-watchlist" class="tab-content">
+      <div id="watchlist-content">
+        <h2>IBKR Slot Usage</h2>
+        <div id="slot-usage" class="slot-grid"></div>
+        <h2>Subscribed Tickers</h2>
+        <div id="subscribed-tickers" class="ticker-list"></div>
+      </div>
+    </div>
+
+    <div id="tab-settings" class="tab-content">
+      <div class="settings-panel">
+        <h2>Settings</h2>
+        <div class="setting-row">
+          <label>Auto-Run Interval (seconds)</label>
+          <input type="number" id="settings-interval" value="300" min="60" max="3600">
+        </div>
+        <button class="btn btn-primary" onclick="saveSettings()">Save</button>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div id="signal-popup-overlay" class="popup-overlay" style="display:none" onclick="closePopup(event)">
+  <div class="popup" onclick="event.stopPropagation()">
+    <div class="popup-header">
+      <h3 id="popup-title">Signal Detail</h3>
+      <button class="popup-close" onclick="closePopup()">&times;</button>
+    </div>
+    <div class="popup-body" id="popup-body">
+      <div class="popup-summary">
+        <div class="popup-metric"><label>Direction</label><span id="popup-direction" class="direction-badge"></span></div>
+        <div class="popup-metric"><label>Confidence</label><span id="popup-confidence"></span></div>
+        <div class="popup-metric"><label>Score</label><span id="popup-score"></span></div>
+        <div class="popup-metric"><label>Regime</label><span id="popup-regime"></span></div>
+        <div class="popup-metric"><label>Price</label><span id="popup-price"></span></div>
+      </div>
+      <h4>Strategy Breakdown</h4>
+      <div id="popup-strategies" class="strategy-list"></div>
+      <h4>News & Sentiment</h4>
+      <div id="popup-news" class="news-list"></div>
+    </div>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

@@ -60,13 +60,22 @@ def _find_prior_week_hl(ohlcv: list) -> tuple[float, float]:
     return max(highs), min(lows)
 
 
-def _compute_gamma_at_strike(chain: dict, strike_target: float, tolerance_pct: float = 0.01) -> float:
-    """Sum gamma for contracts near a target strike (within tolerance % of underlying)."""
+def _compute_gamma_at_strike(chain: dict, strike_target: float, side: str = "all", tolerance_pct: float = 0.01) -> float:
+    """Sum gamma for contracts near a target strike, filtered by side.
+
+    Args:
+        side: "calls" (resistance levels), "puts" (support levels), or "all".
+    """
     total_gamma = 0.0
-    all_contracts = chain.get("calls", []) + chain.get("puts", [])
-    for c in all_contracts:
+    if side == "calls":
+        contracts = chain.get("calls", [])
+    elif side == "puts":
+        contracts = chain.get("puts", [])
+    else:
+        contracts = chain.get("calls", []) + chain.get("puts", [])
+    for c in contracts:
         stk = c.get("strike", 0) or 0
-        if stk <= 0:
+        if stk <= 0 or strike_target <= 0:
             continue
         if abs(stk - strike_target) / strike_target < tolerance_pct:
             gamma = c.get("gamma", 0) or 0
@@ -75,13 +84,22 @@ def _compute_gamma_at_strike(chain: dict, strike_target: float, tolerance_pct: f
     return total_gamma
 
 
-def _compute_oi_at_strike(chain: dict, strike_target: float, tolerance_pct: float = 0.01) -> float:
-    """Sum open interest near a target strike."""
+def _compute_oi_at_strike(chain: dict, strike_target: float, side: str = "all", tolerance_pct: float = 0.01) -> float:
+    """Sum open interest near a target strike, filtered by side.
+
+    Args:
+        side: "calls" (resistance levels), "puts" (support levels), or "all".
+    """
     total_oi = 0
-    all_contracts = chain.get("calls", []) + chain.get("puts", [])
-    for c in all_contracts:
+    if side == "calls":
+        contracts = chain.get("calls", [])
+    elif side == "puts":
+        contracts = chain.get("puts", [])
+    else:
+        contracts = chain.get("calls", []) + chain.get("puts", [])
+    for c in contracts:
         stk = c.get("strike", 0) or 0
-        if stk <= 0:
+        if stk <= 0 or strike_target <= 0:
             continue
         if abs(stk - strike_target) / strike_target < tolerance_pct:
             oi = c.get("openInterest", 0) or 0
@@ -143,8 +161,8 @@ class PriorHLMagnetism(BaseV3Strategy):
         if pd_high > 0:
             dist_pct_high = abs(underlying - pd_high) / pd_high
             if dist_pct_high < PROXIMITY_PCT:
-                gamma_at_high = _compute_gamma_at_strike(chain, pd_high)
-                oi_at_high = _compute_oi_at_strike(chain, pd_high)
+                gamma_at_high = _compute_gamma_at_strike(chain, pd_high, side="calls")
+                oi_at_high = _compute_oi_at_strike(chain, pd_high, side="calls")
                 option_conf = min(gamma_at_high / 500.0, 0.40) + min(oi_at_high / 5000.0, 0.20)
                 prox_score = max(0, (PROXIMITY_PCT - dist_pct_high) / PROXIMITY_PCT) * PROXIMITY_WEIGHT
 
@@ -189,8 +207,8 @@ class PriorHLMagnetism(BaseV3Strategy):
         if pd_low > 0:
             dist_pct_low = abs(underlying - pd_low) / pd_low
             if dist_pct_low < PROXIMITY_PCT:
-                gamma_at_low = _compute_gamma_at_strike(chain, pd_low)
-                oi_at_low = _compute_oi_at_strike(chain, pd_low)
+                gamma_at_low = _compute_gamma_at_strike(chain, pd_low, side="puts")
+                oi_at_low = _compute_oi_at_strike(chain, pd_low, side="puts")
                 option_conf = min(gamma_at_low / 500.0, 0.40) + min(oi_at_low / 5000.0, 0.20)
                 prox_score = max(0, (PROXIMITY_PCT - dist_pct_low) / PROXIMITY_PCT) * PROXIMITY_WEIGHT
 
@@ -234,8 +252,8 @@ class PriorHLMagnetism(BaseV3Strategy):
         if best_signal is None and pw_high > 0:
             dist_pct_wh = abs(underlying - pw_high) / pw_high
             if dist_pct_wh < PROXIMITY_PCT * 1.5:
-                gamma_at_wh = _compute_gamma_at_strike(chain, pw_high)
-                oi_at_wh = _compute_oi_at_strike(chain, pw_high)
+                gamma_at_wh = _compute_gamma_at_strike(chain, pw_high, side="calls")
+                oi_at_wh = _compute_oi_at_strike(chain, pw_high, side="calls")
                 option_conf = min(gamma_at_wh / 500.0, 0.40) + min(oi_at_wh / 5000.0, 0.20)
                 # Week levels need stronger option confirmation to fire
                 if option_conf > 0.20:
@@ -255,8 +273,8 @@ class PriorHLMagnetism(BaseV3Strategy):
         if best_signal is None and pw_low > 0:
             dist_pct_wl = abs(underlying - pw_low) / pw_low
             if dist_pct_wl < PROXIMITY_PCT * 1.5:
-                gamma_at_wl = _compute_gamma_at_strike(chain, pw_low)
-                oi_at_wl = _compute_oi_at_strike(chain, pw_low)
+                gamma_at_wl = _compute_gamma_at_strike(chain, pw_low, side="puts")
+                oi_at_wl = _compute_oi_at_strike(chain, pw_low, side="puts")
                 option_conf = min(gamma_at_wl / 500.0, 0.40) + min(oi_at_wl / 5000.0, 0.20)
                 if option_conf > 0.20:
                     if price_change < 0:

@@ -22,6 +22,10 @@ FIXED_FUTURES = [
     "GC=F", "CL=F", "VX=F",
 ]
 
+FEATURE_CACHE_DIR = PROJECT_ROOT / "data" / "feature_cache"
+MODEL_DIR = PROJECT_ROOT / "data" / "models"
+ML_PIPELINE_ENABLED = True
+
 SLOT_LIMITS = {"stock": 8, "future": 17, "option": 74}
 TOTAL_SLOTS = 100
 

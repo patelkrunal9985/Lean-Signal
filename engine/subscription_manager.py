@@ -34,7 +34,7 @@ def seed_fixed_options():
     connected or the chain fetch fails.
     """
     try:
-        from kronos.skills.ibkr_data_feed import fetch_option_chain_ibkr
+        from engine.ibkr_data_feed import fetch_option_chain_ibkr
         from datetime import datetime
         now = datetime.now()
         for ticker in FIXED_STOCKS:

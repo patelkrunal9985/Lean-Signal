@@ -12,6 +12,34 @@ class AdvancedIndicatorSet:
         self.volatility = {}
         self.flow = {}
         self.signals = {}
+        self._extra = {}
+
+    def __contains__(self, key: str) -> bool:
+        if key in self._extra:
+            return True
+        for d in (self.smart_money, self.momentum, self.volume_profile, self.volatility, self.flow, self.signals):
+            if key in d:
+                return True
+        return False
+
+    def get(self, key: str, default=None):
+        if key in self._extra:
+            return self._extra[key]
+        for d in (self.smart_money, self.momentum, self.volume_profile, self.volatility, self.flow, self.signals):
+            if key in d:
+                return d[key]
+        return default
+
+    def __getitem__(self, key):
+        val = self.get(key)
+        if val is not None:
+            return val
+        if isinstance(key, (int, slice)):
+            raise IndexError(key)
+        raise KeyError(key)
+
+    def __setitem__(self, key, value):
+        self._extra[key] = value
 
 
 def _to_np(ohlcv: list[dict], field: str) -> np.ndarray:

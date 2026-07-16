@@ -1014,7 +1014,7 @@ def fetch_live_option_prices(ticker: str, expiration: str, strikes: list[float],
     # Normalize expiration to YYYYMMDD format for IBKR
     exp_clean = expiration.replace("-", "").replace("/", "")
 
-    result = {}
+    result: Optional[dict] = None
     event = threading.Event()
 
     async def _do_fetch_async():

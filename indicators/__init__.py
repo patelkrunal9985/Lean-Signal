@@ -1,1 +1,1 @@
-from kronos.indicators.advanced_indicators import compute_all_advanced, AdvancedIndicatorSet
+from indicators.advanced_indicators import compute_all_advanced, AdvancedIndicatorSet

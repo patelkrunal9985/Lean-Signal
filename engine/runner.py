@@ -11,6 +11,7 @@ On each cycle:
 import time
 import json
 import threading
+import traceback
 from datetime import datetime
 from typing import Optional
 from pathlib import Path
@@ -181,6 +182,21 @@ def run_cycle() -> dict:
                 "sentiment": sentiment,
                 "data_source": "ibkr" if live_price > 0 else "ohlcv",
             }
+
+        # ── Options processing ──
+        from engine.option_metrics import compute_option_metrics
+        for opt_underlying in ["SPY", "QQQ", "SPX"]:
+            try:
+                underlying_data = ticker_data_map.get(opt_underlying, {})
+                underlying_price = underlying_data.get("current_price", 0)
+                if underlying_price <= 0:
+                    continue
+                opt_ctx = compute_option_metrics(opt_underlying, underlying_price, ticker_data_map)
+                if opt_ctx:
+                    ticker_data_map[opt_ctx["ticker"]] = opt_ctx
+                    all_tickers.append((opt_ctx["ticker"], "option"))
+            except Exception as exc:
+                logger.warning("Option metrics for %s failed: %s", opt_underlying, exc)
 
         signals = []
         v2_registry = V2StrategyRegistry()

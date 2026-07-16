@@ -51,20 +51,21 @@ def _load_html(name: str) -> str:
     return ""
 
 
-def _json_response(data: dict) -> bytes:
+def _json_response(data: dict) -> tuple[bytes, bool]:
     body = json.dumps(data, indent=2, default=str).encode("utf-8")
-    if len(body) > 1024:
+    compressed = len(body) > 1024
+    if compressed:
         body = gzip.compress(body)
-    return body
+    return body, compressed
 
 
 class LeanSignalsHandler(BaseHTTPRequestHandler):
 
     def _send_json(self, data: dict, status: int = 200):
-        body = _json_response(data)
+        body, compressed = _json_response(data)
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
-        if len(body) > 1024:
+        if compressed:
             self.send_header("Content-Encoding", "gzip")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Access-Control-Allow-Origin", "*")
@@ -204,7 +205,7 @@ class ThreadedHTTPServer(HTTPServer):
             self.shutdown_request(request)
 
 
-def run_server(host: str = "0.0.0.0", port: int = 8080):
+def run_server(host: str = "0.0.0.0", port: int = 8088):
     logger.info(f"Initializing engine...")
     init_engine()
     server = ThreadedHTTPServer((host, port), LeanSignalsHandler)

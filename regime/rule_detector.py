@@ -40,6 +40,8 @@ class RuleBasedRegimeDetector:
             scores: dict of per-regime scores
             details: dict with feature values used in detection
         """
+        if not ohlcv or len(ohlcv) < 2:
+            return {"primary_regime": "ranging", "confidence": 0.5, "scores": {}, "details": {}}
         closes = np.array([c["close"] for c in ohlcv])
         highs = np.array([c["high"] for c in ohlcv])
         lows = np.array([c["low"] for c in ohlcv])

@@ -4,6 +4,23 @@ let _status = {};
 let _autoRunActive = false;
 let _pollTimer = null;
 
+function formatBigNum(n) {
+  if (!n || n === 0) return '0';
+  var abs = Math.abs(n);
+  var sign = n < 0 ? '-' : '';
+  if (abs >= 1e9) return sign + (abs / 1e9).toFixed(1) + 'B';
+  if (abs >= 1e6) return sign + (abs / 1e6).toFixed(1) + 'M';
+  if (abs >= 1e3) return sign + (abs / 1e3).toFixed(1) + 'K';
+  return sign + abs.toFixed(0);
+}
+
+function formatTinyNum(n) {
+  if (!n || n === 0) return '0';
+  if (Math.abs(n) < 0.0001) return n.toExponential(2);
+  if (Math.abs(n) < 0.01) return n.toFixed(6);
+  return n.toFixed(4);
+}
+
 document.addEventListener('DOMContentLoaded', function() {
   loadStatus();
   _pollTimer = setInterval(loadStatus, 5000);
@@ -249,6 +266,42 @@ function showSignalPopup(signal, cycle) {
     metaSection.style.display = 'none';
   }
 
+  // ── Market Dashboard (option signals only) ──
+  var dashSection = document.getElementById('popup-market-dashboard');
+  var dash = signal.market_dashboard || {};
+  if (Object.keys(dash).length > 0 && signal.instrument_type === 'option') {
+    dashSection.style.display = 'block';
+    var dashGrid = document.getElementById('dashboard-grid');
+    var dashItems = [
+      ['Underlying', '$' + (dash.underlying_price || 0).toFixed(2)],
+      ['ATM IV', (dash.iv || 0).toFixed(1) + '%'],
+      ['HV(10d)', (dash.hv_10 || 0).toFixed(1) + '%'],
+      ['DTE', dash.dte],
+      ['P/C Ratio', dash.pc_ratio],
+      ['P/C 5d Avg', dash.pc_ratio_5d],
+      ['Gamma Flip', '$' + (dash.gamma_flip || 0).toFixed(0)],
+      ['γ Walls', dash.gamma_walls_count],
+      ['Delta Pos', formatBigNum(dash.delta_positioning)],
+      ['Straddle', '$' + (dash.atm_straddle || 0).toFixed(2)],
+      ['Skew(1m)', (dash.skew_1m || 0).toFixed(1) + ' pts'],
+      ['Charm', dash.charm_direction + ' ' + formatTinyNum(dash.charm_magnitude)],
+      ['Vanna', formatBigNum(dash.total_vanna)],
+      ['VIX Spot', dash.vix_spot],
+      ['Breadth', dash.breadth_state + ' (' + (dash.breadth_composite > 0 ? '+' : '') + dash.breadth_composite.toFixed(2) + ')'],
+      ['Breadth Trend', dash.breadth_trend],
+      ['VIX State', dash.vix_state],
+      ['Futures Align', dash.futures_alignment + '%'],
+      ['Tech Div', (dash.tech_divergence > 0 ? '+' : '') + (dash.tech_divergence * 100).toFixed(2) + '%'],
+      ['Small Cap', dash.small_cap_participating ? '✓ Participating' : '✗ Lagging'],
+      ['Thrust', dash.breadth_thrust ? '⚡ ACTIVE' : '—'],
+    ];
+    dashGrid.innerHTML = dashItems.map(function(p) {
+      return '<div class="dash-metric"><label>' + p[0] + '</label><span>' + p[1] + '</span></div>';
+    }).join('');
+  } else {
+    dashSection.style.display = 'none';
+  }
+
   var stratContainer = document.getElementById('popup-strategies');
   var strats = signal.strategies || [];
   if (strats.length === 0) {
@@ -260,15 +313,57 @@ function showSignalPopup(signal, cycle) {
       var item = document.createElement('div');
       item.className = 'strategy-item';
       var sDirClass = s.direction === 'long' ? 'long' : s.direction === 'short' ? 'short' : 'neutral';
-      var reasoning = s.reasoning ? '<div style="font-size:11px;color:var(--text-muted);margin-top:2px">' + s.reasoning + '</div>' : '';
+      var reasoning = s.reasoning ? '<div class="strat-reasoning">' + s.reasoning + '</div>' : '';
+
+      // Build diagnostics section
+      var diag = s.diagnostics || {};
+      var diagHtml = '';
+      if (Object.keys(diag).length > 0) {
+        var diagPairs = [];
+        for (var k in diag) {
+          if (diag.hasOwnProperty(k)) {
+            var v = diag[k];
+            var displayVal = typeof v === 'number' ? (Math.abs(v) < 0.001 ? formatTinyNum(v) : (Math.abs(v) > 1000 ? formatBigNum(v) : (Number.isInteger(v) ? v : v.toFixed(4)))) : v;
+            diagPairs.push('<span class="diag-kv"><em>' + k.replace(/_/g, ' ') + '</em>: ' + displayVal + '</span>');
+          }
+        }
+        diagHtml = '<div class="strat-diag">' + diagPairs.join(' · ') + '</div>';
+      }
+
       item.innerHTML =
-        '<div><span class="strat-name">' + s.name + '</span><span class="strat-source">' + (s.source || '') + '</span>' + reasoning + '</div>' +
+        '<div><span class="strat-name">' + s.name + '</span><span class="strat-source">' + (s.source || '') + '</span>' + reasoning + diagHtml + '</div>' +
         '<div class="strat-dir-conf">' +
           '<span class="direction-badge ' + sDirClass + '" style="font-size:10px">' + s.direction.toUpperCase() + '</span>' +
           '<span style="font-weight:600">' + (s.confidence * 100).toFixed(1) + '%</span>' +
         '</div>';
       stratContainer.appendChild(item);
     });
+  }
+
+  // ── Consensus Meta ──
+  var consSection = document.getElementById('popup-consensus-meta');
+  var consMeta = signal.consensus_meta || {};
+  var consVotes = consMeta.consensus_votes || [];
+  if (consVotes.length > 0 || consMeta.consensus_net_score != null) {
+    consSection.style.display = 'block';
+    var consGrid = document.getElementById('consensus-grid');
+    var consItems = [
+      ['Net Score', (consMeta.consensus_net_score || 0).toFixed(2)],
+      ['Active Votes', consMeta.consensus_active_votes || 0],
+      ['Neutral Votes', consMeta.consensus_neutral_votes || 0],
+      ['Weighted Long', (consMeta.consensus_weighted_long || 0).toFixed(2)],
+      ['Weighted Short', (consMeta.consensus_weighted_short || 0).toFixed(2)],
+      ['Total Weight', (consMeta.consensus_total_weight || 0).toFixed(2)],
+      ['Counter Trend', consMeta.consensus_counter_trend || 'no'],
+      ['Regime Boost', ((consMeta.consensus_regime_boost || 0) > 0 ? '+' + consMeta.consensus_regime_boost.toFixed(2) : '0')],
+      ['TOD Window', consMeta.consensus_tod_window || '—'],
+      ['Consensus Action', consMeta.consensus_action || '—'],
+    ];
+    consGrid.innerHTML = consItems.map(function(p) {
+      return '<div class="dash-metric"><label>' + p[0] + '</label><span>' + p[1] + '</span></div>';
+    }).join('');
+  } else {
+    consSection.style.display = 'none';
   }
 
   var newsContainer = document.getElementById('popup-news');

@@ -297,6 +297,9 @@ def run_cycle() -> dict:
                     if isinstance(result, dict):
                         direction = result.get("direction", "neutral")
                         confidence = result.get("confidence", 0)
+                        # Capture per-strategy diagnostics (all non-core fields)
+                        core_fields = {"direction", "confidence", "strategy", "name", "action", "reasoning"}
+                        diagnostics = {k: v for k, v in result.items() if k not in core_fields}
                         if direction in ("long", "short") and confidence > 0:
                             v3_results_raw.append({
                                 "name": strategy.name,
@@ -306,6 +309,7 @@ def run_cycle() -> dict:
                                 "source": "v3",
                                 "reasoning": result.get("reasoning", ""),
                                 "action": result.get("action", ""),
+                                "diagnostics": diagnostics,
                             })
                 except Exception:
                     logger.debug(
@@ -373,6 +377,39 @@ def run_cycle() -> dict:
             # ── Position: always 1 contract (signal-only system, no portfolio) ──
             position_contracts = 1 if (instr_type == "option" and direction != "neutral") else 0
 
+            # ── Market dashboard: aggregate metrics for option signal popups ──
+            market_dashboard = {}
+            if instr_type == "option":
+                breadth = data.get("market_breadth", {})
+                market_dashboard = {
+                    "underlying": data.get("underlying", ""),
+                    "underlying_price": data.get("underlying_price", 0),
+                    "iv": round(data.get("iv", 0) * 100, 1) if data.get("iv", 0) else 0,
+                    "hv_10": round(data.get("hv_10", 0) * 100, 1) if data.get("hv_10", 0) else 0,
+                    "dte": data.get("dte", 0),
+                    "expiry": data.get("expiry", ""),
+                    "pc_ratio": round(data.get("pc_ratio", 0), 2),
+                    "pc_ratio_5d": round(data.get("pc_ratio_5day_avg", 0), 2),
+                    "gamma_flip": round(data.get("gamma_flip_level", 0), 1),
+                    "gamma_walls_count": len(data.get("gamma_walls", [])),
+                    "delta_positioning": int(data.get("delta_positioning", 0)),
+                    "atm_straddle": round(data.get("atm_straddle_price", 0), 2),
+                    "skew_1m": round(data.get("skew_term_1m", 0), 1),
+                    "charm_direction": data.get("charm_direction", "neutral"),
+                    "charm_magnitude": round(data.get("charm_magnitude", 0), 6),
+                    "total_vanna": data.get("total_vanna", 0),
+                    "total_charm": data.get("total_charm", 0),
+                    "vix_spot": round(data.get("vix_spot", 0), 1),
+                    "breadth_composite": round(breadth.get("composite", {}).get("composite_score", 0), 2),
+                    "breadth_state": breadth.get("composite", {}).get("state", "n/a"),
+                    "breadth_trend": breadth.get("breadth_trend", ""),
+                    "vix_state": breadth.get("vix_confirmation", {}).get("state", ""),
+                    "futures_alignment": round(breadth.get("futures_alignment", {}).get("alignment_ratio", 0) * 100),
+                    "tech_divergence": round(breadth.get("tech_divergence", 0), 4),
+                    "small_cap_participating": breadth.get("small_cap", {}).get("participating", False),
+                    "breadth_thrust": breadth.get("breadth_thrust", {}).get("thrust_active", False),
+                }
+
             signal = {
                 "ticker": ticker,
                 "instrument_type": instr_type,
@@ -413,10 +450,12 @@ def run_cycle() -> dict:
                         "confidence": round(float(s.get("confidence", 0)), 4),
                         "source": s.get("source", "?"),
                         "reasoning": s.get("reasoning", ""),
+                        "diagnostics": s.get("diagnostics", {}),
                     }
                     for s in all_strategy_votes
                     if float(s.get("confidence", 0)) > 0
                 ],
+                "market_dashboard": market_dashboard,
                 "news": data.get("news", []),
                 "sentiment": data.get("sentiment", {}),
                 "consensus_meta": consensus_meta,

@@ -465,3 +465,61 @@ main {
   padding: 4px 0;
   font-style: italic;
 }
+
+/* -- Market Dashboard -- */
+.popup-dashboard { margin-bottom: 4px; }
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.dash-metric {
+  background: var(--bg-card);
+  padding: 5px 10px;
+  border-radius: 6px;
+  border-left: 2px solid var(--border);
+}
+.dash-metric label {
+  display: block;
+  font-size: 9px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.dash-metric span {
+  font-size: 13px;
+  font-weight: 600;
+  font-family: 'Consolas', 'Monaco', monospace;
+  color: var(--text-primary);
+}
+
+/* -- Strategy Diagnostics -- */
+.strat-reasoning {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+  font-style: italic;
+}
+.strat-diag {
+  font-size: 10px;
+  color: var(--text-secondary);
+  margin-top: 3px;
+  line-height: 1.5;
+  padding: 3px 8px;
+  background: rgba(0,0,0,0.15);
+  border-radius: 4px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.diag-kv {
+  white-space: nowrap;
+}
+.diag-kv em {
+  font-style: normal;
+  color: var(--text-muted);
+}
+
+/* -- Consensus Meta -- */
+.consensus-meta { margin-top: 4px; }

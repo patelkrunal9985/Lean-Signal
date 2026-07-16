@@ -15,28 +15,54 @@ from kronos.utils.logger import get_logger
 logger = get_logger("kronos.skills.cot_fetcher")
 
 _TICKER_TO_CFTC = {
-    "ES=F": "E-MINI S&P 500", "MES=F": "E-MINI S&P 500",
-    "NQ=F": "NASDAQ MINI", "MNQ=F": "MICRO E-MINI NASDAQ-100",
-    "RTY=F": "RUSSELL E-MINI", "M2K=F": "MICRO E-MINI RUSSELL 2000",
-    "GC=F": "GOLD - COMMODITY EXCHANGE", "SI=F": "SILVER - COMMODITY EXCHANGE",
+    # CME (deacmesf.htm): E-mini S&P / NASDAQ / Russell + MICROS + crypto
+    "ES=F":  "E-MINI S&P 500",
+    "MES=F": "MICRO E-MINI S&P 500",
+    "NQ=F":  "NASDAQ MINI",
+    "MNQ=F": "MICRO E-MINI NASDAQ-100",
+    "RTY=F": "RUSSELL E-MINI",
+    "M2K=F": "MICRO E-MINI RUSSELL 2000",
+    # COMEX (deacmxsf.htm): precious metals
+    "GC=F":  "GOLD - COMMODITY EXCHANGE",
     "MGC=F": "MICRO GOLD - COMMODITY EXCHANGE",
+    # CBOT (deacbtsf.htm): DJIA (full + micro)
+    "YM=F":  "DJIA",
+    "MYM=F": "MICRO DJIA",
+    # NYMEX (deanymesf.htm): WTI crude (full + micro), natgas, etc.
+    "CL=F":  "WTI-PHYSICAL",
+    "MCL=F": "WTI-PHYSICAL",   # CFTC rolls micro WTI under parent WTI-PHYSICAL until micro OI grows
+    "NG=F":  "NAT GAS NYME",   # NYMEX physically-settled natgas (Code-023651)
+    # CBOE Futures Exchange (deacboesf.htm): VIX futures
+    "VX=F":  "VIX FUTURES",
+    # Legacy/disabled tickers (kept for compliance mapping)
+    "SI=F": "SILVER - COMMODITY EXCHANGE",
     "HE=F": "LEAN HOGS - CHICAGO", "LE=F": "LIVE CATTLE - CHICAGO",
-    "YM=F": "DOW JONES INDUSTRIAL AVERAGE",
     "ZB=F": "US TREASURY BONDS",
     "ZN=F": "10 YEAR TREASURY NOTES", "ZF=F": "5 YEAR TREASURY NOTES",
     "ZT=F": "2 YEAR TREASURY NOTES",
-    "MCL=F": "CRUDE OIL LIGHT SWEET",
-    "CL=F": "CRUDE OIL, LIGHT SWEET",
     "ZC=F": "CORN", "ZS=F": "SOYBEANS", "ZW=F": "WHEAT",
-    "NG=F": "NATURAL GAS", "VX=F": "CBOE VIX FUTURES",
+}
+
+# Mapping each ticker to its primary CFTC report exchange. _get_urls() fetches
+# the primary first, then falls back to every other exchange's URL so that
+# CFTC URL reshuffles don't silently miss data.
+_TICKER_PRIMARY_EXCHANGE: dict[str, str] = {
+    "ES=F": "CME",   "MES=F": "CME",
+    "NQ=F": "CME",   "MNQ=F": "CME",
+    "RTY=F": "CME",  "M2K=F": "CME",
+    "GC=F": "COMEX", "MGC=F": "COMEX",
+    "YM=F": "CBOT",  "MYM=F": "CBOT",
+    "CL=F": "NYMEX", "MCL=F": "NYMEX", "NG=F": "NYMEX",
+    "VX=F": "CBOE",
 }
 
 _EXCHANGE_URLS = {
-    "CME": "https://www.cftc.gov/dea/futures/deacmesf.htm",
-    "COMEX": "https://www.cftc.gov/dea/futures/deacmxsf.htm",
+    "CME":   "https://www.cftc.gov/dea/futures/deacmesf.htm",   # E-minis, MICROS, BTC/ETH
+    "COMEX": "https://www.cftc.gov/dea/futures/deacmxsf.htm",   # Gold/Silver
+    "CBOT":  "https://www.cftc.gov/dea/futures/deacbtsf.htm",   # DJIA + grains
+    "NYMEX": "https://www.cftc.gov/dea/futures/deanymesf.htm",   # WTI crude, natgas
+    "CBOE":  "https://www.cftc.gov/dea/futures/deacboesf.htm",   # VIX futures
 }
-
-_COMEX_TICKERS = {"GC=F", "SI=F", "MGC=F"}  # GCC_si_tickers_DORMANT: GC=F/SI=F removed from FIXED_FUTURES July 2026; only MGC=F still active. Kept for compliance mapping; re-add GC=F/SI=F manually if COMEX L2 gold/silver trading resumes.
 
 _CACHE_DIR = Path("data/cot")
 _CACHE_TTL_HOURS = 48
@@ -103,9 +129,19 @@ def _read_cache(path: Path) -> dict:
 
 
 def _get_urls(ticker: str) -> list:
-    if ticker.upper() in _COMEX_TICKERS:
-        return [_EXCHANGE_URLS["COMEX"], _EXCHANGE_URLS["CME"]]
-    return [_EXCHANGE_URLS["CME"], _EXCHANGE_URLS["COMEX"]]
+    """Return CFTC URLs to try for this ticker, primary first then fallbacks.
+
+    Falling back to every other exchange URL keeps us robust against CFTC
+    reshuffling files between exchanges.
+    """
+    primary = _TICKER_PRIMARY_EXCHANGE.get(ticker.upper())
+    urls: list = []
+    if primary and primary in _EXCHANGE_URLS:
+        urls.append(_EXCHANGE_URLS[primary])
+    for ex_url in _EXCHANGE_URLS.values():
+        if ex_url not in urls:
+            urls.append(ex_url)
+    return urls
 
 
 def _fetch_and_parse(commodity: str, ticker: str, cache_file: Path) -> dict:

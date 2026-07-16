@@ -148,6 +148,14 @@ class LeanSignalsHandler(BaseHTTPRequestHandler):
             elif path == "/api/auto-run/stop":
                 stop_auto_run()
                 self._send_json({"status": "stopped"})
+            elif path == "/api/restart":
+                # GET shows instructions; POST triggers the actual restart.
+                # The restart daemon kills ONLY the old server PID, clears caches,
+                # and starts a fresh instance. Response returns before the kill.
+                self._send_json({
+                    "status": "info",
+                    "message": "Send POST /api/restart to trigger server restart."
+                })
             elif path == "/api/health":
                 self._send_json({"status": "ok", "timestamp": time.time()})
             else:
@@ -177,6 +185,21 @@ class LeanSignalsHandler(BaseHTTPRequestHandler):
             if path == "/api/run-cycle":
                 result = run_cycle()
                 self._send_json(result)
+            elif path == "/api/restart":
+                # Spawn a detached process that kills ONLY the old server PID,
+                # clears caches, and starts a fresh instance.
+                import subprocess, sys as _sys
+                restart_cmd = [
+                    _sys.executable, str(PROJECT_ROOT / "scripts" / "restart_daemon.py"),
+                    str(os.getpid())
+                ]
+                subprocess.Popen(
+                    restart_cmd,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+                self._send_json({"status": "restarting", "message": "Server restart triggered. New instance will be up in ~5s."})
             else:
                 self._send_json({"error": "not_found"}, 404)
         except Exception as e:

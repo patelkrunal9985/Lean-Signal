@@ -68,6 +68,10 @@ def _import_all():
     from engine.v3.options.sector_etf_option_rotation import SectorETFOptionRotation
     from engine.v3.options.vix_spx_convexity import VIXSPXConvexityArbitrage
     from engine.v3.options.vanna_charm_flow import VannaCharmFlow
+    from engine.v3.options.prior_hl_magnetism import PriorHLMagnetism
+    from engine.v3.options.oi_change_rate import OIChangeRate
+    from engine.v3.options.vol_smile_curvature import VolSmileCurvature
+    from engine.v3.options.delta_gamma_imbalance import DeltaGammaImbalance
     all_strategies = [
         PremarketGapper(), SectorRotation(), ShortSqueeze(), InsiderFlow(),
         EarningsMomentum(), DarkPoolProxy(), PairsTrading(), OrderImbalance(), COTSentiment(),
@@ -83,7 +87,8 @@ def _import_all():
         EarningsVolArbitrage(), ZeroDTEGamma(), OpeningDrive(), DeltaHedgingImbalance(),
         VWAPOptionFlow(), CallPutWallBreakout(), UnusualWhaleFlow(), GammaFlipAcceleration(),
         StrikeVolumeSurge(), SectorETFOptionRotation(), VIXSPXConvexityArbitrage(),
-        VannaCharmFlow(),
+        VannaCharmFlow(), PriorHLMagnetism(), OIChangeRate(),
+        VolSmileCurvature(), DeltaGammaImbalance(),
     ]
     for s in all_strategies:
         for instr in s.applies_to:

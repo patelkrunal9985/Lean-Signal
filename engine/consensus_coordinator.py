@@ -88,6 +88,11 @@ STRATEGY_TAXONOMY: dict[str, str] = {
     "strike_volume_surge": "flow",
     "sector_etf_option_rotation": "flow",
     "vix_spx_convexity": "volatility",
+    "vanna_charm_flow": "volatility",
+    "prior_hl_magnetism": "trend",
+    "oi_change_rate": "flow",
+    "vol_smile_curvature": "volatility",
+    "delta_gamma_imbalance": "volatility",
 }
 
 REGIME_WEIGHTS: dict[str, dict[str, float]] = {

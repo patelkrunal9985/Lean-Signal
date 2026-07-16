@@ -28,12 +28,4 @@ class PutCallDivergence(BaseV3Strategy):
         elif chg_1d < -0.02 and pc > 0.7:
             confidence = 0.55
             direction = "short"
-        # OI source penalty: if the P/C ratio fell back to OI (volume < 100)
-        # and that OI came from yfinance backfill, penalize confidence by 30%.
-        # Volume-based ratio is IBKR live data and needs no penalty.
-        pc_source = context.get("pc_ratio_source", "oi")
-        if pc_source == "oi":
-            oi_source = context.get("pc_oi_source", "yfinance_eod")
-            if oi_source == "yfinance_eod":
-                confidence *= 0.7
         return {"direction": direction, "confidence": confidence, "action": "buy", "pc_ratio": pc, "deviation": dev, "strategy": self.name}

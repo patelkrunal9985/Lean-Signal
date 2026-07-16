@@ -4,6 +4,7 @@ Provides real-time market data via TWS/IB Gateway using ib_insync.
 Runs as a background daemon thread with auto-reconnect.
 """
 import asyncio
+import math
 import random
 import re
 import threading
@@ -1017,6 +1018,16 @@ def fetch_live_option_prices(ticker: str, expiration: str, strikes: list[float],
     result: Optional[dict] = None
     event = threading.Event()
 
+    def _safe_int(v, default=0):
+        """Convert to int safely, returning default for NaN/None/invalid."""
+        try:
+            f = float(v or 0)
+            if math.isnan(f):
+                return default
+            return int(f)
+        except (ValueError, TypeError, AttributeError):
+            return default
+
     async def _do_fetch_async():
         nonlocal result
         try:
@@ -1024,7 +1035,10 @@ def fetch_live_option_prices(ticker: str, expiration: str, strikes: list[float],
             contracts = []
             # Create Option contracts for each strike × right
             # Futures options need FuturesOption with correct symbol/exchange/multiplier
-            from kronos.countries.usa.futures_registry import get_futures_by_yf_ticker
+            try:
+                from kronos.countries.usa.futures_registry import get_futures_by_yf_ticker
+            except ImportError:
+                get_futures_by_yf_ticker = lambda t: None
             from ib_insync import FuturesOption
             fut_spec = get_futures_by_yf_ticker(ticker)
             for strike in strikes:
@@ -1050,7 +1064,6 @@ def fetch_live_option_prices(ticker: str, expiration: str, strikes: list[float],
                             multiplier="100",
                             exchange="SMART",
                             currency="USD",
-                    tradingClass=fut_spec.get("tradingClass") or fut_spec["contract_code"],
                         )
                     contracts.append(contract)
                     # Request market data (streaming mode — TWS 10+ rejects bL in snapshot)
@@ -1064,7 +1077,7 @@ def fetch_live_option_prices(ticker: str, expiration: str, strikes: list[float],
             while _time.time() < deadline:
                 for c in contracts:
                     td = streamer._ib.ticker(c)
-                    if td and (td.bid or td.ask or td.last or td.callVolume or td.putVolume or td.impliedVol or getattr(td, 'callOpenInterest', 0) or getattr(td, 'putOpenInterest', 0)):
+                    if td and (td.bid or td.ask or td.last or td.callVolume or td.putVolume or getattr(td, 'impliedVolatility', 0) or getattr(td, 'callOpenInterest', 0) or getattr(td, 'putOpenInterest', 0)):
                         key = f"{c.strike}_{c.right}"
                         # Generic tick merge: IBKR delivers bid/ask/last in one tick,
                         # then generic ticks 100/101/104/105/106 (volume, OI, IV,
@@ -1072,21 +1085,22 @@ def fetch_live_option_prices(ticker: str, expiration: str, strikes: list[float],
                         # Full dict overwrite would lose data from earlier ticks.
                         # Instead: init once, then merge individual fields on update.
                         if key not in prices:
+                            greeks_init = getattr(td, 'modelGreeks', None) or getattr(td, 'bidGreeks', None) or getattr(td, 'askGreeks', None) or getattr(td, 'lastGreeks', None)
                             prices[key] = {
                                 "strike": float(c.strike),
                                 "right": c.right.lower(),
                                 "bid": float(td.bid or 0),
                                 "ask": float(td.ask or 0),
                                 "last": float(td.last or 0),
-                                "volume": int(td.volume or 0),
-                                "openInterest": int(td.openInterest or 0),
+                                "volume": _safe_int(td.callVolume or td.putVolume),
+                                "openInterest": _safe_int(getattr(td, 'callOpenInterest', 0) or getattr(td, 'putOpenInterest', 0)),
                                 "histVolatility": round(float(getattr(td, 'histVolatility', 0) or 0) * 100, 2) if getattr(td, 'histVolatility', 0) and float(getattr(td, 'histVolatility', 0)) < 1.0 else float(getattr(td, 'histVolatility', 0) or 0),
-                                "avgVolume": int(getattr(td, 'averageOptionVolumeAbove') or 0),
-                                "impliedVolatility": float(td.impliedVol or 0) * 100,
-                                "delta": float(td.delta or 0),
-                                "gamma": float(td.gamma or 0),
-                                "theta": float(td.theta or 0),
-                                "vega": float(td.vega or 0),
+                                "avgVolume": _safe_int(getattr(td, 'averageOptionVolumeAbove', 0)),
+                                "impliedVolatility": float((greeks_init.impliedVol if greeks_init else 0) or getattr(td, 'impliedVolatility', 0) or 0) * 100,
+                                "delta": float((greeks_init.delta if greeks_init else 0) or getattr(td, 'delta', 0) or 0),
+                                "gamma": float((greeks_init.gamma if greeks_init else 0) or getattr(td, 'gamma', 0) or 0),
+                                "theta": float((greeks_init.theta if greeks_init else 0) or getattr(td, 'theta', 0) or 0),
+                                "vega": float((greeks_init.vega if greeks_init else 0) or getattr(td, 'vega', 0) or 0),
                             }
                         else:
                             # Merge: update bid/ask/last (market moves), then fill
@@ -1096,21 +1110,21 @@ def fetch_live_option_prices(ticker: str, expiration: str, strikes: list[float],
                             cur["bid"] = float(td.bid or 0)
                             cur["ask"] = float(td.ask or 0)
                             cur["last"] = float(td.last or 0)
-                            _nv = int(td.callVolume or td.putVolume or 0)
+                            _nv = _safe_int(td.callVolume or td.putVolume)
                             if _nv > 0:
                                 cur["volume"] = _nv
-                            _noi = int(getattr(td, 'callOpenInterest', 0) or getattr(td, 'putOpenInterest', 0) or 0)
+                            _noi = _safe_int(getattr(td, 'callOpenInterest', 0) or getattr(td, 'putOpenInterest', 0))
                             if _noi > 0:
                                 cur["openInterest"] = _noi
-                            if td.impliedVol:
-                                cur["impliedVolatility"] = float(td.impliedVol) * 100
+                            if getattr(td, 'impliedVolatility', 0):
+                                cur["impliedVolatility"] = float(getattr(td, 'impliedVolatility', 0)) * 100
                             _hv = getattr(td, 'histVolatility', 0)
                             if _hv:
                                 cur["histVolatility"] = round(float(_hv) * 100, 2) if float(_hv) < 1.0 else float(_hv)
                             _av = getattr(td, 'averageOptionVolumeAbove', 0)
                             if _av:
-                                cur["avgVolume"] = int(_av)
-                            greeks = t.modelGreeks or t.bidGreeks or t.askGreeks or t.lastGreeks
+                                cur["avgVolume"] = _safe_int(_av)
+                            greeks = td.modelGreeks or td.bidGreeks or td.askGreeks or td.lastGreeks
                             if greeks:
                                 if greeks.delta:
                                     cur["delta"] = float(greeks.delta)
@@ -1162,7 +1176,7 @@ def fetch_live_option_prices(ticker: str, expiration: str, strikes: list[float],
                     except Exception:
                         pass
         except Exception as e:
-            logger.debug(f"IBKR live option prices failed for {ticker}: {e}")
+            logger.warning(f"IBKR live option prices failed for {ticker}: {e}", exc_info=True)
             result = None
         finally:
             event.set()

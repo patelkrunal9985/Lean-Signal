@@ -114,7 +114,7 @@ REGIME_TREND_DIR: dict[str, str | None] = {
 }
 
 COUNTER_TREND_PENALTY = 0.25
-CONSENSUS_THRESHOLD = 0.30
+CONSENSUS_THRESHOLD = 0.20
 COUNTER_TREND_CONSENSUS_THRESHOLD = 0.50
 
 # Minimum total weight required for a signal to pass.
@@ -137,20 +137,32 @@ def _get_taxonomy(strategy_name: str) -> str:
     return STRATEGY_TAXONOMY.get(strategy_name, "reversion")
 
 
+def _get_tod_window_name() -> str:
+    try:
+        from engine.time_of_day import get_time_window
+        return get_time_window()
+    except Exception:
+        return "unknown"
+
+
 def compute_consensus(
     v2_results: list[dict],
     v3_results: list[dict],
-    v3_gate_result: dict | None,
     regime: str,
     ticker: str,
     instr_type: str,
     current_price: float = 0,
     atr: float = 0,
     sma_50: float = 0,
+    dte: int | None = None,
 ) -> tuple[str, float, dict[str, Any]]:
     meta: dict[str, Any] = {}
     regime_weights = REGIME_WEIGHTS.get(regime, REGIME_WEIGHTS["ranging"]).copy()
     trend_dir = REGIME_TREND_DIR.get(regime)  # None if "ranging"
+
+    # ── Time-of-day strategy weight adjustments (0DTE-aware) ──
+    from engine.time_of_day import get_strategy_time_weight
+    tod_weights: dict[str, float] = {}
 
     # ── Regime extreme stiffening (Layer 2) ──
     # If price is extremely far from SMA_50 in the trend direction,
@@ -181,17 +193,26 @@ def compute_consensus(
     total_weight = 0.0
     active_votes = 0
 
+    # ── Count all votes (including neutral) for participation denominator ──
+    total_votes = len(v2_results) + len(v3_results)
+    neutral_count = 0
+
     # ── V2 votes ──
     for r in v2_results:
         direction = r.get("direction", "neutral")
         confidence = r.get("confidence", 0)
         if confidence <= 0 or direction == "neutral":
+            neutral_count += 1
             continue
         sname = r.get("strategy", r.get("name", "unknown"))
         taxo = _get_taxonomy(sname)
         w = regime_weights.get(taxo, 0.5)
         if instr_type == "future":
             w *= 0.5
+        # ── Apply time-of-day multiplier ──
+        tod_mult = get_strategy_time_weight(sname)
+        tod_weights[sname] = tod_mult
+        w *= tod_mult
         if trend_dir is not None and direction != trend_dir:
             w *= COUNTER_TREND_PENALTY
         weighted_long += confidence * w if direction == "long" else 0
@@ -205,8 +226,13 @@ def compute_consensus(
         direction = r.get("direction", "neutral")
         confidence = r.get("confidence", 0)
         if confidence <= 0 or direction == "neutral":
+            neutral_count += 1
             continue
         sname = r.get("strategy", r.get("name", "unknown")); taxo = _get_taxonomy(sname); w = regime_weights.get(taxo, 0.5) * v3_mult
+        # ── Apply time-of-day multiplier ──
+        tod_mult = get_strategy_time_weight(sname)
+        tod_weights[sname] = tod_mult
+        w *= tod_mult
         if trend_dir is not None and direction != trend_dir:
             w *= COUNTER_TREND_PENALTY
         weighted_long += confidence * w if direction == "long" else 0
@@ -215,9 +241,12 @@ def compute_consensus(
         active_votes += 1
 
     meta["consensus_active_votes"] = active_votes
+    meta["consensus_neutral_votes"] = neutral_count
     meta["consensus_weighted_long"] = round(weighted_long, 4)
     meta["consensus_weighted_short"] = round(weighted_short, 4)
     meta["consensus_total_weight"] = round(total_weight, 4)
+    meta["consensus_tod_window"] = _get_tod_window_name()
+    meta["consensus_tod_weights"] = {k: round(v, 2) for k, v in tod_weights.items() if v != 1.0}
 
     # Per-strategy vote breakdown for UI detail panel (Fix 4)
     meta["consensus_votes"] = []
@@ -249,13 +278,12 @@ def compute_consensus(
     meta["consensus_votes"].sort(key=lambda x: -x["contribution"])
 
     # ── Net score: -1 (strong short) to +1 (strong long) ──
-    # Use max(total_weight, MIN_PARTICIPATION_WEIGHT) to prevent a single
-    # low-weight strategy from dominating the net score.
-    net = (weighted_long - weighted_short) / max(total_weight, MIN_PARTICIPATION_WEIGHT) if total_weight > 0 else 0.0
-
-    # If V3 gate explicitly declined, shift net toward 0
-    if v3_gate_result and v3_gate_result.get("action") == "skip":
-        net = net * 0.5
+    # Include neutral votes in denominator: they dampen conviction.
+    # A signal with 1 long and 14 neutrals should score lower than 1 long alone.
+    participation = max(total_weight, MIN_PARTICIPATION_WEIGHT)
+    if neutral_count > 0:
+        participation = max(participation, neutral_count * 0.25)
+    net = (weighted_long - weighted_short) / max(participation, 0.01) if total_weight > 0 else 0.0
 
     net = max(-1.0, min(1.0, net))
     meta["consensus_net_score"] = round(net, 4)

@@ -194,6 +194,36 @@ main {
   color: var(--text-secondary);
 }
 .signal-card .row2 span strong { color: var(--text-primary); }
+.signal-card .row3 {
+  display: flex;
+  gap: 12px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(42,42,85,0.4);
+  font-size: 11px;
+  align-items: center;
+}
+.signal-card .row3.option-premium {
+  border-top: 1px dashed rgba(42,42,85,0.3);
+  padding-top: 4px;
+  margin-top: 4px;
+}
+.level-label {
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  font-size: 9px;
+  margin-right: -6px;
+}
+.level-val {
+  font-weight: 700;
+  color: var(--text-primary);
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 11px;
+}
+.level-val.sl { color: var(--danger); }
+.level-val.tp { color: var(--accent); }
+.level-val.rr { color: var(--warning); }
 
 .popup-overlay {
   position: fixed;
@@ -252,6 +282,36 @@ main {
   font-size: 16px;
   font-weight: 600;
 }
+.popup-levels {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.popup-level {
+  background: var(--bg-card);
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  border-left: 3px solid var(--border);
+}
+.popup-level label {
+  display: block;
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.popup-level span {
+  font-size: 15px;
+  font-weight: 700;
+  font-family: 'Consolas', 'Monaco', monospace;
+}
+.level-entry { color: var(--text-primary); }
+.level-sl { color: var(--danger); }
+.level-tp { color: var(--accent); }
+.level-rr { color: var(--warning); }
+.level-sl-long { color: var(--danger); }
+.level-sl-short { color: var(--danger); }
 .popup-body h4 {
   font-size: 13px;
   color: var(--text-secondary);
@@ -362,3 +422,46 @@ main {
   width: 120px;
 }
 .setting-row input:focus { outline: none; border-color: var(--accent); }
+
+/* -- New 0DTE card rows -- */
+.signal-card .option-strike {
+  border-top: 1px dashed rgba(124,77,255,0.3);
+  padding-top: 4px;
+  margin-top: 4px;
+}
+.signal-card .option-strike .level-val.tp { color: var(--purple); }
+.signal-card .option-size {
+  border-top: 1px dashed rgba(0,200,83,0.2);
+  padding-top: 4px;
+  margin-top: 4px;
+}
+.signal-card .option-meta {
+  border-top: 1px solid rgba(42,42,85,0.3);
+  padding-top: 3px;
+  margin-top: 3px;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.signal-card .option-meta .level-val {
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+/* -- Popup session meta -- */
+.popup-session-meta {
+  display: flex;
+  gap: 16px;
+  padding: 6px 0;
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.popup-session-meta strong { color: var(--text-muted); }
+
+/* -- Strike rationale -- */
+.strike-rationale {
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 4px 0;
+  font-style: italic;
+}

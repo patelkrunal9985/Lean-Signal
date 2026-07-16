@@ -105,6 +105,58 @@ function createSignalCard(signal, cycle) {
   card.className = 'signal-card';
   var dirClass = signal.direction === 'long' ? 'long' : signal.direction === 'short' ? 'short' : 'neutral';
   var dirArrow = signal.direction === 'long' ? '▲' : signal.direction === 'short' ? '▼' : '–';
+  var entryPrice = signal.entry_price || signal.current_price || 0;
+  var sl = signal.stop_loss || 0;
+  var tp = signal.take_profit || 0;
+  var rr = signal.risk_reward || 0;
+  var levelsHtml = '';
+  if (sl > 0 && tp > 0) {
+    levelsHtml =
+      '<div class="row3">' +
+        '<span class="level-label">Entry</span><span class="level-val">$' + entryPrice.toFixed(2) + '</span>' +
+        '<span class="level-label">SL</span><span class="level-val sl">$' + sl.toFixed(2) + '</span>' +
+        '<span class="level-label">TP</span><span class="level-val tp">$' + tp.toFixed(2) + '</span>' +
+        '<span class="level-label">R:R</span><span class="level-val rr">' + rr.toFixed(1) + '</span>' +
+      '</div>';
+  }
+  // Option premium levels for options
+  var optPrem = signal.option_entry_premium || 0;
+  if (optPrem > 0 && signal.instrument_type === 'option') {
+    // Recommended strike
+    var recStrike = signal.recommended_strike || 0;
+    var recOtm = signal.recommended_otm || '';
+    var recType = signal.recommended_option_type || '';
+    var estWin = signal.estimated_win_rate ? (signal.estimated_win_rate * 100).toFixed(0) + '%' : '--';
+    var strikeLine = '';
+    if (recStrike > 0) {
+      strikeLine =
+        '<span class="level-label">' + recOtm + ' ' + recType + '</span>' +
+        '<span class="level-val tp">$' + recStrike.toFixed(0) + '</span>' +
+        '<span class="level-label">Est Win</span><span class="level-val rr">' + estWin + '</span>';
+    }
+    // Position: always 1 contract for options (signal-only system)
+    var posLine = '';
+    if (signal.instrument_type === 'option' && signal.direction !== 'neutral') {
+      posLine = '<span class="level-label">Size</span><span class="level-val">1 contract</span>';
+    }
+    var todLabel = signal.time_window || '';
+    var vwapLabel = signal.vwap_position || '';
+    var metaLine = '';
+    if (todLabel || vwapLabel) {
+      metaLine =
+        (todLabel ? '<span class="level-label">' + todLabel.replace(/_/g, ' ') + '</span>' : '') +
+        (vwapLabel ? '<span class="level-val">VWAP: ' + vwapLabel + '</span>' : '');
+    }
+    levelsHtml +=
+      (strikeLine ? '<div class="row3 option-strike">' + strikeLine + '</div>' : '') +
+      '<div class="row3 option-premium">' +
+        '<span class="level-label">Prem Entry</span><span class="level-val">$' + optPrem.toFixed(2) + '</span>' +
+        '<span class="level-label">Prem SL</span><span class="level-val sl">$' + (signal.option_sl_premium || 0).toFixed(2) + '</span>' +
+        '<span class="level-label">Prem TP</span><span class="level-val tp">$' + (signal.option_tp_premium || 0).toFixed(2) + '</span>' +
+      '</div>' +
+      (posLine ? '<div class="row3 option-size">' + posLine + '</div>' : '') +
+      (metaLine ? '<div class="row3 option-meta">' + metaLine + '</div>' : '');
+  }
   card.innerHTML =
     '<div class="row1">' +
       '<div><span class="ticker-name">' + signal.ticker + '</span>' +
@@ -117,7 +169,8 @@ function createSignalCard(signal, cycle) {
       '<span>Strategies: <strong>' + signal.agreeing_count + '/' + signal.strategy_count + '</strong></span>' +
       '<span>Regime: <strong>' + signal.regime + '</strong></span>' +
       '<span>Price: <strong>$' + (signal.current_price || 0).toFixed(2) + '</strong></span>' +
-    '</div>';
+    '</div>' +
+    levelsHtml;
   card.addEventListener('click', function() { showSignalPopup(signal, cycle); });
   return card;
 }
@@ -132,6 +185,69 @@ function showSignalPopup(signal, cycle) {
   document.getElementById('popup-score').textContent = (signal.composite_score * 100).toFixed(1) + '%';
   document.getElementById('popup-regime').textContent = signal.regime + ' (' + (signal.regime_confidence * 100).toFixed(0) + '%)';
   document.getElementById('popup-price').textContent = '$' + (signal.current_price || 0).toFixed(2);
+
+  // Entry/Exit levels
+  var entryPrice = signal.entry_price || signal.current_price || 0;
+  var sl = signal.stop_loss || 0;
+  var tp = signal.take_profit || 0;
+  var rr = signal.risk_reward || 0;
+  document.getElementById('popup-entry').textContent = '$' + entryPrice.toFixed(2);
+  document.getElementById('popup-sl').textContent = '$' + sl.toFixed(2);
+  document.getElementById('popup-tp').textContent = '$' + tp.toFixed(2);
+  document.getElementById('popup-rr').textContent = rr.toFixed(1) + ':1';
+
+  // Highlight direction on SL
+  var slEl = document.getElementById('popup-sl');
+  slEl.className = signal.direction === 'long' ? 'level-sl-long' : 'level-sl-short';
+
+  // Option premium levels
+  var optSection = document.getElementById('popup-option-levels');
+  var optPrem = signal.option_entry_premium || 0;
+  if (optPrem > 0 && signal.instrument_type === 'option') {
+    optSection.style.display = 'block';
+    document.getElementById('popup-opt-entry').textContent = '$' + optPrem.toFixed(2);
+    document.getElementById('popup-opt-sl').textContent = '$' + (signal.option_sl_premium || 0).toFixed(2);
+    document.getElementById('popup-opt-tp').textContent = '$' + (signal.option_tp_premium || 0).toFixed(2);
+    document.getElementById('popup-premium-rr').textContent = ((signal.premium_risk_reward || 0)).toFixed(1) + ':1';
+  } else {
+    optSection.style.display = 'none';
+  }
+
+  // Strike recommendation
+  var strikeSection = document.getElementById('popup-strike-recommendation');
+  var recStrike = signal.recommended_strike || 0;
+  if (recStrike > 0 && signal.instrument_type === 'option') {
+    strikeSection.style.display = 'block';
+    document.getElementById('popup-strike').textContent = '$' + recStrike.toFixed(0) + ' ' + (signal.recommended_otm || '');
+    document.getElementById('popup-opt-type').textContent = signal.recommended_option_type || '';
+    document.getElementById('popup-est-win').textContent = (signal.estimated_win_rate ? (signal.estimated_win_rate * 100).toFixed(0) + '%' : '--');
+    document.getElementById('popup-est-payoff').textContent = (signal.estimated_payoff || 0).toFixed(1) + ':1';
+    document.getElementById('popup-strike-rationale').textContent = signal.strike_rationale || '';
+  } else {
+    strikeSection.style.display = 'none';
+  }
+
+  // Position: always 1 contract for options
+  var posSection = document.getElementById('popup-position-sizing');
+  if (signal.instrument_type === 'option' && signal.direction !== 'neutral') {
+    posSection.style.display = 'block';
+    document.getElementById('popup-contracts').textContent = '1';
+    document.getElementById('popup-total-prem').textContent = '$' + ((signal.option_entry_premium || 0)).toFixed(2);
+  } else {
+    posSection.style.display = 'none';
+  }
+
+  // Time window & VWAP
+  var metaSection = document.getElementById('popup-session-meta');
+  var todLabel = signal.time_window || '';
+  var vwapLabel = signal.vwap_position || '';
+  if (todLabel || vwapLabel) {
+    metaSection.style.display = 'flex';
+    document.getElementById('popup-time-window').textContent = todLabel ? todLabel.replace(/_/g, ' ') : '--';
+    document.getElementById('popup-vwap-pos').textContent = vwapLabel || '--';
+  } else {
+    metaSection.style.display = 'none';
+  }
 
   var stratContainer = document.getElementById('popup-strategies');
   var strats = signal.strategies || [];

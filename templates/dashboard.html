@@ -86,9 +86,45 @@
       <div class="popup-summary">
         <div class="popup-metric"><label>Direction</label><span id="popup-direction" class="direction-badge"></span></div>
         <div class="popup-metric"><label>Confidence</label><span id="popup-confidence"></span></div>
-        <div class="popup-metric"><label>Score</label><span id="popup-score"></span></div>
         <div class="popup-metric"><label>Regime</label><span id="popup-regime"></span></div>
         <div class="popup-metric"><label>Price</label><span id="popup-price"></span></div>
+      </div>
+      <div id="popup-session-meta" class="popup-session-meta" style="display:none">
+        <span><strong>Window:</strong> <span id="popup-time-window">--</span></span>
+        <span><strong>VWAP:</strong> <span id="popup-vwap-pos">--</span></span>
+      </div>
+      <h4>📍 Entry & Exit Levels</h4>
+      <div class="popup-levels">
+        <div class="popup-level"><label>Entry</label><span id="popup-entry" class="level-entry">--</span></div>
+        <div class="popup-level"><label>Stop Loss</label><span id="popup-sl" class="level-sl">--</span></div>
+        <div class="popup-level"><label>Take Profit</label><span id="popup-tp" class="level-tp">--</span></div>
+        <div class="popup-level"><label>Risk:Reward</label><span id="popup-rr" class="level-rr">--</span></div>
+      </div>
+      <div id="popup-option-levels" style="display:none">
+        <h4>💰 Option Premium Levels</h4>
+        <div class="popup-levels">
+          <div class="popup-level"><label>Entry Premium</label><span id="popup-opt-entry" class="level-entry">--</span></div>
+          <div class="popup-level"><label>Stop Premium</label><span id="popup-opt-sl" class="level-sl">--</span></div>
+          <div class="popup-level"><label>Target Premium</label><span id="popup-opt-tp" class="level-tp">--</span></div>
+          <div class="popup-level"><label>Premium R:R</label><span id="popup-premium-rr" class="level-rr">--</span></div>
+        </div>
+      </div>
+      <div id="popup-strike-recommendation" class="popup-strike" style="display:none">
+        <h4>🎯 Strike Recommendation</h4>
+        <div class="popup-levels">
+          <div class="popup-level"><label>Strike</label><span id="popup-strike" class="level-entry">--</span></div>
+          <div class="popup-level"><label>Type</label><span id="popup-opt-type" class="level-entry">--</span></div>
+          <div class="popup-level"><label>Est Win Rate</label><span id="popup-est-win" class="level-rr">--</span></div>
+          <div class="popup-level"><label>Est Payoff</label><span id="popup-est-payoff" class="level-tp">--</span></div>
+        </div>
+        <div class="strike-rationale" id="popup-strike-rationale"></div>
+      </div>
+      <div id="popup-position-sizing" class="popup-position" style="display:none">
+        <h4>💰 Position</h4>
+        <div class="popup-levels">
+          <div class="popup-level"><label>Contracts</label><span id="popup-contracts" class="level-entry">1</span></div>
+          <div class="popup-level"><label>Premium per Contract</label><span id="popup-total-prem" class="level-entry">--</span></div>
+        </div>
       </div>
       <h4>Strategy Breakdown</h4>
       <div id="popup-strategies" class="strategy-list"></div>

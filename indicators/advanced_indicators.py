@@ -14,6 +14,29 @@ class AdvancedIndicatorSet:
         self.signals = {}
         self._extra = {}
 
+    def __bool__(self):
+        """Truthy only when the set contains actual indicator data."""
+        return bool(
+            self._extra
+            or self.smart_money
+            or self.momentum
+            or self.volume_profile
+            or self.volatility
+            or self.flow
+            or self.signals
+        )
+
+    def __len__(self):
+        return (
+            len(self._extra)
+            + len(self.smart_money)
+            + len(self.momentum)
+            + len(self.volume_profile)
+            + len(self.volatility)
+            + len(self.flow)
+            + len(self.signals)
+        )
+
     def __contains__(self, key: str) -> bool:
         if key in self._extra:
             return True
@@ -147,6 +170,51 @@ def compute_all_advanced(ohlcv: list[dict]) -> AdvancedIndicatorSet:
     kalman = _kalman_filter(closes)
     result.volatility["kalman"] = kalman.get("value", 0)
     result.volatility["kalman_trend"] = kalman.get("trend", "neutral")
+
+    # ── Standard Technical Indicators ──
+    # The gate, consensus coordinator, and strategies depend on these.
+    # Stored in _extra (via __setitem__) so .get() returns them directly.
+
+    # ATR(14) — survival gate requires atr_pct >= 0.001
+    atr_arr = _atr(highs, lows, closes, period=14)
+    result["atr_14"] = round(float(atr_arr[-1]), 4) if not np.isnan(atr_arr[-1]) else 0.0
+
+    # Simple Moving Averages
+    sma20_arr = _sma(closes, 20)
+    result["sma_20"] = round(float(sma20_arr[-1]), 2) if not np.isnan(sma20_arr[-1]) else 0.0
+    sma50_arr = _sma(closes, 50) if len(closes) >= 50 else np.full_like(closes, np.nan)
+    result["sma_50"] = round(float(sma50_arr[-1]), 2) if len(closes) >= 50 and not np.isnan(sma50_arr[-1]) else 0.0
+
+    # RSI(14)
+    rsi_val = _rsi(closes, period=14)
+    result["rsi"] = rsi_val
+    result["rsi_14"] = rsi_val
+
+    # ADX(14)
+    adx_val = _adx(highs, lows, closes, period=14)
+    result["adx"] = adx_val
+
+    # Bollinger Bands (20, 2)
+    bb = _bollinger(closes, period=20, num_std=2)
+    result.volatility["bollinger_bands"] = {
+        "upper": bb["upper"], "middle": bb["middle"], "lower": bb["lower"],
+        "bandwidth": bb["bandwidth"],
+    }
+    result["bb_percent"] = bb["percent"]
+    result["bb_pct"] = bb["percent"]
+
+    # MACD(12, 26, 9)
+    macd_dict = _macd(closes)
+    result.momentum["macd"] = macd_dict
+    result["macd_hist"] = macd_dict["histogram"]
+    result["macd_histogram"] = macd_dict["histogram"]
+
+    # VW Momentum signal
+    vw_mom = _vw_momentum(highs, lows, closes, volumes)
+    result["vw_momentum_signal"] = vw_mom
+
+    # Order flow bias (derived from cumulative delta + close trend)
+    result["order_flow_bias"] = _order_flow_bias(ohlcv)
 
     return result
 
@@ -568,3 +636,131 @@ def _kalman_filter(closes: np.ndarray, r: float = 0.01, q: float = 0.001) -> dic
     result["value"] = round(x[-1], 2)
     result["trend"] = "up" if x[-1] > x[-5] else "down" if x[-1] < x[-5] else "neutral"
     return result
+
+
+def _rsi(closes: np.ndarray, period: int = 14) -> float:
+    """Relative Strength Index."""
+    if len(closes) < period + 1:
+        return 50.0
+    diffs = np.diff(closes[-(period + 1):])
+    gains = np.sum(diffs[diffs > 0])
+    losses = np.sum(np.abs(diffs[diffs < 0]))
+    avg_gain = gains / period if losses > 0 else gains / max(period, 1)
+    avg_loss = losses / period if losses > 0 else 1.0
+    if avg_loss == 0:
+        return 100.0
+    rs = avg_gain / avg_loss
+    return round(100.0 - (100.0 / (1.0 + rs)), 2)
+
+
+def _adx(highs: np.ndarray, lows: np.ndarray, closes: np.ndarray, period: int = 14) -> float:
+    """Average Directional Index — trend strength."""
+    if len(closes) < period * 2:
+        return 0.0
+    high = highs[-(period * 2):]
+    low = lows[-(period * 2):]
+    close = closes[-(period * 2):]
+    tr = np.maximum(high[1:] - low[1:],
+                    np.maximum(np.abs(high[1:] - close[:-1]),
+                               np.abs(low[1:] - close[:-1])))
+    atr_arr = np.zeros(len(tr))
+    atr_arr[0] = tr[0]
+    for i in range(1, len(tr)):
+        atr_arr[i] = (atr_arr[i - 1] * (period - 1) + tr[i]) / period
+    up_move = high[1:] - high[:-1]
+    down_move = low[:-1] - low[1:]
+    plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0)
+    minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0)
+    plus_di = np.zeros(len(tr))
+    minus_di = np.zeros(len(tr))
+    plus_di[0] = 100 * plus_dm[0] / max(atr_arr[0], 1e-10)
+    minus_di[0] = 100 * minus_dm[0] / max(atr_arr[0], 1e-10)
+    for i in range(1, len(tr)):
+        plus_di[i] = (plus_di[i - 1] * (period - 1) + 100 * plus_dm[i] / max(atr_arr[i], 1e-10)) / period
+        minus_di[i] = (minus_di[i - 1] * (period - 1) + 100 * minus_dm[i] / max(atr_arr[i], 1e-10)) / period
+    dx = 100 * np.abs(plus_di - minus_di) / np.maximum(plus_di + minus_di, 1e-10)
+    adx_arr = np.zeros(len(dx))
+    adx_arr[0] = dx[0]
+    for i in range(1, len(dx)):
+        adx_arr[i] = (adx_arr[i - 1] * (period - 1) + dx[i]) / period
+    return round(float(adx_arr[-1]), 2) if not np.isnan(adx_arr[-1]) else 0.0
+
+
+def _bollinger(closes: np.ndarray, period: int = 20, num_std: float = 2.0) -> dict:
+    """Bollinger Bands — volatility envelope."""
+    result = {"upper": 0.0, "middle": 0.0, "lower": 0.0, "bandwidth": 0.0, "percent": 0.5}
+    if len(closes) < period:
+        return result
+    sma_arr = _sma(closes, period)
+    middle = float(sma_arr[-1])
+    if np.isnan(middle):
+        return result
+    std = float(np.std(closes[-period:], ddof=1))
+    upper = middle + num_std * std
+    lower = middle - num_std * std
+    bandwidth = (upper - lower) / max(middle, 0.01)
+    price_range = upper - lower
+    percent = (float(closes[-1]) - lower) / max(price_range, 0.01) if price_range > 0 else 0.5
+    percent = max(0.0, min(1.0, percent))
+    result["upper"] = round(upper, 2)
+    result["middle"] = round(middle, 2)
+    result["lower"] = round(lower, 2)
+    result["bandwidth"] = round(bandwidth, 4)
+    result["percent"] = round(percent, 4)
+    return result
+
+
+def _macd(closes: np.ndarray, fast: int = 12, slow: int = 26, signal: int = 9) -> dict:
+    """MACD — Moving Average Convergence Divergence."""
+    result = {"macd": 0.0, "signal": 0.0, "histogram": 0.0}
+    if len(closes) < slow + signal:
+        return result
+    ema_fast = _ema(closes, fast)
+    ema_slow = _ema(closes, slow)
+    macd_line = ema_fast - ema_slow
+    macd_val = float(macd_line[-1]) if not np.isnan(macd_line[-1]) else 0.0
+    signal_line_arr = _ema(macd_line, signal)
+    signal_val = float(signal_line_arr[-1]) if len(signal_line_arr) > 0 and not np.isnan(signal_line_arr[-1]) else 0.0
+    histogram = macd_val - signal_val
+    result["macd"] = round(macd_val, 4)
+    result["signal"] = round(signal_val, 4)
+    result["histogram"] = round(histogram, 4)
+    return result
+
+
+def _vw_momentum(highs: np.ndarray, lows: np.ndarray, closes: np.ndarray, volumes: np.ndarray) -> float:
+    """Volume-Weighted Momentum signal — normalized ROC * vol_ratio / ATR%."""
+    if len(closes) < 20 or len(volumes) < 20:
+        return 0.0
+    roc_10 = (closes[-1] - closes[-11]) / max(closes[-11], 0.01) if len(closes) >= 11 else 0.0
+    avg_vol = np.mean(volumes[-20:])
+    vol_ratio = volumes[-1] / max(avg_vol, 0.01)
+    atr_arr = _atr(highs, lows, closes, period=14)
+    if np.isnan(atr_arr[-1]) or float(atr_arr[-1]) <= 0:
+        return 0.0
+    atr_pct = float(atr_arr[-1]) / max(closes[-1], 0.01)
+    signal = (roc_10 * vol_ratio) / max(atr_pct, 0.001)
+    return round(float(signal), 3)
+
+
+def _order_flow_bias(ohlcv: list[dict]) -> str:
+    """Estimate order flow bias from cumulative delta vs price trend."""
+    if len(ohlcv) < 10:
+        return "neutral"
+    closes = np.array([b.get("close", 0) for b in ohlcv[-30:]])
+    volumes = np.array([b.get("volume", 0) for b in ohlcv[-30:]])
+    if len(closes) < 2:
+        return "neutral"
+    price_up = np.diff(closes) > 0
+    delta = np.where(price_up, volumes[1:], -volumes[1:])
+    cum_delta = np.sum(delta[-5:])
+    price_trend = closes[-1] - closes[-min(10, len(closes))]
+    if price_trend > 0 and cum_delta > 0:
+        return "bullish"
+    elif price_trend < 0 and cum_delta < 0:
+        return "bearish"
+    elif cum_delta > abs(np.sum(volumes[-5:])) * 0.3:
+        return "bullish"
+    elif cum_delta < -abs(np.sum(volumes[-5:])) * 0.3:
+        return "bearish"
+    return "neutral"

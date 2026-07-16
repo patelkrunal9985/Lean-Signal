@@ -28,18 +28,8 @@ class GammaFlipAcceleration(BaseV3Strategy):
         prox_score = max(0, (0.03 - dist_pct) / 0.03) * 0.40  # closer = higher score
         vel_score = min(velocity * 0.25, 0.35)                  # faster = more urgency
         delta_mag = abs(context.get("delta_positioning", {}).get("net_delta", 0))
-        # Check OI source - apply 0.7x penalty for yfinance EOD OI
-        oi_penalty = 1.0
-        chain = context.get("option_chain", {})
-        for side in (chain.get("calls", []), chain.get("puts", [])):
-            for rec in side:
-                if rec.get("oi_source", "") == "yfinance_eod":
-                    oi_penalty = 0.70
-                    break
-            if oi_penalty < 1.0:
-                break
         delta_score = min(delta_mag / 5000000, 0.15)            # larger delta = more hedging
-        confidence = (prox_score + vel_score + delta_score) * oi_penalty
+        confidence = prox_score + vel_score + delta_score
         confidence = min(confidence, 0.80)
         if confidence < 0.15:
             return {"direction": "neutral", "confidence": 0.0, "strategy": self.name}

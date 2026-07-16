@@ -49,13 +49,8 @@ class LargeOptionFlow(BaseV3Strategy):
             return {"direction": "neutral", "confidence": 0.0, "strategy": self.name}
         net_ratio = (bullish_prem - bearish_prem) / total
         confidence = min(abs(net_ratio), 1.0) * min(total / 5000000, 1.0)
-        # OI source penalty: yfinance OI is end-of-day (15-min delayed) and
-        # unreliable for intraday large option flow detection. Penalize
-        # confidence by 30% when OI comes from yfinance backfill.
-        oi_source = curr.get("oi_source", "yfinance_eod") if isinstance(curr, dict) else "yfinance_eod"
-        oi_penalty = 0.7 if oi_source == "yfinance_eod" else 1.0
         if net_ratio > 0.3:
-            return {"direction": "long", "confidence": confidence * oi_penalty, "action": "buy", "flow": flow, "strategy": self.name}
+            return {"direction": "long", "confidence": confidence, "action": "buy", "flow": flow, "strategy": self.name}
         elif net_ratio < -0.3:
-            return {"direction": "short", "confidence": confidence * oi_penalty, "action": "sell", "flow": flow, "strategy": self.name}
+            return {"direction": "short", "confidence": confidence, "action": "sell", "flow": flow, "strategy": self.name}
         return {"direction": "neutral", "confidence": 0.0, "strategy": self.name}

@@ -48,18 +48,13 @@ class MaxPain(BaseV3Strategy):
             return {"direction": "neutral", "confidence": 0.0, "strategy": self.name}
         dist = (underlying - mp) / mp
         abs_dist = abs(dist)
-        # OI source penalty: yfinance OI is end-of-day (15-min delayed) and
-        # unreliable for intraday max pain calculation. Penalize confidence
-        # by 30% when OI comes from yfinance backfill.
-        oi_source = chain.get("oi_source", "yfinance_eod") if isinstance(chain, dict) else "yfinance_eod"
-        oi_penalty = 0.7 if oi_source == "yfinance_eod" else 1.0
         if dte <= 1 and abs_dist > 0.005:
             direction = "short" if dist > 0 else "long"
-            confidence = min(abs_dist * 30, 0.85) * oi_penalty
+            confidence = min(abs_dist * 30, 0.85)
             return {"direction": direction, "confidence": confidence, "action": "sell", "max_pain": mp, "price_distance_pct": dist, "dte": dte, "strategy": self.name}
         elif dte <= 2 and abs_dist > 0.01:
             direction = "short" if dist > 0 else "long"
-            confidence = min(abs_dist * 20, 0.70) * oi_penalty
+            confidence = min(abs_dist * 20, 0.70)
             return {"direction": direction, "confidence": confidence, "action": "sell", "max_pain": mp, "price_distance_pct": dist, "dte": dte, "strategy": self.name}
         else:
             return {"direction": "neutral", "confidence": 0.0, "strategy": self.name}

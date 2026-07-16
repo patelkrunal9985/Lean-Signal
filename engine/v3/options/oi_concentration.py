@@ -46,11 +46,5 @@ class OIConcentration(BaseV3Strategy):
         put_strikes = [s["strike"] for s in signals if s["type"] == "puts"]
         if call_strikes and put_strikes and np.mean(call_strikes) > np.mean(put_strikes):
             confidence = min(confidence * 1.2, 0.85)
-        # OI source penalty: yfinance OI is end-of-day (15-min delayed) and
-        # unreliable for intraday OI change detection. Penalize confidence
-        # by 30% when OI comes from yfinance backfill.
-        oi_source = curr.get("oi_source", "yfinance_eod") if isinstance(curr, dict) else "yfinance_eod"
-        if oi_source == "yfinance_eod":
-            confidence *= 0.7
         direction = "long" if net_score > 0 else "short"
         return {"direction": direction, "confidence": confidence, "action": "buy", "signals": signals, "net_score": net_score, "strategy": self.name}

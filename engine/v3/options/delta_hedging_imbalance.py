@@ -18,16 +18,6 @@ class DeltaHedgingImbalance(BaseV3Strategy):
         total_delta = call_delta + abs(put_delta)
         if total_delta < 1000000:
             return {"direction": "neutral", "confidence": 0.0, "strategy": self.name}
-        # Check if OI data came from yfinance (EOD, stale) - apply 0.7x penalty
-        oi_penalty = 1.0
-        chain = context.get("option_chain", {})
-        for side in (chain.get("calls", []), chain.get("puts", [])):
-            for rec in side:
-                if rec.get("oi_source", "") == "yfinance_eod":
-                    oi_penalty = 0.70
-                    break
-            if oi_penalty < 1.0:
-                break
         gamma_flip = context.get("gamma_flip_level", 0)
         underlying = context.get("underlying_price", 0)
         flip_proximity = 0.0
@@ -39,7 +29,7 @@ class DeltaHedgingImbalance(BaseV3Strategy):
         delta_score = min(delta_magnitude / 10000000, 0.35)
         flip_score = flip_proximity * 0.25
         concentration = min(abs(delta_ratio - 1.0) * 0.15, 0.20)
-        confidence = (delta_score + flip_score + concentration) * oi_penalty
+        confidence = delta_score + flip_score + concentration
         confidence = min(confidence, 0.80)
         if abs(delta_ratio - 1.0) < 0.3:
             return {"direction": "neutral", "confidence": 0.0, "strategy": self.name}

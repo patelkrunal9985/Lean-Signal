@@ -72,14 +72,12 @@ class GammaExposure(BaseV3Strategy):
             gamma = _black_scholes_gamma(underlying, stk, t_years, iv)
             put_gex += gamma * oi * underlying * 100
             total_oi += oi
-        oi_source = chain.get("oi_source", "yfinance_eod") if isinstance(chain, dict) else "yfinance_eod"
-        oi_penalty = 0.7 if oi_source == "yfinance_eod" else 1.0
         total_gamma_exposure = call_gex + put_gex
         net_gamma_imbalance = call_gex - put_gex
         confidence_base = min(total_gamma_exposure / 200000000, 0.75)
         if net_gamma_imbalance > 10000000:
-            return {"direction": "short", "confidence": 0.40 * oi_penalty, "action": "sell", "total_gex": net_gamma_imbalance, "dte": dte, "strategy": self.name}
+            return {"direction": "short", "confidence": 0.40, "action": "sell", "total_gex": net_gamma_imbalance, "dte": dte, "strategy": self.name}
         elif net_gamma_imbalance < -10000000:
             direction = "long" if underlying > max_pain > 0 else "short"
-            return {"direction": direction, "confidence": confidence_base * oi_penalty, "action": "buy" if max_pain > 0 and underlying < max_pain else "sell", "total_gex": net_gamma_imbalance, "dte": dte, "max_pain": max_pain, "strategy": self.name}
+            return {"direction": direction, "confidence": confidence_base, "action": "buy" if max_pain > 0 and underlying < max_pain else "sell", "total_gex": net_gamma_imbalance, "dte": dte, "max_pain": max_pain, "strategy": self.name}
         return {"direction": "neutral", "confidence": 0.0, "total_gex": net_gamma_imbalance, "dte": dte, "strategy": self.name}

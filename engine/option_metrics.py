@@ -79,7 +79,7 @@ def compute_option_metrics(ticker: str, underlying_price: float, ticker_data_map
             strike = float(strike_str)
         except (ValueError, TypeError):
             continue
-        for right in ("call", "put"):
+        for right in ("c", "p"):
             data = sides.get(right, {})
             if not data:
                 continue
@@ -108,7 +108,7 @@ def compute_option_metrics(ticker: str, underlying_price: float, ticker_data_map
                 "theta": theta,
                 "vega": vega,
             }
-            if right == "call":
+            if right == "c":
                 option_chain["calls"].append(entry)
                 total_call_vol += volume
                 total_call_prem += prem * oi if oi > 0 else 0
@@ -263,6 +263,7 @@ def compute_option_metrics(ticker: str, underlying_price: float, ticker_data_map
         otm_call_iv = option_chain["calls"][-1].get("impliedVolatility", 0) or 0
         skew_term_1m = otm_put_iv - otm_call_iv
 
+    logger.info("compute_option_metrics(%s): done — pc_ratio=%.3f, atm_iv=%.1f%%, gamma_flip=%.2f", ticker, pc_ratio, atm_iv * 100, gamma_flip)
     return {
         "ticker": f"{ticker}_OPT",
         "instrument_type": "option",

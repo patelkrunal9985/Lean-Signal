@@ -8,9 +8,14 @@ Every consumer that needs a list of V2 strategies MUST derive it from
 this module. Hardcoded lists in modeling_agent.py, kronos_server.py,
 and option_analyzer.py are forbidden.
 """
-import json
 
+import json
+import importlib
+
+from kronos.utils.logger import get_logger
 from kronos.utils.config import PROJECT_ROOT
+
+logger = get_logger("engine.v2.registry")
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -405,13 +410,15 @@ class V2StrategyRegistry:
             if not module_path or not class_name:
                 continue
             try:
-                import importlib
                 mod = importlib.import_module(module_path)
                 cls = getattr(mod, class_name, None)
                 if cls:
                     self._strategies.append((name, cls, entry))
             except Exception as e:
-                pass
+                logger.warning(
+                    "V2 strategy load failed: %s from %s: %s",
+                    entry["name"], entry.get("module", "?"), e,
+                )
         self._loaded = True
 
     def run_all(self, context: dict) -> list[dict]:
@@ -437,5 +444,8 @@ class V2StrategyRegistry:
                         "reasoning": reasoning,
                     })
             except Exception as e:
-                pass
+                logger.debug(
+                    "V2 strategy %s failed on %s: %s",
+                    name, context.get("ticker", "?"), e,
+                )
         return results

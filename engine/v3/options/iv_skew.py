@@ -30,11 +30,8 @@ class IVSkew(BaseV3Strategy):
         iv_25p = np.mean([(p.get("impliedVolatility", 0) or 0) for p in puts])
         iv_25c = np.mean([(c.get("impliedVolatility", 0) or 0) for c in calls])
         skew = iv_25p - iv_25c
-        # OI source penalty
-        oi_source = chain.get("oi_source", "yfinance_eod") if isinstance(chain, dict) else "yfinance_eod"
-        oi_penalty = 0.7 if oi_source == "yfinance_eod" else 1.0
         if skew > 8.0:
-            return {"direction": "long", "confidence": min((skew - 8.0) / 5.0, 0.80) * oi_penalty, "action": "sell", "skew": skew, "strategy": self.name}
+            return {"direction": "long", "confidence": min((skew - 8.0) / 5.0, 0.80), "action": "sell", "skew": skew, "strategy": self.name}
         elif skew < 1.0:
-            return {"direction": "short", "confidence": min((1.0 - skew) / 2.0, 0.60) * oi_penalty, "action": "buy", "skew": skew, "strategy": self.name}
+            return {"direction": "short", "confidence": min((1.0 - skew) / 2.0, 0.60), "action": "buy", "skew": skew, "strategy": self.name}
         return {"direction": "neutral", "confidence": 0.0, "skew": skew, "strategy": self.name}

@@ -19,16 +19,6 @@ class CallPutWallBreakout(BaseV3Strategy):
         nearby_walls = [w for w in gamma_walls if abs((w.get("strike", 0) or 0) - underlying) / underlying < 0.02]
         if not nearby_walls:
             return {"direction": "neutral", "confidence": 0.0, "strategy": self.name}
-        # Check if OI data came from yfinance (EOD, stale) - apply 0.7x penalty
-        oi_penalty = 1.0
-        chain = context.get("option_chain", {})
-        for side in (chain.get("calls", []), chain.get("puts", [])):
-            for rec in side:
-                if rec.get("oi_source", "") == "yfinance_eod":
-                    oi_penalty = 0.70
-                    break
-            if oi_penalty < 1.0:
-                break
         # Find nearest wall above and below
         wall_above = min((w for w in nearby_walls if (w.get("strike", 0) or 0) > underlying), key=lambda w: w.get("strike", 0) or 0, default=None)
         wall_below = max((w for w in nearby_walls if (w.get("strike", 0) or 0) < underlying), key=lambda w: w.get("strike", 0) or 0, default=None)
@@ -37,7 +27,7 @@ class CallPutWallBreakout(BaseV3Strategy):
             dist_pct = (underlying - wall_above["strike"]) / underlying
             if -0.005 < dist_pct < 0.01:  # just crossed or about to cross
                 gex_magnitude = wall_above.get("gex_per_1pct", 0)
-                confidence = min(gex_magnitude / 200000, 0.70) * oi_penalty
+                confidence = min(gex_magnitude / 200000, 0.70)
                 if confidence > 0.15:
                     return {"direction": "long", "confidence": round(confidence, 4), "action": "buy", "wall_strike": wall_above["strike"], "wall_type": "call", "strategy": self.name}
         # Breaking below a put wall (gamma support) = bearish breakdown
@@ -45,7 +35,7 @@ class CallPutWallBreakout(BaseV3Strategy):
             dist_pct = (wall_below["strike"] - underlying) / underlying
             if -0.005 < dist_pct < 0.01:
                 gex_magnitude = wall_below.get("gex_per_1pct", 0)
-                confidence = min(gex_magnitude / 200000, 0.70) * oi_penalty
+                confidence = min(gex_magnitude / 200000, 0.70)
                 if confidence > 0.15:
                     return {"direction": "short", "confidence": round(confidence, 4), "action": "buy", "wall_strike": wall_below["strike"], "wall_type": "put", "strategy": self.name}
         return {"direction": "neutral", "confidence": 0.0, "strategy": self.name}

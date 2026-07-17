@@ -16,7 +16,9 @@ class CreditSpreadDetector(BaseV3Strategy):
         if underlying <= 0 or not chain or dte > 14 or dte < 1:
             return {"direction": "neutral", "confidence": 0.0, "strategy": self.name}
 
-        iv_pct = iv / 100.0 if iv > 1 else iv
+        iv_raw = context.get("iv", 0)
+        # Assume iv is passed as percentage (e.g., 20 for 20%) - convert to decimal
+        iv_pct = iv_raw / 100.0 if iv_raw > 1.5 else iv_raw
         if iv_pct <= 0.15:
             return {"direction": "neutral", "confidence": 0.0, "strategy": self.name}
 

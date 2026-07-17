@@ -9,7 +9,7 @@ class FVGLiquiditySweep(BaseV3Strategy):
 
     def compute(self, context: dict) -> dict:
         candles_1m = context.get("ohlcv_1m", [])
-        if len(candles_1m) < 5:
+        if len(candles_1m) < 30:
             return {
                 "direction": "neutral", "confidence": 0.0,
                 "fvg_score": 0.0, "sweep_score": 0.0,

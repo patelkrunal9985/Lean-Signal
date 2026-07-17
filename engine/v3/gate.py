@@ -126,7 +126,7 @@ def _is_macro_event_window(ticker: str, ticker_data: dict) -> tuple[bool, str]:
         headline = (item.get("headline", "") or "").lower()
         for event_type, keywords in MACRO_EVENTS.items():
             if any(kw in headline for kw in keywords):
-                # Check if event is imminent (within ~30 min) or just happened
+                # Could add timestamp parsing here to check if event is within 30 min
                 return True, f"macro_event_{event_type}"
     return False, ""
 

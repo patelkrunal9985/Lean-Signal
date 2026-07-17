@@ -11,7 +11,7 @@ class MTFCore(BaseV3Strategy):
         ohlcv_1m = context.get("ohlcv_1m", [])
         current_price = context.get("current_price", 0)
 
-        if len(ohlcv) < 25 or len(ohlcv_1m) < 80:
+        if len(ohlcv) < 25 or len(ohlcv_1m) < 300:
             return {
                 "direction": "neutral",
                 "confidence": 0.0,

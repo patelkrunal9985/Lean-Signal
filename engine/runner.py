@@ -203,10 +203,19 @@ def run_cycle() -> dict:
 
             # ── OHLCV (IBKR primary) ──
             ohlcv = []
+            ohlcv_1m = []
             try:
                 bars = fetch_historical_bars(ticker, "2 W", "1 day")
                 if bars:
                     ohlcv = bars
+            except Exception:
+                pass
+
+            # ── 1-minute OHLCV for MTF/FVG/Order Flow strategies ──
+            try:
+                bars_1m = fetch_historical_bars(ticker, "1 D", "1 min")
+                if bars_1m:
+                    ohlcv_1m = bars_1m
             except Exception:
                 pass
 
@@ -273,6 +282,7 @@ def run_cycle() -> dict:
                 "ticker": ticker,
                 "instrument_type": instr_type,
                 "ohlcv": ohlcv,
+                "ohlcv_1m": ohlcv_1m,
                 "current_price": live_price,
                 "price_age_seconds": price_age,
                 "depth": depth_data,

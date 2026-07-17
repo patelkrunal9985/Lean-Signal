@@ -21,7 +21,8 @@ class IronCondorDetector(BaseV3Strategy):
         if regime != "ranging":
             return {"direction": "neutral", "confidence": 0.0, "strategy": self.name}
 
-        comp_score = breadth.get("composite", 0) if isinstance(breadth, dict) else 0
+        comp = breadth.get("composite", {}) if isinstance(breadth, dict) else {}
+        comp_score = comp.get("composite_score", 0) if isinstance(comp, dict) else 0
         if comp_score < -0.3 or comp_score > 0.3:
             return {"direction": "neutral", "confidence": 0.0, "strategy": self.name}
 

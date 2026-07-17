@@ -840,3 +840,66 @@ function saveSettings() {
 
   alert('Settings saved.');
 }
+
+async function runValidate() {
+  var btn = document.getElementById('validate-btn');
+  var statusEl = document.getElementById('validate-status');
+  btn.disabled = true;
+  statusEl.textContent = 'Running validation... (may take 30-60s)';
+  try {
+    var resp = await fetch('/api/validate', { method: 'POST' });
+    var result = await resp.json();
+    showValidatePopup(result);
+    statusEl.textContent = 'Validation complete (cycle ' + (result.created_at_cycle || '?') + ')';
+  } catch(e) {
+    console.error('Validate failed:', e);
+    statusEl.textContent = 'Error: ' + e.message;
+  }
+  btn.disabled = false;
+}
+
+function showValidatePopup(result) {
+  document.getElementById('validate-total').textContent = result.total || 0;
+  document.getElementById('validate-passed').textContent = result.passed || 0;
+  document.getElementById('validate-failed').textContent = result.failed || 0;
+  document.getElementById('validate-skipped').textContent = result.skipped || 0;
+  document.getElementById('validate-cycle').textContent = result.created_at_cycle || '-';
+
+  var verdict = document.getElementById('validate-popup-verdict');
+  if (result.all_ok) {
+    verdict.textContent = 'ALL TESTS PASSED';
+    verdict.style.background = 'rgba(0,200,83,0.15)';
+    verdict.style.color = 'var(--accent)';
+    verdict.style.border = '1px solid var(--accent)';
+  } else {
+    verdict.textContent = result.failed + ' TEST(S) FAILED';
+    verdict.style.background = 'rgba(255,70,70,0.12)';
+    verdict.style.color = 'var(--danger)';
+    verdict.style.border = '1px solid var(--danger)';
+  }
+
+  var errorList = document.getElementById('validate-error-list');
+  var errorContainer = document.getElementById('validate-errors');
+  errorContainer.innerHTML = '';
+  if (result.errors && result.errors.length > 0) {
+    errorList.style.display = 'block';
+    result.errors.forEach(function(e) {
+      var item = document.createElement('div');
+      item.className = 'vote-item';
+      item.innerHTML = '<span class="vote-name" style="color:var(--danger)">[' + e.type + '] ' + e.strategy + '</span><span class="vote-conf" style="color:var(--danger)">FAIL</span>';
+      errorContainer.appendChild(item);
+      var detail = document.createElement('div');
+      detail.style.cssText = 'font-size:11px;color:var(--text-muted);padding:2px 8px 6px;margin-top:-2px';
+      detail.textContent = e.error || '';
+      errorContainer.appendChild(detail);
+    });
+  } else {
+    errorList.style.display = 'none';
+  }
+
+  document.getElementById('validate-popup-overlay').style.display = 'flex';
+}
+
+function closeValidatePopup() {
+  document.getElementById('validate-popup-overlay').style.display = 'none';
+}

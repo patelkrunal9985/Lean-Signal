@@ -16,6 +16,9 @@ from concurrent.futures import ThreadPoolExecutor
 from utils.logger import get_logger
 from engine.runner import run_cycle, get_status, start_auto_run, stop_auto_run, init as init_engine
 
+_VALIDATION_RESULT = None
+_VALIDATION_CREATED_CYCLE = 0
+
 logger = get_logger("server")
 
 PROJECT_ROOT = Path(__file__).parent
@@ -38,6 +41,19 @@ def _rate_limited(ip: str) -> bool:
         return True
     _RATE_LIMITS[ip].append(now)
     return False
+
+
+_VALIDATION_EXPIRE_AFTER = 10
+
+def _auto_expire_validation():
+    global _VALIDATION_RESULT, _VALIDATION_CREATED_CYCLE
+    if _VALIDATION_RESULT is None:
+        return
+    current = get_status().get("cycle_count", 0)
+    if current - _VALIDATION_CREATED_CYCLE >= _VALIDATION_EXPIRE_AFTER:
+        logger.info(f"Validation result expired (created at cycle {_VALIDATION_CREATED_CYCLE}, now {current})")
+        _VALIDATION_RESULT = None
+        _VALIDATION_CREATED_CYCLE = 0
 
 
 def _load_html(name: str) -> str:
@@ -156,6 +172,14 @@ class LeanSignalsHandler(BaseHTTPRequestHandler):
                     "status": "info",
                     "message": "Send POST /api/restart to trigger server restart."
                 })
+            elif path == "/api/validate":
+                self._send_json({"status": "hit", "message": "Send POST /api/validate to run validation."})
+            elif path == "/api/validate/result":
+                _auto_expire_validation()
+                if _VALIDATION_RESULT:
+                    self._send_json(_VALIDATION_RESULT)
+                else:
+                    self._send_json({"status": "no_data", "message": "No validation results. POST /api/validate first."})
             elif path == "/api/health":
                 self._send_json({"status": "ok", "timestamp": time.time()})
             else:
@@ -184,7 +208,39 @@ class LeanSignalsHandler(BaseHTTPRequestHandler):
         try:
             if path == "/api/run-cycle":
                 result = run_cycle()
+                _auto_expire_validation()
                 self._send_json(result)
+            elif path == "/api/validate":
+                _auto_expire_validation()
+                global _VALIDATION_RESULT, _VALIDATION_CREATED_CYCLE
+                import subprocess, sys as _sys
+                script = str(PROJECT_ROOT / "test_strategies.py")
+                if not os.path.exists(script):
+                    self._send_json({"status": "error", "message": "test_strategies.py not found"})
+                    return
+                proc = subprocess.run(
+                    [_sys.executable, script, "--json"],
+                    capture_output=True, text=True, timeout=120,
+                    cwd=str(PROJECT_ROOT),
+                )
+                stdout = proc.stdout
+                start = stdout.find("<<<JSON_START>>>")
+                end = stdout.find("<<<JSON_END>>>")
+                if start != -1 and end != -1:
+                    raw = stdout[start + len("<<<JSON_START>>>"):end].strip()
+                    data = json.loads(raw)
+                else:
+                    data = {"status": "error", "message": "JSON parse failed", "raw_stdout": stdout[:2000], "stderr": proc.stderr[:2000]}
+                data["created_at_cycle"] = get_status().get("cycle_count", 0)
+                _VALIDATION_RESULT = data
+                _VALIDATION_CREATED_CYCLE = data["created_at_cycle"]
+                self._send_json(data)
+            elif path == "/api/validate/result":
+                _auto_expire_validation()
+                if _VALIDATION_RESULT:
+                    self._send_json(_VALIDATION_RESULT)
+                else:
+                    self._send_json({"status": "no_data", "message": "No validation results. POST /api/validate first."})
             elif path == "/api/restart":
                 # Spawn a detached process that kills ONLY the old server PID,
                 # clears caches, and starts a fresh instance.

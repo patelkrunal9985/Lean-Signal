@@ -78,6 +78,16 @@
           </label>
         </div>
         <button class="btn btn-primary" onclick="saveSettings()">Save</button>
+        <hr style="margin:20px 0;border-color:var(--border)">
+        <h3>Strategy Validation</h3>
+        <p style="font-size:12px;color:var(--text-muted);margin:4px 0 12px">
+          Runs all V2/V3 strategies, consensus, gate, tick engine, and pipeline
+          with synthetic data. Results auto-delete after 10 cycle runs.
+        </p>
+        <button class="btn btn-primary" id="validate-btn" onclick="runValidate()">
+          Validate Strategies
+        </button>
+        <div id="validate-status" style="margin-top:8px;font-size:12px;color:var(--text-muted)"></div>
       </div>
     </div>
   </main>
@@ -164,6 +174,32 @@
   </div>
 </div>
 
-<script src="/static/app.js?v=2"></script>
+<div id="validate-popup-overlay" class="popup-overlay" style="display:none" onclick="closePopup(event)">
+  <div class="popup" onclick="event.stopPropagation()">
+    <div class="popup-header">
+      <h3 id="validate-popup-title">Strategy Validation Results</h3>
+      <button class="popup-close" onclick="closeValidatePopup()">&times;</button>
+    </div>
+    <div class="popup-body" id="validate-popup-body">
+      <div id="validate-popup-summary" class="popup-summary">
+        <div class="popup-metric"><label>Total Tests</label><span id="validate-total">-</span></div>
+        <div class="popup-metric"><label>Passed</label><span id="validate-passed" style="color:var(--accent)">-</span></div>
+        <div class="popup-metric"><label>Failed</label><span id="validate-failed" style="color:var(--danger)">-</span></div>
+        <div class="popup-metric"><label>Skipped</label><span id="validate-skipped">-</span></div>
+      </div>
+      <div id="validate-popup-verdict" style="text-align:center;padding:12px;margin:8px 0;border-radius:var(--radius);font-weight:700;font-size:16px"></div>
+      <div id="validate-error-list" style="display:none">
+        <h4>Failure Details</h4>
+        <div id="validate-errors" class="vote-list"></div>
+      </div>
+      <div style="margin-top:12px;font-size:11px;color:var(--text-muted);text-align:center">
+        Created at cycle <span id="validate-cycle">-</span>
+        &middot; Auto-deletes after 10 more cycles
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/static/app.js?v=3"></script>
 </body>
 </html>

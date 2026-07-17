@@ -23,7 +23,7 @@ at ATM strikes is far more significant than far OTM positioning.
 """
 from __future__ import annotations
 import math
-from kronos.strategies.v3.base import BaseV3Strategy
+from engine.v3.base import BaseV3Strategy
 from utils.logger import get_logger
 
 logger = get_logger("engine.v3.options.oi_change_rate")

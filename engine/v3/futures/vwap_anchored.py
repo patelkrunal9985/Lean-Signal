@@ -1,4 +1,4 @@
-from kronos.strategies.v3.base import BaseV3Strategy
+from engine.v3.base import BaseV3Strategy
 
 
 class VWAPAnchored(BaseV3Strategy):
@@ -28,7 +28,7 @@ class VWAPAnchored(BaseV3Strategy):
         depth_imb = 0.0
         if ticker:
             try:
-                from kronos.skills.ibkr_data_feed import get_market_depth
+                from engine.skills.ibkr_data_feed import get_market_depth
                 depth = get_market_depth(ticker)
                 if depth:
                     bids = depth.get("bids", [])

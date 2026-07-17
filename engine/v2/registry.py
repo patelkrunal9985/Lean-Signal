@@ -12,8 +12,8 @@ and option_analyzer.py are forbidden.
 import json
 import importlib
 
-from kronos.utils.logger import get_logger
-from kronos.utils.config import PROJECT_ROOT
+from utils.logger import get_logger
+from utils.config import PROJECT_ROOT
 
 logger = get_logger("engine.v2.registry")
 

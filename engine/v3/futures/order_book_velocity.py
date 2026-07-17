@@ -1,4 +1,4 @@
-from kronos.strategies.v3.base import BaseV3Strategy
+from engine.v3.base import BaseV3Strategy
 
 
 class OrderBookVelocity(BaseV3Strategy):
@@ -19,7 +19,7 @@ class OrderBookVelocity(BaseV3Strategy):
             if not depth.get("bids") or not depth.get("asks"):
                 # Fallback: direct call only when context didn't pre-populate
                 try:
-                    from kronos.skills.ibkr_data_feed import get_market_depth
+                    from engine.skills.ibkr_data_feed import get_market_depth
                     depth = get_market_depth(ticker)
                 except Exception:
                     depth = {}

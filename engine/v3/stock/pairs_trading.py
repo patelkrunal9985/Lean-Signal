@@ -1,6 +1,6 @@
 import logging
 
-from kronos.strategies.v3.base import BaseV3Strategy
+from engine.v3.base import BaseV3Strategy
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ class PairsTrading(BaseV3Strategy):
         leg_a, leg_b, instr_type, direction_sign = pair_info
         leg_b_bars = None
         try:
-            from kronos.skills.ibkr_data_feed import fetch_historical_bars
+            from engine.skills.ibkr_data_feed import fetch_historical_bars
             leg_b_bars = fetch_historical_bars(leg_b, duration="2 M", bar_size="1 day")
         except Exception:
             pass

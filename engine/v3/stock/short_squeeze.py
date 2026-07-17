@@ -1,4 +1,4 @@
-from kronos.strategies.v3.base import BaseV3Strategy
+from engine.v3.base import BaseV3Strategy
 
 SQ_PARAMS = {
     "short_float_pct_min": 15.0,

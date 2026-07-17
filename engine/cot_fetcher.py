@@ -10,9 +10,9 @@ import urllib.request
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from kronos.utils.logger import get_logger
+from utils.logger import get_logger
 
-logger = get_logger("kronos.skills.cot_fetcher")
+logger = get_logger("engine.skills.cot_fetcher")
 
 _TICKER_TO_CFTC = {
     # CME (deacmesf.htm): E-mini S&P / NASDAQ / Russell + MICROS + crypto

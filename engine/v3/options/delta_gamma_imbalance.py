@@ -27,7 +27,7 @@ The strategy detects:
   4. VIX regime (amplification factor)
 """
 from __future__ import annotations
-from kronos.strategies.v3.base import BaseV3Strategy
+from engine.v3.base import BaseV3Strategy
 from utils.logger import get_logger
 
 logger = get_logger("engine.v3.options.delta_gamma_imbalance")

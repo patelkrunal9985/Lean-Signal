@@ -33,7 +33,7 @@ class VWAPDeviationStrategy:
         order_flow = indicators.get("order_flow_imbalance") or {}
         if ticker:
             try:
-                from kronos.skills.ibkr_data_feed import get_order_book_imbalance
+                from engine.skills.ibkr_data_feed import get_order_book_imbalance
                 ob = get_order_book_imbalance(ticker)
                 if ob and ob.get("pressure", 0) > 0:
                     order_flow = {

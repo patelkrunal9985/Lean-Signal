@@ -21,7 +21,7 @@ class StopHuntStrategy:
             reasons.append(f"swept={swept_level}")
         iex_depth = None
         try:
-            from kronos.skills.ibkr_data_feed import get_market_depth
+            from engine.skills.ibkr_data_feed import get_market_depth
             iex_depth = get_market_depth(ticker)
         except Exception:
             pass

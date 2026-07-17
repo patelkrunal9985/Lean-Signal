@@ -22,7 +22,7 @@ class PullbackStrategy:
         macd_hist = macd.get("histogram", 0) if isinstance(macd, dict) else 0
         adx = indicators.get("adx", 0)
         if adx == 0 and len(closes) >= 15:
-            from kronos.utils.helpers import calculate_adx
+            from utils.helpers import calculate_adx
             highs_np = [c["high"] for c in ohlcv]
             lows_np = [c["low"] for c in ohlcv]
             adx = calculate_adx(highs_np, lows_np, closes)

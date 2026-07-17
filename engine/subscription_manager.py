@@ -12,9 +12,9 @@ import threading
 from typing import Optional
 
 import sys
-from kronos.utils.logger import get_logger
+from utils.logger import get_logger
 
-logger = get_logger("kronos.skills.subscription_manager")
+logger = get_logger("engine.skills.subscription_manager")
 
 # ── Slot limits by instrument type ────────────────────────────────
 # Slot allocation optimized: futures need 3+ dynamic slots for next-month contracts

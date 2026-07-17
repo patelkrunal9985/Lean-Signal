@@ -13,7 +13,7 @@ def accumulate_ticks(ticker: str, interval_sec: int = 120) -> list:
     Returns list of {price, size, timestamp} or empty list on disconnect.
     """
     try:
-        from kronos.skills.ibkr_data_feed import fetch_historical_ticks
+        from engine.skills.ibkr_data_feed import fetch_historical_ticks
         ticks = fetch_historical_ticks(ticker, duration_sec=interval_sec)
         return ticks or []
     except Exception:

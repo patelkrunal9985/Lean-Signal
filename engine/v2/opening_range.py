@@ -17,7 +17,7 @@ class OpeningRangeStrategy:
         vol_ratio = volume / max(avg_vol, 1)
         intraday_bars = None
         try:
-            from kronos.skills.ibkr_data_feed import fetch_historical_bars
+            from engine.skills.ibkr_data_feed import fetch_historical_bars
             intraday_bars = fetch_historical_bars(ticker, duration="1 D", bar_size="1 min")
         except Exception:
             pass

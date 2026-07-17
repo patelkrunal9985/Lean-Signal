@@ -13,10 +13,10 @@ import traceback
 from datetime import date, datetime
 from typing import Optional
 
-from kronos.utils.logger import get_logger
-from kronos.utils.config import IBKR_HOST, IBKR_PORT, IBKR_CLIENT_ID
+from utils.logger import get_logger
+from utils.config import IBKR_HOST, IBKR_PORT, IBKR_CLIENT_ID
 
-logger = get_logger("kronos.skills.ibkr_data_feed")
+logger = get_logger("engine.skills.ibkr_data_feed")
 
 # ── Shared live price cache (thread-safe, simple dict) ──
 # Updated in real-time by the IBKR streamer callbacks.
@@ -1052,7 +1052,7 @@ def fetch_live_option_prices(ticker: str, expiration: str, strikes: list[float],
             # Create Option contracts for each strike × right
             # Futures options need FuturesOption with correct symbol/exchange/multiplier
             try:
-                from kronos.countries.usa.futures_registry import get_futures_by_yf_ticker
+                from engine.countries.usa.futures_registry import get_futures_by_yf_ticker
             except ImportError:
                 get_futures_by_yf_ticker = lambda t: None
             from ib_insync import FuturesOption

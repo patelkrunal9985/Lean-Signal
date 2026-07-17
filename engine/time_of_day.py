@@ -133,7 +133,7 @@ LATE_CLOSE_TICKERS = frozenset({"SPX"})
 
 def _current_et_minutes() -> int:
     """Return minutes since midnight ET, or 9999 if weekend."""
-    from kronos.utils.time_utils import now_ny
+    from utils.time_utils import now_ny
     t = now_ny()
     if t.weekday() >= 5:
         return 9999

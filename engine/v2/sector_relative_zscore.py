@@ -40,7 +40,7 @@ class SectorRelativeZscoreStrategy(BaseAdvancedStrategy):
         
         adx = indicators.get("adx", 0)
         if adx == 0:
-            from kronos.utils.helpers import calculate_adx
+            from utils.helpers import calculate_adx
             highs = np.array([c["high"] for c in ohlcv])
             lows = np.array([c["low"] for c in ohlcv])
             adx = calculate_adx(highs.tolist(), lows.tolist(), closes.tolist())

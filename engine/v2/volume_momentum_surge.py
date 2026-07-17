@@ -39,7 +39,7 @@ class VolumeMomentumSurgeStrategy:
         atr_pct = atr / max(close, 0.01) if atr > 0 else 0.015
         adx = indicators.get("adx", 0)
         if adx == 0 and len(closes) >= 15:
-            from kronos.utils.helpers import calculate_adx
+            from utils.helpers import calculate_adx
             highs = np.array([c["high"] for c in ohlcv])
             lows = np.array([c["low"] for c in ohlcv])
             adx = calculate_adx(highs.tolist(), lows.tolist(), closes.tolist())

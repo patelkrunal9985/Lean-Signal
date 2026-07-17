@@ -29,7 +29,7 @@ class OrderFlowDeltaStrategy(BaseAdvancedStrategy):
         # ── Primary: IEX Depth of Book as real order flow signal ──
         if ticker:
             try:
-                from kronos.skills.ibkr_data_feed import get_order_book_imbalance
+                from engine.skills.ibkr_data_feed import get_order_book_imbalance
                 ob = get_order_book_imbalance(ticker)
                 if ob and ob.get("pressure", 0) > 0.03:
                     ob_ratio = ob.get("imbalance_ratio", 0)

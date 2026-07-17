@@ -150,7 +150,7 @@ def get_globex_range(ticker: str) -> dict:
     Returns empty dict on disconnect.
     """
     try:
-        from kronos.skills.ibkr_data_feed import fetch_historical_bars
+        from engine.skills.ibkr_data_feed import fetch_historical_bars
         from datetime import datetime as _dt
         bars = fetch_historical_bars(ticker, "1 D", "1 min")
         if not bars or len(bars) < 5:

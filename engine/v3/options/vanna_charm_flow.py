@@ -21,7 +21,7 @@ Time weighting: Charm accelerates as t→0 (≈ 1/√t behavior).  Power hour
 and closing pin windows get the highest multipliers.
 """
 from __future__ import annotations
-from kronos.strategies.v3.base import BaseV3Strategy
+from engine.v3.base import BaseV3Strategy
 from utils.logger import get_logger
 
 logger = get_logger("engine.v3.options.vanna_charm_flow")

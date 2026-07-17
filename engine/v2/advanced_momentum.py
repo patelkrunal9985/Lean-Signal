@@ -1,5 +1,5 @@
 import numpy as np
-from kronos.indicators.advanced_indicators import compute_all_advanced
+from engine.indicators.advanced_indicators import compute_all_advanced
 
 
 class AdvancedMomentumStrategy:

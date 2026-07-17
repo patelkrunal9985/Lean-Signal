@@ -1,5 +1,5 @@
 import numpy as np
-from kronos.strategies.v3.base import BaseV3Strategy
+from engine.v3.base import BaseV3Strategy
 
 
 class PutCallDivergence(BaseV3Strategy):

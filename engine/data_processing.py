@@ -3,13 +3,13 @@ import math
 import statistics
 from typing import Any
 
-from kronos.utils.helpers import (
+from utils.helpers import (
     calculate_rsi, calculate_macd, calculate_bollinger_bands,
     calculate_atr, calculate_sma, calculate_ema,
 )
-from kronos.utils.logger import get_logger
+from utils.logger import get_logger
 
-logger = get_logger("kronos.skills.data_processing")
+logger = get_logger("engine.skills.data_processing")
 
 
 class DataProcessingSkill:

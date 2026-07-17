@@ -13,7 +13,7 @@ The prior week high/low add a second, higher-timeframe magnet — when both
 day and week levels align, the signal is very strong.
 """
 from __future__ import annotations
-from kronos.strategies.v3.base import BaseV3Strategy
+from engine.v3.base import BaseV3Strategy
 from utils.logger import get_logger
 
 logger = get_logger("engine.v3.options.prior_hl_magnetism")

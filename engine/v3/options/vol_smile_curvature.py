@@ -19,7 +19,7 @@ The strategy detects:
   3. Shift: is the entire smile shifting up/down?
 """
 from __future__ import annotations
-from kronos.strategies.v3.base import BaseV3Strategy
+from engine.v3.base import BaseV3Strategy
 from utils.logger import get_logger
 
 logger = get_logger("engine.v3.options.vol_smile_curvature")

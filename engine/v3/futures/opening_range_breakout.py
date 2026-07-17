@@ -1,4 +1,4 @@
-from kronos.strategies.v3.base import BaseV3Strategy
+from engine.v3.base import BaseV3Strategy
 
 
 class OpeningRangeBreakout(BaseV3Strategy):
@@ -52,7 +52,7 @@ class OpeningRangeBreakout(BaseV3Strategy):
         ticker = context.get("ticker", "")
         if ticker:
             try:
-                from kronos.skills.ibkr_data_feed import get_market_depth
+                from engine.skills.ibkr_data_feed import get_market_depth
                 depth = get_market_depth(ticker)
                 if depth and depth.get("bids") and depth.get("asks"):
                     bids = depth["bids"]

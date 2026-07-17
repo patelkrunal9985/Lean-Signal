@@ -1,4 +1,4 @@
-from kronos.strategies.v3.base import BaseV3Strategy
+from engine.v3.base import BaseV3Strategy
 
 
 class IcebergDetection(BaseV3Strategy):
@@ -18,7 +18,7 @@ class IcebergDetection(BaseV3Strategy):
         source = "none"
         if ticker:
             try:
-                from kronos.skills.ibkr_data_feed import get_market_depth
+                from engine.skills.ibkr_data_feed import get_market_depth
                 depth = get_market_depth(ticker)
                 if depth:
                     bids = depth.get("bids", [])
@@ -85,7 +85,7 @@ class IcebergDetection(BaseV3Strategy):
         elif source == "tick_clusters":
             if ticker:
                 try:
-                    from kronos.skills.ibkr_data_feed import get_market_quote
+                    from engine.skills.ibkr_data_feed import get_market_quote
                     quote = get_market_quote(ticker)
                     qp = quote.get("price", 0)
                     if qp > 0 and iceberg_price_level > 0:

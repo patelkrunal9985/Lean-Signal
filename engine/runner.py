@@ -264,6 +264,31 @@ def run_cycle() -> dict:
                 "session_context": session_context,
             }
 
+        # ── Futures cumulative delta from tick engine (real Lee-Ready signed) ──
+        # Primary: tick_engine.get_tick_stats() from live IBKR tape.
+        # Fallback: compute_cumulative_delta from OHLCV proxy.
+        from engine.tick_engine import get_tick_stats
+        from engine.futures_data import compute_cumulative_delta
+        for t, instr in all_tickers:
+            if instr != "future":
+                continue
+            td = ticker_data_map.get(t, {})
+            if not td:
+                continue
+            try:
+                tick_stats = get_tick_stats(t)
+                if tick_stats and tick_stats.get("cumulative_delta", 0) != 0:
+                    td["cumulative_delta"] = tick_stats
+                    td["vpin"] = tick_stats.get("vpin", 0)
+                else:
+                    ohlcv_1m = td.get("ohlcv_1m", td.get("ohlcv", []))
+                    depth = td.get("depth", {})
+                    cd = compute_cumulative_delta(ohlcv_1m, depth)
+                    if cd:
+                        td["cumulative_delta"] = cd
+            except Exception:
+                pass
+
         # ── Options processing (sequential full-chain mode) ──
         # Each underlying gets the full 83-line IBKR budget since only one
         # chain is live at a time.  fetch_live_option_prices cancels all

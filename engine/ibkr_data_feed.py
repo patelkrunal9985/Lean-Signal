@@ -544,6 +544,22 @@ class IBKRStreamer:
                         "timestamp": now.isoformat(),
                         "source": "ibkr",
                     }
+                    # Feed tick to real-time tick engine for Lee-Ready signing
+                    try:
+                        from engine.tick_engine import on_tick as _tick_on_tick
+                        _tick_on_tick(
+                            ticker=key,
+                            sec_type=t.contract.secType,
+                            last_price=float(price),
+                            bid=float(t.bid or 0),
+                            ask=float(t.ask or 0),
+                            volume=int(t.volume or 0),
+                            last_size=int(getattr(t, 'lastSize', 0) or 0),
+                            timestamp=now.timestamp(),
+                        )
+                    except Exception:
+                        pass
+
                     # Futures absolute price floor: protect against option
                     # premiums leaking into _live_prices as first-tick data
                     # (e.g. ES=F at bid=7.6 instead of ~5500).

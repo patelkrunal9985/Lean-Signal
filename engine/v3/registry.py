@@ -43,6 +43,9 @@ def _import_all():
     from engine.v3.futures.time_of_day_momentum import TimeOfDayMomentum
     from engine.v3.futures.gamma_flip import GammaFlip
     from engine.v3.futures.volume_profile_decay import VolumeProfileDecay
+    from engine.v3.futures.cumulative_delta_flow import CumulativeDeltaFlow
+    from engine.v3.futures.vpin import VPINStrategy
+    from engine.v3.futures.momentum_jerk import MomentumJerk
     from engine.v3.options.gamma_exposure import GammaExposure
     from engine.v3.options.put_call_divergence import PutCallDivergence
     from engine.v3.options.iv_skew import IVSkew
@@ -82,6 +85,7 @@ def _import_all():
         OrderBookVelocity(), DeltaDivergence(), OpeningRangeBreakout(), SpreadReversion(),
         SessionRegime(), VWAPAnchored(), IcebergDetection(), TimeOfDayMomentum(),
         GammaFlip(), VolumeProfileDecay(),
+        CumulativeDeltaFlow(), VPINStrategy(), MomentumJerk(),
         GammaExposure(), PutCallDivergence(), IVSkew(), ExpectedVsActual(),
         OIConcentration(), MaxPain(), LargeOptionFlow(), ThetaDecay(), IVRVSpread(),
         DeltaPositioning(), OptionVolumeFlow(), GammaFlipLevels(), SkewTermStructure(),

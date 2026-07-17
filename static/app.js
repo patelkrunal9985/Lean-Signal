@@ -675,7 +675,29 @@ function renderHistory() {
     container.innerHTML = '<div style="padding:16px;color:var(--text-muted);font-size:13px"><em>No cycle history yet</em></div>';
     return;
   }
+
+  // Save which cycles are currently expanded before re-render
+  var expanded = {};
+  container.querySelectorAll('.cycle-body').forEach(function(b) {
+    if (b.style.display !== 'none') {
+      expanded[b.id] = true;
+    }
+  });
+
   container.innerHTML = cycles.map(buildCycleCard).join('');
+
+  // Restore expanded state after re-render
+  Object.keys(expanded).forEach(function(id) {
+    var body = document.getElementById(id);
+    if (body) {
+      body.style.display = 'block';
+      var header = body.previousElementSibling;
+      if (header && header.classList.contains('cycle-header')) {
+        var icon = header.querySelector('.collapse-icon');
+        if (icon) icon.textContent = '▲';
+      }
+    }
+  });
 }
 
 function _onHistoryRowClick(cycleId, ticker, instrType) {

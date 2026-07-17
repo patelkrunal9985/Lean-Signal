@@ -119,7 +119,9 @@ function updateUI() {
     var flipCount = last.flip_count || 0;
     var sigLabel = 'Signals: ' + sigCount;
     if (flipCount > 0) {
-      sigLabel += '  ⚠️ <span class="flip-count">' + flipCount + ' flip' + (flipCount > 1 ? 's' : '') + '</span>';
+      var flips = last.flips || {};
+      var flipNames = Object.keys(flips).join(', ');
+      sigLabel += '  ⚠️ <span class="flip-count" title="' + flipNames + '">' + flipCount + ' flip' + (flipCount > 1 ? 's' : '') + ': ' + flipNames + '</span>';
     }
     document.getElementById('total-signals').innerHTML = sigLabel;
     var elapsed = last.elapsed_seconds || 0;

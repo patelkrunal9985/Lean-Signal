@@ -610,6 +610,30 @@ def run_cycle() -> dict:
             "gate_rejection_breakdown": _summarize_gate_rejections(gate_rejections),
         }
 
+        # ── Compute direction flips vs previous cycle ──
+        # A "flip" is any change in consensus direction (long/short/neutral)
+        # between consecutive cycles for the same ticker.  Flips persist in
+        # cycle_history.json so they're visible in both live and history views.
+        prev_cycle = _cycle_history[0] if _cycle_history else None
+        flips: dict[str, dict] = {}
+        if prev_cycle:
+            prev_map: dict[str, str] = {
+                e["ticker"]: e["direction"]
+                for e in prev_cycle.get("gate_evaluations", [])
+            }
+            for e in gate_evaluations:
+                prev_dir = prev_map.get(e["ticker"])
+                if prev_dir and prev_dir != e["direction"]:
+                    flips[e["ticker"]] = {
+                        "from": prev_dir,
+                        "to": e["direction"],
+                        "instrument_type": e["instrument_type"],
+                        "consensus_confidence": e["consensus_confidence"],
+                        "gate_passed": e["gate_passed"],
+                    }
+        result["flip_count"] = len(flips)
+        result["flips"] = flips
+
         _last_cycle_result = result
         _cycle_history.insert(0, result)
         _save_history()

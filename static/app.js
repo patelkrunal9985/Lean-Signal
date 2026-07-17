@@ -3,6 +3,8 @@ let _currentSubTab = 'stock';
 let _status = {};
 let _autoRunActive = false;
 let _pollTimer = null;
+let _lastFlipCount = 0;
+let _flipNotifiedCycles = {};
 
 function formatBigNum(n) {
   if (!n || n === 0) return '0';
@@ -35,6 +37,12 @@ function toggleCollapse(bodyId, headerEl) {
 }
 
 document.addEventListener('DOMContentLoaded', function() {
+  // Restore saved settings
+  var savedInterval = localStorage.getItem('lean_signals_interval');
+  if (savedInterval) document.getElementById('settings-interval').value = savedInterval;
+  var savedNotify = localStorage.getItem('lean_signals_desktop_notify') === 'true';
+  document.getElementById('settings-desktop-notify').checked = savedNotify;
+
   loadStatus();
   _pollTimer = setInterval(loadStatus, 5000);
 });
@@ -107,7 +115,13 @@ function updateUI() {
   var last = _status.last_cycle;
   if (last) {
     document.getElementById('total-scanned').textContent = 'Scanned: ' + (last.tickers_scanned || 0);
-    document.getElementById('total-signals').textContent = 'Signals: ' + (last.signals_count || 0);
+    var sigCount = last.signals_count || 0;
+    var flipCount = last.flip_count || 0;
+    var sigLabel = 'Signals: ' + sigCount;
+    if (flipCount > 0) {
+      sigLabel += '  ⚠️ <span class="flip-count">' + flipCount + ' flip' + (flipCount > 1 ? 's' : '') + '</span>';
+    }
+    document.getElementById('total-signals').innerHTML = sigLabel;
     var elapsed = last.elapsed_seconds || 0;
     document.getElementById('cycle-elapsed').textContent = 'Last cycle: ' + elapsed.toFixed(1) + 's';
   }
@@ -118,6 +132,9 @@ function updateUI() {
   if (_currentTab === 'history') {
     renderHistory();
   }
+
+  // Desktop notifications for flips
+  _sendFlipNotifications(last);
 }
 
 function renderSignals(cycle) {
@@ -209,6 +226,14 @@ function createSignalCard(signal, cycle) {
         '<span>DTE <strong>' + (miniDash.dte != null ? miniDash.dte : '—') + '</strong></span>' +
       '</div>';
   }
+  // Flip badge
+  var flips = (cycle && cycle.flips) || {};
+  var flipInfo = flips[signal.ticker] || null;
+  var flipRow = '';
+  if (flipInfo) {
+    flipRow = '<div class="row-flip"><span class="flip-badge">↻ FLIP from ' + flipInfo.from.toUpperCase() + '</span></div>';
+  }
+
   card.innerHTML =
     '<div class="row1">' +
       '<div><span class="ticker-name">' + signal.ticker + '</span>' +
@@ -222,6 +247,7 @@ function createSignalCard(signal, cycle) {
       '<span>Regime: <strong>' + signal.regime + '</strong></span>' +
       '<span>Price: <strong>$' + (signal.current_price || 0).toFixed(2) + '</strong></span>' +
     '</div>' +
+    flipRow +
     miniDashHtml +
     levelsHtml;
   card.addEventListener('click', function() { showSignalPopup(signal, cycle); });
@@ -580,6 +606,7 @@ function buildCycleCard(cycle) {
   var rows = cycle.gate_evaluations || [];
   // Filter by active sub-tab
   rows = rows.filter(function(e) { return e.instrument_type === _currentSubTab; });
+  var cycleFlips = cycle.flips || {};
 
   var bodyHtml = '';
   if (rows.length === 0) {
@@ -598,11 +625,18 @@ function buildCycleCard(cycle) {
       var tw = (e.time_window || '').replace(/_/g, ' ');
       var vp = e.vwap_position || '';
 
+      var flipInfo = cycleFlips[e.ticker] || null;
+      var flipBadge = '';
+      if (flipInfo) {
+        flipBadge = '<span class="flip-badge" style="margin-right:4px">↻ ' + flipInfo.from.toUpperCase() + '→' + flipInfo.to.toUpperCase() + '</span>';
+      }
+
       var regimeHtml = regime && regime !== 'unknown' ? '<span class="row-meta">' + regime + '</span>' : '';
       var twHtml = tw && tw !== 'unknown' ? '<span class="row-meta">' + tw + '</span>' : '';
       var vpHtml = vp && vp !== 'unknown' ? '<span class="row-meta">VWAP: ' + vp + '</span>' : '';
 
       return '<div class="' + rowClass + '" onclick="_onHistoryRowClick(\'' + cid + '\',\'' + e.ticker + '\',\'' + e.instrument_type + '\')">' +
+        flipBadge +
         '<span class="direction-badge ' + dirClass + '" style="font-size:11px;padding:2px 8px">' + dirArrow + ' ' + e.direction.toUpperCase() + '</span>' +
         '<span class="ticker-name" style="font-weight:600">' + e.ticker + '</span>' +
         '<span class="instrument-badge" style="font-size:10px">' + e.instrument_type + '</span>' +
@@ -614,10 +648,17 @@ function buildCycleCard(cycle) {
     }).join('');
   }
 
+  // Add flip count to cycle header if flips exist
+  var flipSummary = '';
+  var flipKeys = Object.keys(cycleFlips);
+  if (flipKeys.length > 0) {
+    flipSummary = ' · <span class="flip-count">⚠️ ' + flipKeys.length + ' flip' + (flipKeys.length > 1 ? 's' : '') + '</span>';
+  }
+
   return '<div class="history-cycle">' +
     '<div class="cycle-header" onclick="toggleCollapse(\'' + cid + '-body\', this)">' +
       '<span><span class="collapse-icon">▼</span>Cycle #' + cycle.cycle_id + ' — ' + _fmtDate(cycle.timestamp) + ' ' + _fmtTime(cycle.timestamp) + '</span>' +
-      '<span class="cycle-summary-stats">' + statusBadge + ' ' + elaped + 's · ' + tickerCount + ' tickers · ' + sigCount + ' signals</span>' +
+      '<span class="cycle-summary-stats">' + statusBadge + ' ' + elaped + 's · ' + tickerCount + ' tickers · ' + sigCount + ' signals' + flipSummary + '</span>' +
     '</div>' +
     breakdownHtml +
     '<div id="' + cid + '-body" class="cycle-body" style="display:none">' + bodyHtml + '</div>' +
@@ -731,6 +772,47 @@ function showRejectedPopup(evalEntry, cycle) {
   overlay.style.display = 'flex';
 }
 
+function _sendFlipNotifications(cycle) {
+  if (!cycle || !cycle.flips || cycle.flip_count === 0) return;
+  var notifyEnabled = localStorage.getItem('lean_signals_desktop_notify') === 'true';
+  if (!notifyEnabled) return;
+
+  // Only notify once per cycle
+  if (_flipNotifiedCycles[cycle.cycle_id]) return;
+  _flipNotifiedCycles[cycle.cycle_id] = true;
+
+  if (typeof Notification === 'undefined') return;
+  if (Notification.permission === 'denied') return;
+
+  var flips = cycle.flips || {};
+  var tickerList = Object.keys(flips);
+  if (tickerList.length === 0) return;
+
+  var title = tickerList.length + ' signal flip' + (tickerList.length > 1 ? 's' : '') + ' detected';
+  var body = tickerList.slice(0, 5).map(function(t) {
+    var f = flips[t];
+    return t + ': ' + f.from.toUpperCase() + ' → ' + f.to.toUpperCase();
+  }).join('\n');
+  if (tickerList.length > 5) body += '\n+' + (tickerList.length - 5) + ' more...';
+
+  try {
+    var n = new Notification(title, { body: body, icon: '/static/favicon.ico' });
+    setTimeout(function() { n.close(); }, 8000);
+  } catch(e) {
+    // Silently fail — desktop notification not supported
+  }
+}
+
 function saveSettings() {
-  alert('Settings saved (local). Auto-run will use new interval on next cycle.');
+  var interval = parseInt(document.getElementById('settings-interval').value) || 300;
+  localStorage.setItem('lean_signals_interval', interval);
+
+  var notifyEnabled = document.getElementById('settings-desktop-notify').checked;
+  localStorage.setItem('lean_signals_desktop_notify', notifyEnabled);
+
+  if (notifyEnabled && typeof Notification !== 'undefined' && Notification.permission === 'default') {
+    Notification.requestPermission();
+  }
+
+  alert('Settings saved.');
 }

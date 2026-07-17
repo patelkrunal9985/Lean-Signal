@@ -24,3 +24,6 @@ data/
 # IDE
 .vscode/
 .idea/
+
+server_*.txt
+server_*.log

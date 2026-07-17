@@ -707,3 +707,4 @@ def init():
         logger.info("IBKR streamer started")
     from engine.ibkr_connector import start_monitoring
     start_monitoring(interval=10)
+    start_auto_run()

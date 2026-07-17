@@ -103,11 +103,15 @@
         </div>
       </div>
       <h4>📍 Entry & Exit Levels</h4>
-      <div class="popup-levels">
+      <div id="popup-levels-section" class="popup-levels">
         <div class="popup-level"><label>Entry</label><span id="popup-entry" class="level-entry">--</span></div>
         <div class="popup-level"><label>Stop Loss</label><span id="popup-sl" class="level-sl">--</span></div>
         <div class="popup-level"><label>Take Profit</label><span id="popup-tp" class="level-tp">--</span></div>
         <div class="popup-level"><label>Risk:Reward</label><span id="popup-rr" class="level-rr">--</span></div>
+      </div>
+      <div id="popup-gate-reason" class="popup-levels" style="display:none">
+        <div class="popup-level"><label>Gate Decision</label><span id="popup-gate-decision" class="level-sl" style="color:var(--danger)">REJECTED</span></div>
+        <div class="popup-level"><label>Reason</label><span id="popup-gate-reason-text" class="level-rr"></span></div>
       </div>
       <div id="popup-option-levels" style="display:none">
         <h4>💰 Option Premium Levels</h4>

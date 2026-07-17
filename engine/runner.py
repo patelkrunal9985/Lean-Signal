@@ -22,6 +22,7 @@ _cycle_lock = threading.Lock()
 
 from utils.logger import get_logger
 from utils.time_utils import now_iso, now_ny
+from datetime import datetime, timezone as tz
 from engine.ibkr_connector import is_connected, get_connection_status
 from engine.subscription_manager import (
     set_priority, refresh, reset_non_pinned, get_slot_summary,
@@ -33,7 +34,7 @@ logger = get_logger("engine.runner")
 DATA_DIR = Path(__file__).parent.parent / "data"
 CYCLE_HISTORY_FILE = DATA_DIR / "cycle_history.json"
 
-MAX_HISTORY = 5
+MAX_HISTORY = 200
 
 _cycle_in_progress = False
 _cycle_count = 0
@@ -49,7 +50,7 @@ def _load_history():
     try:
         if CYCLE_HISTORY_FILE.exists():
             with open(CYCLE_HISTORY_FILE) as f:
-                _cycle_history = json.load(f)[:MAX_HISTORY]
+                _cycle_history = json.load(f)
     except Exception:
         _cycle_history = []
 
@@ -58,7 +59,7 @@ def _save_history():
     try:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         with open(CYCLE_HISTORY_FILE, "w") as f:
-            json.dump(_cycle_history[:MAX_HISTORY], f, indent=2, default=str)
+            json.dump(_cycle_history, f, indent=2, default=str)
     except Exception as e:
         logger.warning(f"Failed to save history: {e}")
 
@@ -91,6 +92,18 @@ def _summarize_gate_rejections(rejections: list) -> dict:
         bucket = _GATE_REASON_BUCKET_RE.sub("", reason)
         summary[bucket] = summary.get(bucket, 0) + 1
     return summary
+
+
+def _is_new_trading_day(last_utc_iso: str, now_ny_dt: datetime) -> bool:
+    """True if last stored cycle is from a prior trading day in Eastern time."""
+    try:
+        last_utc = datetime.fromisoformat(last_utc_iso)
+        if last_utc.tzinfo is None:
+            last_utc = last_utc.replace(tzinfo=tz.utc)
+        last_et = last_utc.astimezone(now_ny_dt.tzinfo)
+        return last_et.date() < now_ny_dt.date()
+    except Exception:
+        return False
 
 
 def get_status() -> dict:
@@ -133,10 +146,22 @@ def run_cycle() -> dict:
             }
             _last_cycle_result = result
             _cycle_history.insert(0, result)
-            _cycle_history[:] = _cycle_history[:MAX_HISTORY]
             _save_history()
             logger.warning("Cycle skipped: IBKR not connected")
             return result
+
+        # ── Market-open history reset ──
+        # First cycle after 9:30 AM ET wipes previous day's history.
+        # This keeps all intraday cycles visible while preventing stale
+        # data from carrying across trading days.
+        now_et = now_ny()
+        market_open_minutes = 9 * 60 + 30
+        current_et_minutes = now_et.hour * 60 + now_et.minute
+        if current_et_minutes >= market_open_minutes and _cycle_history:
+            last_ts = _cycle_history[0].get("timestamp", "")
+            if last_ts and _is_new_trading_day(last_ts, now_et):
+                _cycle_history.clear()
+                logger.info("New trading day after market open: cleared previous day's history")
 
         from engine.ibkr_data_feed import (
             fetch_historical_bars, get_live_price, get_market_depth,
@@ -408,7 +433,7 @@ def run_cycle() -> dict:
             )
 
             # ── Capture per-ticker gate decision for /api/run-cycle + cycle_history ──
-            gate_evaluations.append({
+            gate_eval_entry = {
                 "ticker": ticker,
                 "instrument_type": instr_type,
                 "direction": direction,
@@ -418,7 +443,30 @@ def run_cycle() -> dict:
                 "gate_reason": gate_result.get("reason", "unknown"),
                 "time_window": gate_result.get("time_window", "unknown"),
                 "vwap_position": gate_result.get("vwap_position", "unknown"),
-            })
+                "strategy_votes": [
+                    {
+                        "name": s.get("name", s.get("strategy", "?")),
+                        "direction": s.get("direction", "neutral"),
+                        "confidence": round(float(s.get("confidence", 0)), 4),
+                        "source": s.get("source", "?"),
+                    }
+                    for s in all_strategy_votes
+                    if float(s.get("confidence", 0)) > 0
+                ],
+                "consensus_meta": {
+                    "consensus_net_score": consensus_meta.get("net_score", 0),
+                    "consensus_active_votes": consensus_meta.get("active_votes", 0),
+                    "consensus_neutral_votes": consensus_meta.get("neutral_votes", 0),
+                    "consensus_weighted_long": consensus_meta.get("weighted_long", 0),
+                    "consensus_weighted_short": consensus_meta.get("weighted_short", 0),
+                    "consensus_total_weight": consensus_meta.get("total_weight", 0),
+                    "consensus_counter_trend": consensus_meta.get("counter_trend", "no"),
+                    "consensus_regime_boost": consensus_meta.get("regime_boost", 0),
+                    "consensus_tod_window": consensus_meta.get("tod_window", "—"),
+                    "consensus_action": consensus_meta.get("action", "—"),
+                },
+            }
+            gate_evaluations.append(gate_eval_entry)
 
             # ── Entry/Exit levels ──
             levels = {}
@@ -564,7 +612,6 @@ def run_cycle() -> dict:
 
         _last_cycle_result = result
         _cycle_history.insert(0, result)
-        _cycle_history[:] = _cycle_history[:MAX_HISTORY]
         _save_history()
 
         logger.info(
@@ -586,7 +633,6 @@ def run_cycle() -> dict:
         }
         _last_cycle_result = result
         _cycle_history.insert(0, result)
-        _cycle_history[:] = _cycle_history[:MAX_HISTORY]
         _save_history()
         return result
 

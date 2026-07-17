@@ -49,6 +49,7 @@ function switchTab(name) {
   });
   if (name === 'watchlist') loadWatchlist();
   if (name === 'signals' && _status.last_cycle) renderSignals(_status.last_cycle);
+  if (name === 'history') renderHistory();
 }
 
 function switchSubTab(tab, sub) {
@@ -61,6 +62,7 @@ function switchSubTab(tab, sub) {
   container.querySelectorAll('.signals-group').forEach(function(sg) {
     sg.classList.toggle('active', sg.id === 'signals-' + sub);
   });
+  if (tab === 'history') renderHistory();
 }
 
 async function loadStatus() {
@@ -112,6 +114,9 @@ function updateUI() {
 
   if (_currentTab === 'signals' && last && last.status === 'completed') {
     renderSignals(last);
+  }
+  if (_currentTab === 'history') {
+    renderHistory();
   }
 }
 
@@ -233,6 +238,10 @@ function showSignalPopup(signal, cycle) {
   document.getElementById('popup-confidence').textContent = (signal.confidence * 100).toFixed(1) + '%';
   document.getElementById('popup-regime').textContent = signal.regime + ' (' + (signal.regime_confidence * 100).toFixed(0) + '%)';
   document.getElementById('popup-price').textContent = '$' + (signal.current_price || 0).toFixed(2);
+
+  // Restore levels section + hide gate reason
+  document.getElementById('popup-levels-section').style.display = '';
+  document.getElementById('popup-gate-reason').style.display = 'none';
 
   // Entry/Exit levels
   var entryPrice = signal.entry_price || signal.current_price || 0;
@@ -522,6 +531,204 @@ function loadWatchlist() {
     html += '<div class="slot-card"><h3>' + t.charAt(0).toUpperCase() + t.slice(1) + '</h3><div class="used">' + used + '/' + limit + '</div><div class="limit">slots</div></div>';
   });
   slotContainer.innerHTML = html;
+}
+
+function _findSignal(cycle, ticker, instrType) {
+  var groups = cycle.signals || {};
+  var list = groups[instrType] || [];
+  for (var i = 0; i < list.length; i++) {
+    if (list[i].ticker === ticker) return list[i];
+  }
+  return null;
+}
+
+function _fmtTime(ts) {
+  if (!ts) return '--';
+  try {
+    var d = new Date(ts);
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  } catch(e) { return ts; }
+}
+
+function _fmtDate(ts) {
+  if (!ts) return '--';
+  try {
+    var d = new Date(ts);
+    return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  } catch(e) { return ts; }
+}
+
+function _fmtConf(v) {
+  return v ? (v * 100).toFixed(1) + '%' : '0%';
+}
+
+function buildCycleCard(cycle) {
+  var cid = 'cycle-' + cycle.cycle_id;
+  var sigCount = cycle.signals_count || 0;
+  var tickerCount = (cycle.gate_evaluations || []).length;
+  var elaped = (cycle.elapsed_seconds || 0).toFixed(1);
+  var statusBadge = cycle.status === 'completed' ? '✅' : '❌';
+  var breakdown = cycle.gate_rejection_breakdown || {};
+  var breakdownHtml = '';
+  var bkKeys = Object.keys(breakdown);
+  if (bkKeys.length > 0) {
+    breakdownHtml = '<div style="margin-top:4px;font-size:11px;color:var(--text-muted)">⛔ ' +
+      bkKeys.map(function(k) { return '<span class="rejection-chip">' + k + ' (' + breakdown[k] + ')</span>'; }).join(' ') +
+      '</div>';
+  }
+
+  var rows = cycle.gate_evaluations || [];
+  // Filter by active sub-tab
+  rows = rows.filter(function(e) { return e.instrument_type === _currentSubTab; });
+
+  var bodyHtml = '';
+  if (rows.length === 0) {
+    bodyHtml = '<div style="padding:16px;color:var(--text-muted);font-size:12px">No ' + _currentSubTab + ' evaluations in this cycle</div>';
+  } else {
+    bodyHtml = rows.map(function(e) {
+      var dirClass = e.direction === 'long' ? 'long' : e.direction === 'short' ? 'short' : 'neutral';
+      var dirArrow = e.direction === 'long' ? '▲' : e.direction === 'short' ? '▼' : '–';
+      var passed = e.gate_passed;
+      var gateLabel = passed ? 'PASSED' : 'REJECTED';
+      var gateClass = passed ? 'gate-badge passed' : 'gate-badge rejected';
+      var rowClass = passed ? 'ticker-row passed' : e.direction === 'neutral' ? 'ticker-row neutral' : 'ticker-row rejected';
+      var conf = e.consensus_confidence || 0;
+      var reason = e.gate_reason || '';
+      var regime = e.regime || '';
+      var tw = (e.time_window || '').replace(/_/g, ' ');
+      var vp = e.vwap_position || '';
+
+      var regimeHtml = regime && regime !== 'unknown' ? '<span class="row-meta">' + regime + '</span>' : '';
+      var twHtml = tw && tw !== 'unknown' ? '<span class="row-meta">' + tw + '</span>' : '';
+      var vpHtml = vp && vp !== 'unknown' ? '<span class="row-meta">VWAP: ' + vp + '</span>' : '';
+
+      return '<div class="' + rowClass + '" onclick="_onHistoryRowClick(\'' + cid + '\',\'' + e.ticker + '\',\'' + e.instrument_type + '\')">' +
+        '<span class="direction-badge ' + dirClass + '" style="font-size:11px;padding:2px 8px">' + dirArrow + ' ' + e.direction.toUpperCase() + '</span>' +
+        '<span class="ticker-name" style="font-weight:600">' + e.ticker + '</span>' +
+        '<span class="instrument-badge" style="font-size:10px">' + e.instrument_type + '</span>' +
+        '<span style="font-size:12px;color:var(--text-secondary)">' + _fmtConf(conf) + '</span>' +
+        '<span class="' + gateClass + '">' + gateLabel + '</span>' +
+        (passed ? '' : '<span class="gate-reason" title="' + reason + '">' + reason.replace(/_/g, ' ') + '</span>') +
+        regimeHtml + twHtml + vpHtml +
+        '</div>';
+    }).join('');
+  }
+
+  return '<div class="history-cycle">' +
+    '<div class="cycle-header" onclick="toggleCollapse(\'' + cid + '-body\', this)">' +
+      '<span><span class="collapse-icon">▼</span>Cycle #' + cycle.cycle_id + ' — ' + _fmtDate(cycle.timestamp) + ' ' + _fmtTime(cycle.timestamp) + '</span>' +
+      '<span class="cycle-summary-stats">' + statusBadge + ' ' + elaped + 's · ' + tickerCount + ' tickers · ' + sigCount + ' signals</span>' +
+    '</div>' +
+    breakdownHtml +
+    '<div id="' + cid + '-body" class="cycle-body" style="display:none">' + bodyHtml + '</div>' +
+    '</div>';
+}
+
+function renderHistory() {
+  var container = document.getElementById('history-list');
+  if (!container) return;
+  var cycles = _status.history || [];
+  if (cycles.length === 0) {
+    container.innerHTML = '<div style="padding:16px;color:var(--text-muted);font-size:13px"><em>No cycle history yet</em></div>';
+    return;
+  }
+  container.innerHTML = cycles.map(buildCycleCard).join('');
+}
+
+function _onHistoryRowClick(cycleId, ticker, instrType) {
+  var cycles = _status.history || [];
+  var cycle = null;
+  for (var i = 0; i < cycles.length; i++) {
+    if ('cycle-' + cycles[i].cycle_id === cycleId) { cycle = cycles[i]; break; }
+  }
+  if (!cycle) return;
+
+  var evalRows = cycle.gate_evaluations || [];
+  var evalEntry = null;
+  for (var j = 0; j < evalRows.length; j++) {
+    if (evalRows[j].ticker === ticker && evalRows[j].instrument_type === instrType) {
+      evalEntry = evalRows[j];
+      break;
+    }
+  }
+  if (!evalEntry) return;
+
+  if (evalEntry.gate_passed) {
+    var signal = _findSignal(cycle, ticker, instrType);
+    if (signal) {
+      showSignalPopup(signal, cycle);
+    } else {
+      // Fallback: show evaluation popup with signal-like structure
+      showRejectedPopup(evalEntry, cycle);
+    }
+  } else {
+    showRejectedPopup(evalEntry, cycle);
+  }
+}
+
+function showRejectedPopup(evalEntry, cycle) {
+  var overlay = document.getElementById('signal-popup-overlay');
+  var dirClass = evalEntry.direction === 'long' ? 'long' : evalEntry.direction === 'short' ? 'short' : 'neutral';
+  document.getElementById('popup-title').textContent = evalEntry.ticker + ' — Gate Rejected';
+  document.getElementById('popup-direction').textContent = evalEntry.direction.toUpperCase();
+  document.getElementById('popup-direction').className = 'direction-badge ' + dirClass;
+  document.getElementById('popup-confidence').textContent = _fmtConf(evalEntry.consensus_confidence);
+  document.getElementById('popup-regime').textContent = evalEntry.regime ? evalEntry.regime + ' regime' : '--';
+  document.getElementById('popup-price').textContent = '--';
+
+  // Hide optional sections not relevant for rejected
+  document.getElementById('popup-levels-section').style.display = 'none';
+  document.getElementById('popup-option-levels').style.display = 'none';
+  document.getElementById('popup-strike-recommendation').style.display = 'none';
+  document.getElementById('popup-position-sizing').style.display = 'none';
+  document.getElementById('popup-market-dashboard').style.display = 'none';
+  document.getElementById('popup-consensus-meta').style.display = 'none';
+
+  // Show gate reason section
+  var gateSection = document.getElementById('popup-gate-reason');
+  gateSection.style.display = 'flex';
+  var gateReason = (evalEntry.gate_reason || 'unknown').replace(/_/g, ' ');
+  document.getElementById('popup-gate-decision').textContent = 'REJECTED';
+  document.getElementById('popup-gate-reason-text').textContent = gateReason;
+
+  // Session meta
+  var metaSection = document.getElementById('popup-session-meta');
+  var tw = (evalEntry.time_window || '').replace(/_/g, ' ');
+  var vp = evalEntry.vwap_position || '';
+  if (tw || vp) {
+    metaSection.style.display = 'flex';
+    document.getElementById('popup-time-window').textContent = tw || '--';
+    document.getElementById('popup-vwap-pos').textContent = vp || '--';
+  } else {
+    metaSection.style.display = 'none';
+  }
+
+  // Strategy votes
+  var votes = evalEntry.strategy_votes || [];
+  var stratContainer = document.getElementById('popup-strategies');
+  if (votes.length === 0) {
+    stratContainer.innerHTML = '<div style="color:var(--text-muted);font-size:12px">No strategy votes recorded</div>';
+  } else {
+    votes.sort(function(a, b) { return b.confidence - a.confidence; });
+    stratContainer.innerHTML = '';
+    votes.forEach(function(s) {
+      var item = document.createElement('div');
+      item.className = 'strategy-item';
+      var sDirClass = s.direction === 'long' ? 'long' : s.direction === 'short' ? 'short' : 'neutral';
+      item.innerHTML =
+        '<div><span class="strat-name">' + s.name + '</span><span class="strat-source">' + (s.source || '') + '</span></div>' +
+        '<div class="strat-dir-conf">' +
+          '<span class="direction-badge ' + sDirClass + '" style="font-size:10px">' + s.direction.toUpperCase() + '</span>' +
+          '<span style="font-weight:600">' + _fmtConf(s.confidence) + '</span>' +
+        '</div>';
+      stratContainer.appendChild(item);
+    });
+  }
+
+  // News section — show rejection note
+  document.getElementById('popup-news').innerHTML = '<div style="color:var(--text-muted);font-size:12px">No signal generated (gate rejected)</div>';
+
+  overlay.style.display = 'flex';
 }
 
 function saveSettings() {

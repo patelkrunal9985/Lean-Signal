@@ -1,4 +1,4 @@
-from engine.v3.base import BaseV3Strategy
+from engine.v3.base import BaseV3Strategy, STRATEGY_FAMILIES
 from utils.logger import get_logger
 
 logger = get_logger("engine.v3.registry")
@@ -7,6 +7,86 @@ _INSTRUMENT_STRATEGIES = {
     "stock": [],
     "future": [],
     "option": [],
+}
+
+# Every V3 strategy mapped to its information family.
+# Families represent independent data axes for confluence diversity checking.
+STRATEGY_FAMILY_MAP: dict[str, str] = {
+    # ── Stock strategies ──
+    "premarket_gapper": "flow",
+    "sector_rotation": "macro",
+    "short_squeeze": "volatility",
+    "insider_flow": "macro",
+    "earnings_momentum": "macro",
+    "dark_pool_proxy": "flow",
+    "pairs_trading": "technical",
+    # ── Futures strategies ──
+    "order_imbalance": "flow",
+    "cot_sentiment": "macro",
+    "carry_yield": "macro",
+    "calendar_spread": "macro",
+    "vix_term_structure": "volatility",
+    "momentum_cross": "technical",
+    "volume_spike": "volume",
+    "mean_reversion": "technical",
+    "vwap_reversion": "technical",
+    "high_low_breakout": "technical",
+    "order_flow_burst": "flow",
+    "delta_absorption": "flow",
+    "profile_poison": "volume",
+    "session_continuation": "technical",
+    "gamma_pin": "options_micro",
+    "order_book_velocity": "flow",
+    "delta_divergence": "flow",
+    "opening_range_breakout": "technical",
+    "spread_reversion": "technical",
+    "session_regime": "mtf",
+    "vwap_anchored": "technical",
+    "iceberg_detection": "flow",
+    "time_of_day_momentum": "mtf",
+    "gamma_flip": "options_micro",
+    "volume_profile_decay": "volume",
+    "cumulative_delta_flow": "flow",
+    "vpin": "volume",
+    "momentum_jerk": "technical",
+    "mtf_core": "mtf",
+    "fvg_liquidity_sweep": "flow",
+    "order_flow_exhaustion": "flow",
+    # ── Options strategies ──
+    "gamma_exposure": "options_micro",
+    "put_call_divergence": "options_macro",
+    "iv_skew": "options_micro",
+    "expected_vs_actual": "options_macro",
+    "oi_concentration": "options_macro",
+    "max_pain": "options_micro",
+    "large_option_flow": "options_macro",
+    "theta_decay": "options_micro",
+    "iv_rv_spread": "volatility",
+    "delta_positioning": "options_micro",
+    "option_volume_flow": "options_macro",
+    "gamma_flip_levels": "options_micro",
+    "skew_term_structure": "options_micro",
+    "earnings_vol_arbitrage": "volatility",
+    "zero_dte_gamma": "options_micro",
+    "opening_drive": "options_macro",
+    "delta_hedging_imbalance": "options_micro",
+    "vwap_option_flow": "options_macro",
+    "call_put_wall_breakout": "options_micro",
+    "unusual_whale_flow": "options_macro",
+    "gamma_flip_acceleration": "options_micro",
+    "strike_volume_surge": "options_macro",
+    "sector_etf_option_rotation": "options_macro",
+    "vix_spx_convexity": "volatility",
+    "vanna_charm_flow": "options_micro",
+    "prior_hl_magnetism": "options_macro",
+    "oi_change_rate": "options_macro",
+    "vol_smile_curvature": "options_micro",
+    "delta_gamma_imbalance": "options_micro",
+    "breadth_confirmation": "macro",
+    "iv_rank_percentile": "volatility",
+    "credit_spread_detector": "options_micro",
+    "iron_condor_detector": "options_micro",
+    "expiry_day_gamma": "options_micro",
 }
 
 
@@ -46,6 +126,9 @@ def _import_all():
     from engine.v3.futures.cumulative_delta_flow import CumulativeDeltaFlow
     from engine.v3.futures.vpin import VPINStrategy
     from engine.v3.futures.momentum_jerk import MomentumJerk
+    from engine.v3.futures.mtf_core import MTFCore
+    from engine.v3.futures.fvg_liquidity_sweep import FVGLiquiditySweep
+    from engine.v3.futures.order_flow_exhaustion import OrderFlowExhaustion
     from engine.v3.options.gamma_exposure import GammaExposure
     from engine.v3.options.put_call_divergence import PutCallDivergence
     from engine.v3.options.iv_skew import IVSkew
@@ -76,6 +159,10 @@ def _import_all():
     from engine.v3.options.vol_smile_curvature import VolSmileCurvature
     from engine.v3.options.delta_gamma_imbalance import DeltaGammaImbalance
     from engine.v3.options.breadth_confirmation import BreadthConfirmation
+    from engine.v3.options.iv_rank_percentile import IVRankPercentile
+    from engine.v3.options.credit_spread_detector import CreditSpreadDetector
+    from engine.v3.options.iron_condor_detector import IronCondorDetector
+    from engine.v3.options.expiry_day_gamma import ExpiryDayGamma
     all_strategies = [
         PremarketGapper(), SectorRotation(), ShortSqueeze(), InsiderFlow(),
         EarningsMomentum(), DarkPoolProxy(), PairsTrading(), OrderImbalance(), COTSentiment(),
@@ -86,6 +173,7 @@ def _import_all():
         SessionRegime(), VWAPAnchored(), IcebergDetection(), TimeOfDayMomentum(),
         GammaFlip(), VolumeProfileDecay(),
         CumulativeDeltaFlow(), VPINStrategy(), MomentumJerk(),
+        MTFCore(), FVGLiquiditySweep(), OrderFlowExhaustion(),
         GammaExposure(), PutCallDivergence(), IVSkew(), ExpectedVsActual(),
         OIConcentration(), MaxPain(), LargeOptionFlow(), ThetaDecay(), IVRVSpread(),
         DeltaPositioning(), OptionVolumeFlow(), GammaFlipLevels(), SkewTermStructure(),
@@ -94,8 +182,10 @@ def _import_all():
         StrikeVolumeSurge(), SectorETFOptionRotation(), VIXSPXConvexityArbitrage(),
         VannaCharmFlow(), PriorHLMagnetism(), OIChangeRate(),
         VolSmileCurvature(), DeltaGammaImbalance(), BreadthConfirmation(),
+        IVRankPercentile(), CreditSpreadDetector(), IronCondorDetector(), ExpiryDayGamma(),
     ]
     for s in all_strategies:
+        s.family = STRATEGY_FAMILY_MAP.get(s.name, "technical")
         for instr in s.applies_to:
             if instr in _INSTRUMENT_STRATEGIES:
                 _INSTRUMENT_STRATEGIES[instr].append(s)

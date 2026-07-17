@@ -141,6 +141,109 @@ INSTR_TYPE_V3_MULTIPLIER: dict[str, float] = {
     "option": 1.0,
 }
 
+# ── Conviction Tiers ──
+# Each tier has minimum requirements. A signal must meet ALL criteria
+# for its tier to be classified at that level.
+CONVICTION_TIERS = {
+    "bronze": {
+        "min_confidence": 0.20,
+        "min_strategies": 1,
+        "min_families": 1,
+    },
+    "silver": {
+        "min_confidence": 0.40,
+        "min_strategies": 2,
+        "min_families": 2,
+        "regime_required": False,
+    },
+    "gold": {
+        "min_confidence": 0.55,
+        "min_strategies": 3,
+        "min_families": 3,
+        "regime_required": True,
+        "counter_trend_blocked": True,
+    },
+    "platinum": {
+        "min_confidence": 0.70,
+        "min_strategies": 5,
+        "min_families": 4,
+        "regime_required": True,
+        "counter_trend_blocked": True,
+        "mtf_required": True,
+        "description": "95% target: 5+ strategies from 4+ families, regime aligned, MTF confirmed",
+    },
+}
+
+# Family diversity bonus: how much extra confidence for wide agreement.
+FAMILY_DIVERSITY_BONUS = {
+    1: 1.0,
+    2: 1.10,
+    3: 1.20,
+    4: 1.30,
+    5: 1.40,
+}
+# Maximum per-family contribution to prevent one family from dominating.
+MAX_FAMILY_WEIGHT_SHARE = 0.40
+
+
+def _get_family(strategy_name: str) -> str:
+    from engine.v3.registry import STRATEGY_FAMILY_MAP
+    return STRATEGY_FAMILY_MAP.get(strategy_name, "technical")
+
+
+def _compute_family_diversity(votes: list[dict]) -> dict:
+    families = {}
+    for v in votes:
+        fam = v.get("family", _get_family(v.get("name", v.get("strategy", ""))))
+        families.setdefault(fam, 0)
+        families[fam] += v.get("confidence", 0) * v.get("weight", 0.5)
+    total = sum(families.values()) or 1
+    shares = {f: s / total for f, s in families.items()}
+    # Dominant family share — if >40%, penalize
+    dominant = max(shares.values()) if shares else 0
+    diversity_penalty = 1.0
+    if dominant > MAX_FAMILY_WEIGHT_SHARE:
+        diversity_penalty = MAX_FAMILY_WEIGHT_SHARE / dominant
+    return {
+        "families": families,
+        "family_count": len(families),
+        "dominant_share": round(dominant, 4),
+        "diversity_penalty": round(diversity_penalty, 4),
+    }
+
+
+def _classify_conviction_tier(
+    direction: str,
+    confidence: float,
+    active_votes: int,
+    family_count: int,
+    regime: str,
+    trend_dir: str | None,
+    mtf_direction: str | None,
+) -> dict:
+    is_counter = trend_dir is not None and direction not in ("neutral", trend_dir)
+    families_ok = family_count
+    votes_ok = active_votes
+    conf_ok = confidence
+
+    # Test tiers from highest to lowest
+    for tier_name in ("platinum", "gold", "silver", "bronze"):
+        tier = CONVICTION_TIERS[tier_name]
+        if conf_ok < tier["min_confidence"]:
+            continue
+        if votes_ok < tier["min_strategies"]:
+            continue
+        if families_ok < tier["min_families"]:
+            continue
+        if tier.get("regime_required") and regime == "ranging" and direction == "neutral":
+            continue
+        if tier.get("counter_trend_blocked") and is_counter:
+            continue
+        if tier.get("mtf_required") and mtf_direction != direction:
+            continue
+        return {"tier": tier_name, "met_all": True}
+    return {"tier": "bronze", "met_all": True}
+
 
 def _get_taxonomy(strategy_name: str) -> str:
     return STRATEGY_TAXONOMY.get(strategy_name, "reversion")
@@ -197,12 +300,14 @@ def compute_consensus(
             meta["consensus_regime_quality"] = round(regime_quality, 4)
     meta["consensus_regime"] = regime
 
+    # ── Collect all votes with family info ──
+    all_votes = []
+
     weighted_long = 0.0
     weighted_short = 0.0
     total_weight = 0.0
     active_votes = 0
 
-    # ── Count all votes (including neutral) for participation denominator ──
     total_votes = len(v2_results) + len(v3_results)
     neutral_count = 0
 
@@ -215,10 +320,10 @@ def compute_consensus(
             continue
         sname = r.get("strategy", r.get("name", "unknown"))
         taxo = _get_taxonomy(sname)
+        fam = _get_family(sname)
         w = regime_weights.get(taxo, 0.5)
         if instr_type == "future":
             w *= 0.5
-        # ── Apply time-of-day multiplier ──
         tod_mult = get_strategy_time_weight(sname)
         tod_weights[sname] = tod_mult
         w *= tod_mult
@@ -228,6 +333,10 @@ def compute_consensus(
         weighted_short += confidence * w if direction == "short" else 0
         total_weight += w
         active_votes += 1
+        all_votes.append({
+            "name": sname, "direction": direction, "confidence": confidence,
+            "weight": w, "family": fam, "type": "V2",
+        })
 
     # ── V3 votes (with per-instrument-type multiplier) ──
     v3_mult = INSTR_TYPE_V3_MULTIPLIER.get(instr_type, 1.0)
@@ -237,8 +346,10 @@ def compute_consensus(
         if confidence <= 0 or direction == "neutral":
             neutral_count += 1
             continue
-        sname = r.get("strategy", r.get("name", "unknown")); taxo = _get_taxonomy(sname); w = regime_weights.get(taxo, 0.5) * v3_mult
-        # ── Apply time-of-day multiplier ──
+        sname = r.get("strategy", r.get("name", "unknown"))
+        taxo = _get_taxonomy(sname)
+        fam = _get_family(sname)
+        w = regime_weights.get(taxo, 0.5) * v3_mult
         tod_mult = get_strategy_time_weight(sname)
         tod_weights[sname] = tod_mult
         w *= tod_mult
@@ -248,47 +359,40 @@ def compute_consensus(
         weighted_short += confidence * w if direction == "short" else 0
         total_weight += w
         active_votes += 1
+        all_votes.append({
+            "name": sname, "direction": direction, "confidence": confidence,
+            "weight": w, "family": fam, "type": "V3",
+        })
+
+    # ── Family diversity computation ──
+    fam_div = _compute_family_diversity(all_votes)
+    meta["consensus_families"] = fam_div["families"]
+    meta["consensus_family_count"] = fam_div["family_count"]
+    meta["consensus_dominant_share"] = fam_div["dominant_share"]
+    meta["consensus_diversity_penalty"] = fam_div["diversity_penalty"]
+
+    # Apply diversity penalty/bonus to total_weight
+    total_weight *= fam_div["diversity_penalty"]
+    meta["consensus_total_weight"] = round(total_weight, 4)
 
     meta["consensus_active_votes"] = active_votes
     meta["consensus_neutral_votes"] = neutral_count
     meta["consensus_weighted_long"] = round(weighted_long, 4)
     meta["consensus_weighted_short"] = round(weighted_short, 4)
-    meta["consensus_total_weight"] = round(total_weight, 4)
     meta["consensus_tod_window"] = _get_tod_window_name()
     meta["consensus_tod_weights"] = {k: round(v, 2) for k, v in tod_weights.items() if v != 1.0}
 
-    # Per-strategy vote breakdown for UI detail panel (Fix 4)
+    # ── Per-strategy vote breakdown for UI detail panel ──
     meta["consensus_votes"] = []
-    for r in v2_results:
-        d = r.get("direction", "neutral")
-        c = r.get("confidence", 0)
-        if c > 0 and d not in ("neutral",):
-            taxo = _get_taxonomy(r.get("strategy", r.get("name", "unknown")))
-            w = regime_weights.get(taxo, 0.5)
-            if trend_dir is not None and d != trend_dir:
-                w *= COUNTER_TREND_PENALTY
-            meta["consensus_votes"].append({
-                "name": r.get("strategy", r.get("name", "?")),
-                "type": "V2", "direction": d, "confidence": round(c, 4),
-                "weight": round(w, 4), "contribution": round(c * w, 4),
-            })
-    for r in v3_results:
-        d = r.get("direction", "neutral")
-        c = r.get("confidence", 0)
-        if c > 0 and d not in ("neutral",):
-            sname = r.get("strategy", r.get("name", "unknown")); taxo = _get_taxonomy(sname); w = regime_weights.get(taxo, 0.5) * v3_mult
-            if trend_dir is not None and d != trend_dir:
-                w *= COUNTER_TREND_PENALTY
-            meta["consensus_votes"].append({
-                "name": r.get("name", r.get("strategy", "?")),
-                "type": "V3", "direction": d, "confidence": round(c, 4),
-                "weight": round(w, 4), "contribution": round(c * w, 4),
-            })
+    for v in all_votes:
+        meta["consensus_votes"].append({
+            "name": v["name"], "type": v["type"], "direction": v["direction"],
+            "confidence": round(v["confidence"], 4), "weight": round(v["weight"], 4),
+            "contribution": round(v["confidence"] * v["weight"], 4), "family": v["family"],
+        })
     meta["consensus_votes"].sort(key=lambda x: -x["contribution"])
 
     # ── Net score: -1 (strong short) to +1 (strong long) ──
-    # Include neutral votes in denominator: they dampen conviction.
-    # A signal with 1 long and 14 neutrals should score lower than 1 long alone.
     participation = max(total_weight, MIN_PARTICIPATION_WEIGHT)
     if neutral_count > 0:
         participation = max(participation, neutral_count * 0.25)
@@ -298,7 +402,6 @@ def compute_consensus(
     meta["consensus_net_score"] = round(net, 4)
 
     # ── Determine direction with adaptive threshold ──
-    # Options use stricter threshold (0.40) — 0DTE gamma demands strong confluence
     threshold = CONSENSUS_THRESHOLD_OPTION if instr_type == "option" else CONSENSUS_THRESHOLD
     if trend_dir is not None:
         inferred = "long" if net > 0 else "short"
@@ -312,13 +415,33 @@ def compute_consensus(
     else:
         direction = "neutral"
 
-    # ── Determine confidence ──
+    # ── MTF alignment check ──
+    mtf_direction = None
+    for r in v3_results:
+        if r.get("strategy") == "mtf_core" and r.get("direction") != "neutral":
+            mtf_direction = r["direction"]
+            break
+    meta["consensus_mtf_direction"] = mtf_direction
+
+    # ── Determine base confidence ──
     if direction == "neutral":
-        confidence = 0.0
+        base_confidence = 0.0
     else:
-        confidence = min(abs(net) * 1.2, 0.95)
+        base_confidence = min(abs(net) * 1.2, 0.95)
         if trend_dir is not None and direction != trend_dir:
-            confidence = max(confidence, 0.75)
+            base_confidence = max(base_confidence, 0.75)
+
+    # ── Conviction tier classification ──
+    tier_info = _classify_conviction_tier(
+        direction, base_confidence, active_votes, fam_div["family_count"],
+        regime, trend_dir, mtf_direction,
+    )
+    meta["consensus_conviction_tier"] = tier_info["tier"]
+    meta["consensus_tier_met"] = tier_info["met_all"]
+
+    # ── Apply family diversity bonus to confidence ──
+    family_bonus = FAMILY_DIVERSITY_BONUS.get(fam_div["family_count"], 1.0)
+    confidence = min(base_confidence * family_bonus, 0.95)
 
     meta["consensus_direction"] = direction
     meta["consensus_action"] = _decide_consensus_action(
@@ -328,11 +451,8 @@ def compute_consensus(
     meta["consensus_counter_trend"] = (
         "yes" if (trend_dir is not None and direction not in ("neutral", trend_dir)) else "no"
     )
-    # Regime boost: how much the regime amplified the consensus (Fix 5)
-    if direction != "neutral" and trend_dir is not None and direction == trend_dir:
-        meta["consensus_regime_boost"] = round(0.15, 4)
-    else:
-        meta["consensus_regime_boost"] = 0.0
+    meta["consensus_regime_boost"] = 0.15 if (direction != "neutral" and trend_dir is not None and direction == trend_dir) else 0.0
+    meta["consensus_family_bonus"] = round(family_bonus, 4)
     meta["consensus_reasons"] = _build_reasons(
         direction, net, regime, active_votes, total_weight, threshold,
         weighted_long=weighted_long, weighted_short=weighted_short,

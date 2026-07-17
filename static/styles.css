@@ -243,6 +243,9 @@ main {
   max-height: 85vh;
   overflow-y: auto;
 }
+.popup-validate {
+  max-width: 860px;
+}
 .popup-header {
   display: flex;
   align-items: center;

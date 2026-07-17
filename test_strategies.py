@@ -179,7 +179,7 @@ mock_stock_ctx = dict(mock_context, ticker='SPY', instrument_type='stock', under
 mock_option_ctx = dict(mock_context, ticker='SPY_OPT', instrument_type='option', underlying='SPY',
                        dte=0, expiry='2026-07-17')
 
-results = {'passed': 0, 'failed': 0, 'skipped': 0, 'errors': []}
+results = {'passed': 0, 'failed': 0, 'skipped': 0, 'errors': [], 'details': []}
 
 # -- 2. Test V3 strategies --
 print('\n--- V3 STRATEGIES ---')
@@ -199,12 +199,21 @@ for instr_type, ctx in [('stock', mock_stock_ctx), ('future', mock_context), ('o
             assert isinstance(result['confidence'], (int, float)), f"bad confidence type: {type(result['confidence'])}"
             assert 0 <= result['confidence'] <= 1, f"confidence out of range: {result['confidence']}"
             results['passed'] += 1
+            results['details'].append({
+                'name': s.name, 'type': instr_type, 'direction': result['direction'],
+                'confidence': round(float(result['confidence']), 4), 'passed': True, 'error': '',
+            })
             if results['passed'] <= 5 or results['passed'] % 15 == 0:
                 print(f'   [OK] {s.name:35s} {result["direction"]:7s} {result["confidence"]:.3f}')
         except Exception as e:
             results['failed'] += 1
             tb = traceback.format_exc()
-            results['errors'].append({'strategy': s.name, 'type': instr_type, 'error': str(e)[:200], 'traceback': tb})
+            err_msg = str(e)[:200]
+            results['errors'].append({'strategy': s.name, 'type': instr_type, 'error': err_msg, 'traceback': tb})
+            results['details'].append({
+                'name': s.name, 'type': instr_type, 'direction': 'neutral',
+                'confidence': 0.0, 'passed': False, 'error': err_msg,
+            })
             print(f' [FAIL] {s.name:35s} FAILED: {str(e)[:80]}')
 
 # -- 3. Test V2 strategies --
@@ -220,10 +229,18 @@ for ctx in [mock_stock_ctx, mock_context]:
             assert 'direction' in r
             assert 'confidence' in r
         results['passed'] += 1
+        results['details'].append({
+            'name': f'V2Registry({typ})', 'type': typ, 'direction': 'neutral',
+            'confidence': 0.0, 'passed': True, 'error': '',
+        })
         print(f'   [OK] V2Registry({typ}) returned {len(v2_results)} results')
     except Exception as e:
         results['failed'] += 1
         results['errors'].append({'strategy': f'V2Registry({typ})', 'type': typ, 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+        results['details'].append({
+            'name': f'V2Registry({typ})', 'type': typ, 'direction': 'neutral',
+            'confidence': 0.0, 'passed': False, 'error': str(e)[:200],
+        })
         print(f' [FAIL] V2Registry({typ}) FAILED: {str(e)[:80]}')
 
 # -- 4. Test Consensus Coordinator --
@@ -246,10 +263,18 @@ try:
     assert isinstance(conf, (int, float))
     assert isinstance(meta, dict)
     results['passed'] += 1
+    results['details'].append({
+        'name': 'ConsensusCoordinator', 'type': 'future', 'direction': direction,
+        'confidence': round(float(conf), 4), 'passed': True, 'error': '',
+    })
     print(f'   [OK] Consensus: {direction} @ {conf:.3f}  (votes={len(sample_votes)}, net={meta.get("net_score","?")})')
 except Exception as e:
     results['failed'] += 1
     results['errors'].append({'strategy': 'compute_consensus', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    results['details'].append({
+        'name': 'ConsensusCoordinator', 'type': 'future', 'direction': 'neutral',
+        'confidence': 0.0, 'passed': False, 'error': str(e)[:200],
+    })
     print(f' [FAIL] Consensus FAILED: {str(e)[:80]}')
 
 # -- 5. Test Signal Quality Gate --
@@ -262,10 +287,18 @@ try:
                         consensus_meta=meta)
     assert isinstance(gr, dict) and 'passed' in gr and 'reason' in gr
     results['passed'] += 1
+    results['details'].append({
+        'name': 'SignalQualityGate', 'type': 'future', 'direction': 'neutral',
+        'confidence': 0.0, 'passed': True, 'error': '',
+    })
     print(f'   [OK] Gate: passed={gr["passed"]} reason={gr.get("reason","?")}')
 except Exception as e:
     results['failed'] += 1
     results['errors'].append({'strategy': 'SignalQualityGate.evaluate', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    results['details'].append({
+        'name': 'SignalQualityGate', 'type': 'future', 'direction': 'neutral',
+        'confidence': 0.0, 'passed': False, 'error': str(e)[:200],
+    })
     print(f' [FAIL] Gate FAILED: {str(e)[:80]}')
 
 # -- 6. Test Tick Engine --
@@ -284,10 +317,18 @@ try:
     stats = get_tick_stats('ES=F')
     assert isinstance(stats, dict) and 'cumulative_delta' in stats and 'vpin' in stats
     results['passed'] += 1
+    results['details'].append({
+        'name': 'TickEngine', 'type': 'future', 'direction': 'neutral',
+        'confidence': 0.0, 'passed': True, 'error': '',
+    })
     print(f'   [OK] TickEngine: delta={stats["cumulative_delta"]} buy={stats["total_buy_vol"]} sell={stats["total_sell_vol"]} vpin={stats["vpin"]:.3f}')
 except Exception as e:
     results['failed'] += 1
     results['errors'].append({'strategy': 'TickEngine', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    results['details'].append({
+        'name': 'TickEngine', 'type': 'future', 'direction': 'neutral',
+        'confidence': 0.0, 'passed': False, 'error': str(e)[:200],
+    })
     print(f' [FAIL] TickEngine FAILED: {str(e)[:80]}')
 
 # -- 7. Test Entry/Exit Levels --
@@ -299,10 +340,18 @@ for instr in ['stock', 'future', 'option']:
         levels = compute_entry_exit_levels(ctx['ticker'], ctx, 'long', 0.6, instr)
         assert isinstance(levels, dict)
         results['passed'] += 1
+        results['details'].append({
+            'name': f'EntryExit({instr})', 'type': instr, 'direction': 'long',
+            'confidence': 0.6, 'passed': True, 'error': '',
+        })
         print(f'   [OK] EntryExit({instr}): entry={levels.get("entry_price","?")} sl={levels.get("stop_loss","?")} tp={levels.get("take_profit","?")}')
     except Exception as e:
         results['failed'] += 1
         results['errors'].append({'strategy': f'EntryExit({instr})', 'type': instr, 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+        results['details'].append({
+            'name': f'EntryExit({instr})', 'type': instr, 'direction': 'neutral',
+            'confidence': 0.0, 'passed': False, 'error': str(e)[:200],
+        })
         print(f' [FAIL] EntryExit({instr}) FAILED: {str(e)[:80]}')
 
 # -- 8. Test Market Breadth --
@@ -314,11 +363,19 @@ try:
     breadth = compute_market_breadth(tdm)
     assert isinstance(breadth, dict)
     results['passed'] += 1
+    results['details'].append({
+        'name': 'MarketBreadth', 'type': 'future', 'direction': 'neutral',
+        'confidence': 0.0, 'passed': True, 'error': '',
+    })
     print(f'   [OK] MarketBreadth: state={breadth.get("composite",{}).get("state","?")} '
           f'trend={breadth.get("breadth_trend","?")}')
 except Exception as e:
     results['failed'] += 1
     results['errors'].append({'strategy': 'MarketBreadth', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    results['details'].append({
+        'name': 'MarketBreadth', 'type': 'future', 'direction': 'neutral',
+        'confidence': 0.0, 'passed': False, 'error': str(e)[:200],
+    })
     print(f' [FAIL] MarketBreadth FAILED: {str(e)[:80]}')
 
 # -- 9. Test Strike Selector --
@@ -329,10 +386,18 @@ try:
     strike_rec = recommend_strike('SPY', chain, base_price, 'long', 0.65, 0.165, 25.0, 0)
     assert isinstance(strike_rec, dict)
     results['passed'] += 1
+    results['details'].append({
+        'name': 'StrikeSelector', 'type': 'option', 'direction': 'long',
+        'confidence': 0.65, 'passed': True, 'error': '',
+    })
     print(f'   [OK] StrikeSelector: strike={strike_rec.get("recommended_strike","?")} win_rate={strike_rec.get("estimated_win_rate","?")}')
 except Exception as e:
     results['failed'] += 1
     results['errors'].append({'strategy': 'StrikeSelector', 'type': 'option', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    results['details'].append({
+        'name': 'StrikeSelector', 'type': 'option', 'direction': 'neutral',
+        'confidence': 0.0, 'passed': False, 'error': str(e)[:200],
+    })
     print(f' [FAIL] StrikeSelector FAILED: {str(e)[:80]}')
 
 # -- 10. Test Regime Detector --
@@ -343,10 +408,18 @@ try:
     regime = rd.detect(ohlcv, mock_context.get('indicators', {}))
     assert isinstance(regime, dict)
     results['passed'] += 1
+    results['details'].append({
+        'name': 'RegimeDetector', 'type': 'future', 'direction': 'neutral',
+        'confidence': 0.0, 'passed': True, 'error': '',
+    })
     print(f'   [OK] RegimeDetector: primary={regime.get("primary_regime","?")} confidence={regime.get("confidence","?")}')
 except Exception as e:
     results['failed'] += 1
     results['errors'].append({'strategy': 'RegimeDetector', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    results['details'].append({
+        'name': 'RegimeDetector', 'type': 'future', 'direction': 'neutral',
+        'confidence': 0.0, 'passed': False, 'error': str(e)[:200],
+    })
     print(f' [FAIL] RegimeDetector FAILED: {str(e)[:80]}')
 
 # -- 11. Full Pipeline: V3 -> Consensus -> Gate --
@@ -366,12 +439,20 @@ for instr_type, ctx in [('stock', mock_stock_ctx), ('future', mock_context), ('o
                                                 ctx.get('current_price',0), 15.0, 5500)
         gr_ = gate.evaluate(ctx, dir_, conf_, votes, {'primary_regime': 'ranging', 'confidence': 0.7}, meta_)
         results['passed'] += 1
+        results['details'].append({
+            'name': f'Pipeline({instr_type})', 'type': instr_type, 'direction': dir_,
+            'confidence': round(float(conf_), 4), 'passed': True, 'error': '',
+        })
         print(f'   [OK] Pipeline({instr_type}): {len(strats)} strats, {len(votes)} active, '
               f'{dir_} @ {conf_:.3f}, gate={gr_["passed"]} ({gr_.get("reason","?")})')
     except Exception as e:
         results['failed'] += 1
         results['errors'].append({'strategy': f'Pipeline({instr_type})', 'type': instr_type,
                                    'error': str(e)[:200], 'traceback': traceback.format_exc()})
+        results['details'].append({
+            'name': f'Pipeline({instr_type})', 'type': instr_type, 'direction': 'neutral',
+            'confidence': 0.0, 'passed': False, 'error': str(e)[:200],
+        })
         print(f' [FAIL] Pipeline({instr_type}) FAILED: {str(e)[:80]}')
 
 # -- SUMMARY --
@@ -382,6 +463,7 @@ if '--json' in sys.argv:
         'skipped': results['skipped'],
         'total': results['passed'] + results['failed'] + results['skipped'],
         'errors': results['errors'],
+        'details': results['details'],
         'all_ok': results['failed'] == 0,
     }
     print()

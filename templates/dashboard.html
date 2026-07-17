@@ -175,10 +175,14 @@
 </div>
 
 <div id="validate-popup-overlay" class="popup-overlay" style="display:none" onclick="closePopup(event)">
-  <div class="popup" onclick="event.stopPropagation()">
+  <div class="popup popup-validate" onclick="event.stopPropagation()">
     <div class="popup-header">
       <h3 id="validate-popup-title">Strategy Validation Results</h3>
-      <button class="popup-close" onclick="closeValidatePopup()">&times;</button>
+      <div style="display:flex;align-items:center;gap:12px">
+        <span id="validate-badge-pass" class="gate-badge passed" style="display:none"></span>
+        <span id="validate-badge-fail" class="gate-badge rejected" style="display:none"></span>
+        <button class="popup-close" onclick="closeValidatePopup()">&times;</button>
+      </div>
     </div>
     <div class="popup-body" id="validate-popup-body">
       <div id="validate-popup-summary" class="popup-summary">
@@ -187,11 +191,16 @@
         <div class="popup-metric"><label>Failed</label><span id="validate-failed" style="color:var(--danger)">-</span></div>
         <div class="popup-metric"><label>Skipped</label><span id="validate-skipped">-</span></div>
       </div>
-      <div id="validate-popup-verdict" style="text-align:center;padding:12px;margin:8px 0;border-radius:var(--radius);font-weight:700;font-size:16px"></div>
-      <div id="validate-error-list" style="display:none">
-        <h4>Failure Details</h4>
-        <div id="validate-errors" class="vote-list"></div>
+      <div class="sub-tabs" style="margin-top:12px">
+        <button class="sub-tab active" data-subtab="all" onclick="switchValidateSubTab('all')">All</button>
+        <button class="sub-tab" data-subtab="stock" onclick="switchValidateSubTab('stock')">Stock</button>
+        <button class="sub-tab" data-subtab="future" onclick="switchValidateSubTab('future')">Futures</button>
+        <button class="sub-tab" data-subtab="option" onclick="switchValidateSubTab('option')">Options</button>
       </div>
+      <div id="validate-signals-all" class="signals-group active"></div>
+      <div id="validate-signals-stock" class="signals-group"></div>
+      <div id="validate-signals-future" class="signals-group"></div>
+      <div id="validate-signals-option" class="signals-group"></div>
       <div style="margin-top:12px;font-size:11px;color:var(--text-muted);text-align:center">
         Created at cycle <span id="validate-cycle">-</span>
         &middot; Auto-deletes after 10 more cycles

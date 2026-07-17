@@ -841,6 +841,8 @@ function saveSettings() {
   alert('Settings saved.');
 }
 
+var _validateDetails = [];
+
 async function runValidate() {
   var btn = document.getElementById('validate-btn');
   var statusEl = document.getElementById('validate-status');
@@ -865,39 +867,86 @@ function showValidatePopup(result) {
   document.getElementById('validate-skipped').textContent = result.skipped || 0;
   document.getElementById('validate-cycle').textContent = result.created_at_cycle || '-';
 
-  var verdict = document.getElementById('validate-popup-verdict');
+  var badgePass = document.getElementById('validate-badge-pass');
+  var badgeFail = document.getElementById('validate-badge-fail');
   if (result.all_ok) {
-    verdict.textContent = 'ALL TESTS PASSED';
-    verdict.style.background = 'rgba(0,200,83,0.15)';
-    verdict.style.color = 'var(--accent)';
-    verdict.style.border = '1px solid var(--accent)';
+    badgePass.style.display = 'inline';
+    badgePass.textContent = 'ALL PASSED';
+    badgeFail.style.display = 'none';
   } else {
-    verdict.textContent = result.failed + ' TEST(S) FAILED';
-    verdict.style.background = 'rgba(255,70,70,0.12)';
-    verdict.style.color = 'var(--danger)';
-    verdict.style.border = '1px solid var(--danger)';
+    badgeFail.style.display = 'inline';
+    badgeFail.textContent = result.failed + ' FAILED';
+    badgePass.style.display = 'none';
   }
 
-  var errorList = document.getElementById('validate-error-list');
-  var errorContainer = document.getElementById('validate-errors');
-  errorContainer.innerHTML = '';
-  if (result.errors && result.errors.length > 0) {
-    errorList.style.display = 'block';
-    result.errors.forEach(function(e) {
-      var item = document.createElement('div');
-      item.className = 'vote-item';
-      item.innerHTML = '<span class="vote-name" style="color:var(--danger)">[' + e.type + '] ' + e.strategy + '</span><span class="vote-conf" style="color:var(--danger)">FAIL</span>';
-      errorContainer.appendChild(item);
-      var detail = document.createElement('div');
-      detail.style.cssText = 'font-size:11px;color:var(--text-muted);padding:2px 8px 6px;margin-top:-2px';
-      detail.textContent = e.error || '';
-      errorContainer.appendChild(detail);
-    });
-  } else {
-    errorList.style.display = 'none';
-  }
+  _validateDetails = result.details || [];
+
+  ['all', 'stock', 'future', 'option'].forEach(function(type) {
+    var container = document.getElementById('validate-signals-' + type);
+    if (!container) return;
+    var items = type === 'all' ? _validateDetails : _validateDetails.filter(function(d) { return d.type === type; });
+    if (items.length === 0) {
+      container.innerHTML = '<div class="signal-card" style="opacity:0.6"><em>No ' + type + ' tests</em></div>';
+      return;
+    }
+    container.innerHTML = '';
+    items.forEach(function(d) { container.appendChild(createValidateCard(d)); });
+  });
 
   document.getElementById('validate-popup-overlay').style.display = 'flex';
+  resetValidateSubTabs();
+}
+
+function resetValidateSubTabs() {
+  document.querySelectorAll('#validate-popup-body .sub-tab').forEach(function(t) { t.classList.remove('active'); });
+  var first = document.querySelector('#validate-popup-body .sub-tab[data-subtab="all"]');
+  if (first) first.classList.add('active');
+  document.querySelectorAll('#validate-popup-body .signals-group').forEach(function(g) { g.classList.remove('active'); });
+  var all = document.getElementById('validate-signals-all');
+  if (all) all.classList.add('active');
+}
+
+function switchValidateSubTab(type) {
+  document.querySelectorAll('#validate-popup-body .sub-tab').forEach(function(t) {
+    t.classList.toggle('active', t.getAttribute('data-subtab') === type);
+  });
+  document.querySelectorAll('#validate-popup-body .signals-group').forEach(function(g) {
+    g.classList.toggle('active', g.id === 'validate-signals-' + type);
+  });
+}
+
+function createValidateCard(d) {
+  var card = document.createElement('div');
+  card.className = 'signal-card';
+  var dirArrow = d.direction === 'long' ? '▲' : d.direction === 'short' ? '▼' : '–';
+  var dirClass = d.direction === 'long' ? 'long' : d.direction === 'short' ? 'short' : 'neutral';
+
+  var badgeHtml = d.passed
+    ? '<span class="gate-badge passed">PASS</span>'
+    : '<span class="gate-badge rejected">FAIL</span>';
+
+  var errHtml = '';
+  if (!d.passed && d.error) {
+    errHtml = '<div class="row3" style="margin-top:4px"><span style="color:var(--danger);font-size:11px">' + escHtml(d.error) + '</span></div>';
+  }
+
+  var nameSpan = document.createElement('span');
+  nameSpan.className = 'ticker-name';
+  nameSpan.textContent = d.name;
+
+  card.innerHTML =
+    '<div class="row1">' +
+      '<div>' + nameSpan.outerHTML + '<span class="instrument-badge">' + d.type + '</span></div>' +
+      '<div style="display:flex;align-items:center;gap:8px">' +
+        badgeHtml +
+        '<span class="direction-badge ' + dirClass + '">' + dirArrow + ' ' + d.direction.toUpperCase() + '</span>' +
+      '</div>' +
+    '</div>' +
+    '<div class="row2">' +
+      '<span>Confidence: <strong>' + (d.confidence * 100).toFixed(1) + '%</strong></span>' +
+    '</div>' +
+    errHtml;
+  return card;
 }
 
 function closeValidatePopup() {

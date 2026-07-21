@@ -10,6 +10,8 @@ from typing import Any
 
 from utils.logger import get_logger
 
+logger = get_logger("engine.strategy_eval")
+
 from engine.v2.registry import V2StrategyRegistry
 from engine.v3.registry import get_strategies
 from engine.v3.gate import SignalQualityGate

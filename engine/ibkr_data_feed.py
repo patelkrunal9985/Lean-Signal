@@ -70,6 +70,36 @@ def _validate_futures_contract(contract) -> tuple[bool, str]:
     return True, "OK"
 
 
+# ── Futures with pre-month expiry (expire ~20th of the month PRIOR to contract label) ──
+# e.g., CLQ6 (August 2026) expires ~July 20; GCQ6 (August 2026) expires ~July 28
+_PRE_MONTH_EXPIRY_FUTURES = {"CL", "MCL", "GC", "MGC"}
+
+
+def _is_near_expiry(symbol: str, expiry_yyyymm: str) -> bool:
+    """Check if a futures contract is within 2 days of estimated expiry.
+
+    For pre-month expiry futures (CL/MCL/GC/MGC), the contract expires
+    ~20th of the month BEFORE its label month. For all others, the
+    contract expires mid-month of its label month.
+
+    Returns True if the contract should be skipped (near/at expiry).
+    """
+    today = date.today()
+    try:
+        expiry_year = int(expiry_yyyymm[:4])
+        expiry_month = int(expiry_yyyymm[4:6])
+        if symbol in _PRE_MONTH_EXPIRY_FUTURES:
+            if expiry_month == 1:
+                est_expiry = date(expiry_year - 1, 12, 20)
+            else:
+                est_expiry = date(expiry_year, expiry_month - 1, 20)
+        else:
+            est_expiry = date(expiry_year, expiry_month, 15)
+        return (today - est_expiry).days >= -2
+    except ValueError:
+        return False
+
+
 def _validate_option_params(symbol: str, expiry: str, strike: float, right: str) -> tuple[bool, str]:
     if not expiry or len(expiry) != 8:
         return False, "INVALID_EXPIRY_FORMAT"
@@ -650,6 +680,9 @@ class IBKRStreamer:
         Uses per-future contract cycles (quarterly, bi-monthly, or monthly).
         Returns YYYYMM format (e.g. '202608' for Aug 2026).
 
+        Auto-rolls contracts within 2 days of estimated expiry to the next
+        cycle month (prevents querying dead contracts like CLQ6 on Jul 21).
+
         VIX futures (VX) trade monthly and expire mid-month (~3rd Wednesday).
         Before the 16th the front month is the current month; after the 15th
         it rolls to next month. All other futures use m > month (current month
@@ -660,8 +693,6 @@ class IBKRStreamer:
         month = today.month
         year = today.year
         # VIX futures: monthly, expire ~3rd Wednesday (15th-21st).
-        # Use m >= month until the 21st (conservative — covers the full expiry
-        # window). After the 21st the current month has definitely expired.
         if symbol == "VX":
             day = today.day
             for m in sorted(cycles):
@@ -670,8 +701,16 @@ class IBKRStreamer:
             return f"{year + 1}{cycles[0]:02d}"
         for m in sorted(cycles):
             if m > month:
-                return f"{year}{m:02d}"
-        return f"{year + 1}{cycles[0]:02d}"
+                candidate = f"{year}{m:02d}"
+                if _is_near_expiry(symbol, candidate):
+                    logger.debug("Futures rollover: %s %s near expiry, advancing to next cycle", symbol, candidate)
+                    continue
+                return candidate
+        # Wrap to next year — also check near-expiry on first cycle of new year
+        candidate = f"{year + 1}{cycles[0]:02d}"
+        if _is_near_expiry(symbol, candidate) and len(cycles) > 1:
+            return f"{year + 1}{cycles[1]:02d}"
+        return candidate
 
     @staticmethod
     def _next_quarterly_futures_expiry() -> str:

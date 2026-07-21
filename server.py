@@ -13,8 +13,18 @@ from urllib.parse import urlparse, parse_qs
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 
+import webbrowser
 from utils.logger import get_logger
 from engine.runner import run_cycle, get_status, start_auto_run, stop_auto_run, init as init_engine
+
+
+def _launch_browser(url: str):
+    """Open the dashboard in the default browser, best-effort."""
+    try:
+        webbrowser.open(url, new=0, autoraise=True)
+        logger.info(f"Browser launched for {url}")
+    except Exception as e:
+        logger.debug(f"Could not open browser: {e}")
 
 _VALIDATION_RESULT = None
 _VALIDATION_CREATED_CYCLE = 0
@@ -307,11 +317,16 @@ class ThreadedHTTPServer(HTTPServer):
             self.shutdown_request(request)
 
 
-def run_server(host: str = "0.0.0.0", port: int = 8088):
+def run_server(host: str = "0.0.0.0", port: int = 8088, open_browser: bool = True):
     logger.info(f"Initializing engine...")
     init_engine()
     server = ThreadedHTTPServer((host, port), LeanSignalsHandler)
-    logger.info(f"Lean Signals dashboard at http://{host}:{port}")
+    url = f"http://localhost:{port}" if host == "0.0.0.0" else f"http://{host}:{port}"
+    logger.info(f"Lean Signals dashboard at {url}")
+    if open_browser:
+        # Small delay so the server socket is fully bound before browser hits it
+        import threading
+        threading.Timer(0.5, lambda: _launch_browser(url)).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:

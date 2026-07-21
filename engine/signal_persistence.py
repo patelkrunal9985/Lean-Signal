@@ -58,6 +58,11 @@ _last_flip_cycle: dict[str, int] = {}             # ticker → cycle_id of last 
 _take_profit_events: dict[str, list[dict]] = {}   # ticker → list of take-profit notifications
 _consecutive_counter: dict[str, int] = {}         # ticker → consecutive cycles in opposite direction (for sticky downgrade)
 
+# ── Signal Health & Warning tracking ──
+_last_strong_cycle: dict[str, int] = {}             # ticker → last cycle_id where net_score > 0.4
+_last_top_contributors: dict[str, list[str]] = {}   # ticker → [top 3 strategy names from last cycle]
+_prev_strategy_count: dict[str, int] = {}            # ticker → active strategy count from last cycle
+
 # ── Dynamic strategy authority tracking ──
 # Tracks each strategy's recent prediction accuracy vs final consensus direction.
 # Used to adjust authority multipliers: strategies that predict well gain authority,
@@ -295,6 +300,12 @@ def update(
             "state": None,  # filled below
             "families": consensus_meta.get("consensus_families", {}),
             "family_count": consensus_meta.get("consensus_family_count", 0),
+            "agreement_cv": consensus_meta.get("consensus_agreement_cv", 0.5),
+            "threshold": consensus_meta.get("consensus_threshold", 0.2),
+            "dominant_share": consensus_meta.get("consensus_dominant_share", 0.0),
+            "active_votes": consensus_meta.get("consensus_active_votes", 0),
+            "weighted_long": consensus_meta.get("consensus_weighted_long", 0),
+            "weighted_short": consensus_meta.get("consensus_weighted_short", 0),
         }
         _signal_memory.setdefault(ticker, [])
         _signal_memory[ticker].append(snapshot)
@@ -415,6 +426,25 @@ def update(
 
             if is_real_flip:
                 _last_flip_cycle[ticker] = cycle_id
+
+        # ── Track top contributors for key strategy exit detection ──
+        if strategy_votes and len(strategy_votes) > 0:
+            # Sort by contribution (confidence × weight) and keep top 3
+            sorted_votes = sorted(
+                strategy_votes,
+                key=lambda s: float(s.get("confidence", 0)) * float(s.get("weight", 0)),
+                reverse=True,
+            )
+            top3 = [s.get("name", s.get("strategy", "?")) for s in sorted_votes[:3]]
+            _last_top_contributors[ticker] = top3
+            _prev_strategy_count[ticker] = consensus_meta.get("consensus_active_votes", 0)
+
+        # ── Track last strong confirmation cycle (for stale detection) ──
+        if direction != "neutral" and abs(net_score) > 0.4:
+            _last_strong_cycle[ticker] = cycle_id
+            snapshot["strong_cycle"] = True
+        else:
+            snapshot["strong_cycle"] = False
 
         return flip_event
 
@@ -638,6 +668,210 @@ def get_take_profit_events(ticker: str | None = None) -> list[dict]:
 
 
 # ═══════════════════════════════════════════════════════════════════
+# Signal Health Score — 5-Factor Composite (Leading Quality Metric)
+# ═══════════════════════════════════════════════════════════════════
+
+def get_signal_health_score(ticker: str) -> dict:
+    """Compute a 5-factor health score for a ticker's current signal.
+
+    Runs alongside the state machine with zero lag. Detects rotting signals
+    before the state changes. Each factor is 0-1, weighted and summed to 0-100.
+
+    Factors:
+      1. Net Score Momentum (30%): Is net_score building or fading?
+      2. Strategy Retention (25%): How many strategies stayed vs last cycle?
+      3. Confidence Tightness (20%): Is strategy agreement tight or scattered?
+      4. Family Concentration (15%): Signal dependent on single family?
+      5. Threshold Margin (10%): How close to flipping neutral?
+
+    Returns:
+        {
+            "health": int (0-100),
+            "label": "robust" | "caution" | "fragile" | "terminal",
+            "factors": {name: score},
+            "warnings": [str],
+        }
+    """
+    with _lock:
+        mem = _signal_memory.get(ticker, [])
+        if len(mem) < 2:
+            return {"health": 50, "label": "caution", "factors": {}, "warnings": ["insufficient_data"]}
+
+        current = mem[-1]
+        prev = mem[-2]
+        state = _signal_state.get(ticker, "none")
+        direction = current.get("direction", "neutral")
+
+        if direction == "neutral" or state == "none":
+            return {"health": 0, "label": "terminal", "factors": {}, "warnings": ["no_active_signal"]}
+
+        # ── Factor 1: Net Score Momentum (30%) ──
+        net_now = abs(current.get("net_score", 0))
+        net_prev = abs(prev.get("net_score", 0))
+        if len(mem) >= 3:
+            net_prev2 = abs(mem[-3].get("net_score", 0))
+            # Trend: (now - oldest) / max change
+            net_trend = (net_now - net_prev2) / max(abs(net_now - net_prev2), 0.01)
+            net_trend = max(-1.0, min(1.0, net_trend))
+            net_momentum = 0.5 + (net_trend * 0.5)  # 0 = crashing, 0.5 = flat, 1 = surging
+        else:
+            net_momentum = 0.5  # Neutral if not enough data
+
+        # ── Factor 2: Strategy Retention (25%) ──
+        curr_votes = current.get("active_votes", 0)
+        prev_votes_count = _prev_strategy_count.get(ticker, curr_votes)
+        if prev_votes_count > 0:
+            retention = min(curr_votes / max(prev_votes_count, 1), 1.0)
+        else:
+            retention = 0.5
+        # Count how many families are in current vs previous
+        curr_families = set(current.get("families", {}).keys())
+        prev_families = set(prev.get("families", {}).keys())
+        if len(prev_families) > 0:
+            family_retention = len(curr_families & prev_families) / len(prev_families)
+        else:
+            family_retention = 1.0
+        # Blend: 60% count retention, 40% family retention
+        retention_score = retention * 0.6 + family_retention * 0.4
+
+        # ── Factor 3: Confidence Tightness (20%) ──
+        cv = current.get("agreement_cv", 0.5)
+        # CV < 0.3 = tight (good), CV > 0.6 = scattered (bad)
+        if cv <= 0.3:
+            tightness = 1.0
+        elif cv >= 0.8:
+            tightness = 0.0
+        else:
+            tightness = 1.0 - ((cv - 0.3) / 0.5)  # Linear from 1.0 to 0.0
+
+        # ── Factor 4: Family Concentration (15%) ──
+        dominant = current.get("dominant_share", 0.0)
+        # > 60% dominant = risky concentration
+        if dominant <= 0.40:
+            diversity = 1.0
+        elif dominant >= 0.70:
+            diversity = 0.0
+        else:
+            diversity = 1.0 - ((dominant - 0.40) / 0.30)
+
+        # ── Factor 5: Threshold Margin (10%) ──
+        threshold = current.get("threshold", 0.2)
+        margin = net_now - threshold
+        # margin 0 = at threshold, margin 0.3+ = comfortable
+        if margin <= 0.02:
+            margin_score = 0.0
+        elif margin >= 0.30:
+            margin_score = 1.0
+        else:
+            margin_score = margin / 0.30
+
+        # ── Weighted Composite ──
+        health = (
+            net_momentum * 0.30 +
+            retention_score * 0.25 +
+            tightness * 0.20 +
+            diversity * 0.15 +
+            margin_score * 0.10
+        ) * 100
+        health = max(0, min(100, int(health)))
+
+        # ── Classification ──
+        if health >= 75:
+            label = "robust"
+        elif health >= 50:
+            label = "caution"
+        elif health >= 25:
+            label = "fragile"
+        else:
+            label = "terminal"
+
+        # ── Collect warnings from individual factors ──
+        warnings = []
+        if net_momentum < 0.35:
+            warnings.append("net_score_fading")
+        if retention_score < 0.5:
+            dropped = prev_votes_count - curr_votes
+            if dropped > 0:
+                warnings.append(f"{dropped}_strategies_dropped")
+        if tightness < 0.4:
+            warnings.append("confidence_scattered")
+        if diversity < 0.4:
+            warnings.append("single_family_dominant")
+        if margin_score < 0.2:
+            warnings.append("near_threshold")
+
+        # ── Additional warnings ──
+        # Key strategy exit detection
+        prev_top3 = _last_top_contributors.get(ticker, [])
+        if prev_top3 and curr_votes > 0:
+            # Check if top contributors dropped out (compute from memory families)
+            # Simple heuristic: if family count dropped by 2+ and dominant share rose
+            if len(curr_families) < len(prev_families) - 1 and dominant > 0.55:
+                warnings.append("key_families_exiting")
+
+        # Stale confirmation warning
+        last_strong = _last_strong_cycle.get(ticker, 0)
+        curr_cycle = current.get("cycle_id", 0)
+        stale_gap = curr_cycle - last_strong if last_strong > 0 else 0
+        if stale_gap >= 5 and state in ("active", "confirmed"):
+            warnings.append(f"stale_confirmation_{stale_gap}_cycles")
+
+        return {
+            "health": health,
+            "label": label,
+            "factors": {
+                "net_momentum": round(net_momentum, 3),
+                "retention": round(retention_score, 3),
+                "tightness": round(tightness, 3),
+                "diversity": round(diversity, 3),
+                "margin": round(margin_score, 3),
+            },
+            "warnings": warnings,
+        }
+
+
+def get_price_signal_divergence(ticker: str, current_price: float, entry_price: float, atr: float) -> dict:
+    """Detect when price is moving against the signal direction.
+
+    Useful when the signal is still CONFIRMED but price already broke against it.
+
+    Returns:
+        {diverged: bool, atr_distance: float, warning: str}
+    """
+    with _lock:
+        direction = _active_direction.get(ticker, "neutral")
+        if direction == "neutral" or current_price <= 0 or entry_price <= 0 or atr <= 0:
+            return {"diverged": False, "atr_distance": 0, "warning": ""}
+
+        price_move = current_price - entry_price
+        atr_dist = price_move / max(atr, 0.01)
+
+        if direction == "long" and atr_dist < -1.5:
+            return {"diverged": True, "atr_distance": round(atr_dist, 1), "warning": f"price_{abs(atr_dist):.1f}_ATR_against_long"}
+        if direction == "short" and atr_dist > 1.5:
+            return {"diverged": True, "atr_distance": round(atr_dist, 1), "warning": f"price_{atr_dist:.1f}_ATR_against_short"}
+
+        if direction == "long" and atr_dist < -0.8:
+            return {"diverged": False, "atr_distance": round(atr_dist, 1), "warning": f"approaching_against_long"}
+        if direction == "short" and atr_dist > 0.8:
+            return {"diverged": False, "atr_distance": round(atr_dist, 1), "warning": f"approaching_against_short"}
+
+        return {"diverged": False, "atr_distance": round(atr_dist, 1), "warning": ""}
+
+
+def get_all_health_scores() -> dict:
+    """Get health scores for all tracked tickers with active signals."""
+    with _lock:
+        result = {}
+        for ticker in _signal_memory:
+            state = _signal_state.get(ticker, "none")
+            if state in ("none",):
+                continue
+            result[ticker] = get_signal_health_score(ticker)
+        return result
+
+
+# ═══════════════════════════════════════════════════════════════════
 # Dynamic Strategy Authority (Gap 2)
 # ═══════════════════════════════════════════════════════════════════
 
@@ -731,3 +965,7 @@ def reset():
         _last_flip_cycle.clear()
         _take_profit_events.clear()
         _strategy_performance.clear()
+        _last_strong_cycle.clear()
+        _last_top_contributors.clear()
+        _prev_strategy_count.clear()
+        _pre_weakening_state.clear()

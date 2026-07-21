@@ -494,7 +494,15 @@ function createSignalCard(signal, cycle, flips, flipPotentials, signalStates) {
   } else if (flipPotInfo) {
     var needed = flipPotInfo.needs_cycles || 1;
     flipRow = '<div class="row-flip"><span class="flip-badge potential">↻ WATCHING: needs ' + needed + ' more cycle' + (needed > 1 ? 's' : '') + ' to confirm</span></div>';
-  }    // ── Build card ──
+  }
+
+  // TAKE PROFIT banner for weakening state
+  var tpBannerHtml = '';
+  if (isWeakening) {
+    tpBannerHtml = '<div class="take-profit-banner">⚠️ TAKE PROFIT — Signal Weakening</div>';
+  }
+
+  // ── Build card ──
     // Conviction meter
     var convTier = (signal.consensus_meta && signal.consensus_meta.consensus_conviction_tier) || 'bronze';
     var convPct = signal.confidence * 100;
@@ -505,26 +513,76 @@ function createSignalCard(signal, cycle, flips, flipPotentials, signalStates) {
         '<div class="meter-bar ' + convTier + '" style="width:' + meterWidth + '%"></div>' +
       '</div>';
 
-    // TAKE PROFIT banner for weakening state
-    var tpBannerHtml = '';
-    if (isWeakening) {
-      tpBannerHtml = '<div class="take-profit-banner">⚠️ TAKE PROFIT — Signal Weakening</div>';
+    // ── Signal Health Score bar (parallel quality metric) ──
+    var healthScores = cycle.health_scores || {};
+    var health = healthScores[signal.ticker];
+    var healthHtml = '';
+    var fragileHtml = '';
+    var warningHtml = '';
+    if (health && health.health !== undefined) {
+      var healthPct = health.health;
+      var healthLabel = health.label || 'caution';
+      var healthColors = { robust: 'var(--accent)', caution: 'var(--warning)', fragile: 'var(--danger)', terminal: '#666' };
+      var hc = healthColors[healthLabel] || 'var(--text-muted)';
+      healthHtml =
+        '<div class="health-bar-row">' +
+          '<span class="health-label">Health</span>' +
+          '<div class="health-bar-track"><div class="health-bar-fill ' + healthLabel + '" style="width:' + healthPct + '%;background:' + hc + '"></div></div>' +
+          '<span class="health-pct ' + healthLabel + '">' + healthPct + '</span>' +
+        '</div>';
+
+      // Fragile signal badge: CONFIRMED but health < 40
+      var signalState = signalStates && signalStates.by_state ? (function() {
+        for (var st in signalStates.by_state) {
+          var arr = signalStates.by_state[st] || [];
+          for (var i = 0; i < arr.length; i++) {
+            if (arr[i].ticker === signal.ticker) return arr[i].state;
+          }
+        }
+        return '';
+      })() : '';
+      if (healthLabel === 'fragile' || healthLabel === 'terminal') {
+        if (signalState === 'confirmed' || signalState === 'active') {
+          fragileHtml = '<span class="fragile-badge">⚠️ FRAGILE — Avoid Entry</span>';
+        }
+      }
+
+      // Warnings
+      var warnings = health.warnings || [];
+      if (warnings.length > 0) {
+        var warnLabels = [];
+        warnings.forEach(function(w) {
+          if (w.indexOf('stale_confirmation') >= 0) warnLabels.push('Stale ' + w.split('_').pop() + 'cyc');
+          else if (w === 'net_score_fading') warnLabels.push('Fading');
+          else if (w.indexOf('strategies_dropped') >= 0) warnLabels.push(w.split('_')[0] + ' dropped');
+          else if (w === 'confidence_scattered') warnLabels.push('Scattered');
+          else if (w === 'single_family_dominant') warnLabels.push('1-family');
+          else if (w === 'near_threshold') warnLabels.push('Near neutral');
+          else if (w === 'key_families_exiting') warnLabels.push('Key exit');
+        });
+        warningHtml = '<div class="health-warnings">' + warnLabels.map(function(l) { return '<span class="warn-chip">' + l + '</span>'; }).join('') + '</div>';
+      }
     }
 
-    card.innerHTML =
-      '<div class="row1">' +
-        '<div><span class="ticker-name">' + signal.ticker + '</span>' +
-        '<span class="instrument-badge">' + signal.instrument_type + '</span>' +
+  // ── Assemble card HTML ──
+  card.innerHTML =
+    '<div class="row1">' +
+      '<div><span class="ticker-name">' + signal.ticker + '</span>' +
+        '<span class="instrument-badge">' + (signal.instrument_type || '') + '</span>' +
         signalStateHtml + '</div>' +
-        '<span class="direction-badge ' + dirClass + '">' + dirArrow + ' ' + signal.direction.toUpperCase() + '</span>' +
-      '</div>' +
-      '<div class="row2">' +
-        convictionHtml +
-        '<span>Score: <strong>' + (signal.composite_score * 100).toFixed(1) + '%</strong></span>' +
-        '<span>Strategies: <strong>' + (signal.agreeing_count || 0) + '/' + (signal.strategy_count || 0) + '</strong></span>' +
-        '<span>Regime: <strong>' + (signal.regime || '?') + '</strong></span>' +
-      '</div>' +
-      levelsHtml + miniDashHtml + tpBannerHtml + flipRow;
+      '<span class="direction-badge ' + dirClass + '">' + dirArrow + ' ' + signal.direction.toUpperCase() + '</span>' +
+    '</div>' +
+    convictionHtml +
+    healthHtml +
+    fragileHtml +
+    warningHtml +
+    '<div class="row2">' +
+      '<span>Confidence: <strong>' + (signal.confidence * 100).toFixed(1) + '%</strong></span>' +
+      '<span>Score: <strong>' + ((signal.composite_score || 0) * 100).toFixed(1) + '%</strong></span>' +
+      '<span>Strategies: <strong>' + (signal.agreeing_count || 0) + '/' + (signal.strategy_count || 0) + '</strong></span>' +
+      '<span>Regime: <strong>' + (signal.regime || '?').replace(/_/g, ' ') + '</strong></span>' +
+    '</div>' +
+    levelsHtml + miniDashHtml + tpBannerHtml + flipRow;
 
   // ── Click to popup ──
   card.onclick = function() { showSignalPopup(signal, cycle); };

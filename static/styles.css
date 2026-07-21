@@ -473,3 +473,17 @@ header {
 ::-webkit-scrollbar-track { background: var(--bg); }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+/* ── Health Score Bar ── */
+.health-bar-row { display: flex; align-items: center; gap: 6px; padding: 3px 0; font-size: 11px; }
+.health-label { color: var(--text-muted); font-size: 10px; text-transform: uppercase; min-width: 36px; }
+.health-bar-track { flex: 1; height: 5px; background: var(--bg-hover); border-radius: 3px; overflow: hidden; }
+.health-bar-fill { height: 100%; border-radius: 3px; transition: width 0.5s ease, background 0.5s ease; }
+.health-pct { font-weight: 600; font-size: 11px; min-width: 26px; text-align: right; }
+.health-pct.robust { color: var(--accent); }
+.health-pct.caution { color: var(--warning); }
+.health-pct.fragile { color: var(--danger); }
+.health-pct.terminal { color: #666; }
+.fragile-badge { display: inline-block; padding: 2px 7px; border-radius: 8px; font-size: 10px; font-weight: 700; background: var(--danger-dim); color: var(--danger); margin-left: 4px; animation: weakenPulse 1.5s ease-in-out infinite; }
+.health-warnings { display: flex; gap: 4px; flex-wrap: wrap; padding: 2px 0; }
+.warn-chip { padding: 1px 6px; border-radius: 6px; font-size: 9px; font-weight: 600; background: var(--warning-dim); color: var(--warning); }

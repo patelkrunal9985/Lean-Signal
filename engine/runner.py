@@ -28,7 +28,7 @@ from engine.subscription_manager import (
     set_priority, refresh, reset_non_pinned, get_slot_summary,
     seed_fixed_options, sync_from_ibkr,
 )
-from engine.signal_persistence import update as update_signal_state, get_significant_flips, get_all_states, update_strategy_performance
+from engine.signal_persistence import update as update_signal_state, get_significant_flips, get_all_states, update_strategy_performance, get_all_health_scores
 
 logger = get_logger("engine.runner")
 
@@ -897,6 +897,13 @@ def run_cycle() -> dict:
             result["take_profit_events"] = tp_events[:10]  # Last 10
         except Exception:
             result["take_profit_events"] = []
+
+        # ── Signal health scores (parallel quality metric with zero lag) ──
+        try:
+            health_scores = get_all_health_scores()
+            result["health_scores"] = health_scores
+        except Exception:
+            result["health_scores"] = {}
 
         _last_cycle_result = result
         _cycle_history.insert(0, result)

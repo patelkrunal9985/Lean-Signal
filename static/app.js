@@ -17,6 +17,11 @@ let _lastFlipCount = -1;
 let _lastTpCount = -1;
 let _firstLoad = true;
 
+// ── Sticky event persistence: TP banners and flip badges linger for N cycles ──
+var _stickyTps = {};   // { ticker: { cyclesLeft, direction, verdict, timestamp } }
+var _stickyFlips = {}; // { ticker: { cyclesLeft, from, to, score } }
+var _STICKY_TTL = 5;   // cycles to persist after the event ends
+
 function formatAge(sec) {
   if (!sec || sec <= 0) return '';
   if (sec < 60) return Math.round(sec) + 's';
@@ -370,6 +375,52 @@ function renderPriceTicker() {
    Signal Rendering with 4-State Management
    ═══════════════════════════════════════════════════════════════ */
 
+function _updateStickyEvents(signals, flips, flipPotentials) {
+  // Decrement existing sticky TP counters; remove expired
+  for (var t in _stickyTps) {
+    _stickyTps[t].cyclesLeft--;
+    if (_stickyTps[t].cyclesLeft <= 0) delete _stickyTps[t];
+  }
+  // Decrement existing sticky flip counters; remove expired
+  for (var t in _stickyFlips) {
+    _stickyFlips[t].cyclesLeft--;
+    if (_stickyFlips[t].cyclesLeft <= 0) delete _stickyFlips[t];
+  }
+
+  // Register new TP events (weakening signals)
+  (signals || []).forEach(function(s) {
+    if (s.weakening && !_stickyTps[s.ticker]) {
+      _stickyTps[s.ticker] = {
+        cyclesLeft: _STICKY_TTL,
+        direction: s.direction,
+        verdict: s.verdict || '',
+        timestamp: Date.now()
+      };
+    }
+  });
+
+  // Register new flip events; refresh existing ones while still live
+  var flipsSeen = {};
+  for (var ft in (flips || {})) { flipsSeen[ft] = true; }
+  for (var ft in (flipPotentials || {})) { flipsSeen[ft] = true; }
+  for (var ft in flipsSeen) {
+    if (!_stickyFlips[ft]) {
+      var fInfo = (flips || {})[ft] || (flipPotentials || {})[ft] || {};
+      _stickyFlips[ft] = {
+        cyclesLeft: _STICKY_TTL,
+        from: fInfo.from || '',
+        to: fInfo.to || '',
+        score: fInfo.score || 0,
+        potential: !!(flipPotentials || {})[ft],
+        timestamp: Date.now()
+      };
+    } else {
+      // Refresh: reset counter if flip is still active
+      _stickyFlips[ft].cyclesLeft = _STICKY_TTL;
+    }
+  }
+}
+
 function renderSignals(cycle) {
   // STATE: Error
   if (cycle.status === 'error') {
@@ -384,6 +435,19 @@ function renderSignals(cycle) {
   var flips = cycle.flips || {};
   var flipPotentials = cycle.flips_potential || {};
   var signalStates = cycle.signal_states || {};
+
+  // ── Update sticky event persistence ──
+  var allSignals = [];
+  ['stock', 'future', 'option'].forEach(function(type) {
+    var sigs = groups[type] || [];
+    sigs.forEach(function(s) {
+      // Derive weakening state for sticky TP tracking
+      var ss = (signalStates && signalStates.by_ticker) ? signalStates.by_ticker[s.ticker] : null;
+      s.weakening = (ss && ss.state === 'weakening');
+      allSignals.push(s);
+    });
+  });
+  _updateStickyEvents(allSignals, flips, flipPotentials);
 
   ['stock', 'future', 'option'].forEach(function(type) {
     var container = document.getElementById('signals-' + type);
@@ -498,9 +562,10 @@ function createSignalCard(signal, cycle, flips, flipPotentials, signalStates) {
       '</div>';
   }
 
-  // ── Flip badge (from persistence engine) ──
+  // ── Flip badge (from persistence engine + sticky persistence) ──
   var flipInfo = flips[signal.ticker] || null;
   var flipPotInfo = (!flipInfo) ? (flipPotentials[signal.ticker] || null) : null;
+  var stickyFlip = _stickyFlips[signal.ticker] || null;
   var flipRow = '';
   if (flipInfo) {
     var score = flipInfo.score || 0;
@@ -509,12 +574,19 @@ function createSignalCard(signal, cycle, flips, flipPotentials, signalStates) {
   } else if (flipPotInfo) {
     var needed = flipPotInfo.needs_cycles || 1;
     flipRow = '<div class="row-flip"><span class="flip-badge potential">↻ WATCHING: needs ' + needed + ' more cycle' + (needed > 1 ? 's' : '') + ' to confirm</span></div>';
+  } else if (stickyFlip) {
+    var stickyClass = stickyFlip.potential ? 'flip-badge potential' : (stickyFlip.score >= 0.8 ? 'flip-badge major' : 'flip-badge');
+    var stickyLabel = stickyFlip.from ? (stickyFlip.from.toUpperCase() + ' → ' + stickyFlip.to.toUpperCase()) : 'recent flip';
+    flipRow = '<div class="row-flip"><span class="' + stickyClass + ' sticky">↻ FLIP ' + stickyLabel + ' (' + stickyFlip.cyclesLeft + ' cycles ago)</span></div>';
   }
 
-  // TAKE PROFIT banner for weakening state
+  // TAKE PROFIT banner (current + sticky persistence)
   var tpBannerHtml = '';
+  var stickyTp = _stickyTps[signal.ticker] || null;
   if (isWeakening) {
     tpBannerHtml = '<div class="take-profit-banner">⚠️ TAKE PROFIT — Signal Weakening</div>';
+  } else if (stickyTp && stickyTp.cyclesLeft > 0) {
+    tpBannerHtml = '<div class="take-profit-banner sticky">⚠️ TAKE PROFIT — Signal Weakened (' + stickyTp.cyclesLeft + ' cycles ago)</div>';
   }
 
   // ── Build card ──

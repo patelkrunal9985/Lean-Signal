@@ -411,8 +411,24 @@ def get_slot_summary() -> dict:
     """Return current slot budget usage summary for diagnostics/monitoring.
 
     Returns dict with by_type breakdown, fixed/pinned counts, limits.
+    Uses try-lock to avoid blocking dashboard API calls when cycle holds the lock.
     """
-    with _lock:
+    acquired = _lock.acquire(blocking=False)
+    if not acquired:
+        # Lock held by cycle — return immediately, don't block dashboard
+        return {
+            "by_type": {"stock": 0, "future": 0, "option": 0, "other": 0},
+            "fixed_stocks": len(FIXED_STOCKS),
+            "fixed_futures": len(FIXED_FUTURES),
+            "pinned": 0,
+            "limits": dict(SLOT_LIMITS),
+            "total_limit": TOTAL_SLOTS,
+            "total_fixed": len(FIXED_STOCKS) + len(FIXED_FUTURES),
+            "total_scored": 0,
+            "prev_subscribed": 0,
+            "_stale": True,
+        }
+    try:
         by_type: dict[str, int] = {"stock": 0, "future": 0, "option": 0, "other": 0}
         for key, info in _priorities.items():
             t = info.get("instr_type", "other")
@@ -421,17 +437,20 @@ def get_slot_summary() -> dict:
         fixed_futures = len(FIXED_FUTURES)
         pinned = len(_pinned)
         prev = len(_prev_subscribed)
-    return {
-        "by_type": by_type,
-        "fixed_stocks": fixed_stocks,
-        "fixed_futures": fixed_futures,
-        "pinned": pinned,
-        "limits": dict(SLOT_LIMITS),
-        "total_limit": TOTAL_SLOTS,
-        "total_fixed": fixed_stocks + fixed_futures,
-        "total_scored": sum(by_type.values()),
-        "prev_subscribed": prev,
-    }
+        return {
+            "by_type": by_type,
+            "fixed_stocks": fixed_stocks,
+            "fixed_futures": fixed_futures,
+            "pinned": pinned,
+            "limits": dict(SLOT_LIMITS),
+            "total_limit": TOTAL_SLOTS,
+            "total_fixed": fixed_stocks + fixed_futures,
+            "total_scored": sum(by_type.values()),
+            "prev_subscribed": prev,
+        }
+    finally:
+        if acquired:
+            _lock.release()
 
 
 def unpin_ticker(ticker: str, *, underlying: Optional[str] = None,

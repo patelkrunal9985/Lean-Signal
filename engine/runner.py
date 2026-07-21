@@ -39,6 +39,7 @@ MAX_HISTORY = 200
 
 _cycle_in_progress = False
 _cycle_count = 0
+_CYCLE_MAX_SECONDS = 180  # watchdog: if a cycle runs > 3 min, something is wrong
 _last_cycle_result = None
 _cycle_history = []
 _auto_run_enabled = False
@@ -523,12 +524,22 @@ def run_cycle() -> dict:
 
         # ── Strategy evaluation (V2 + V3 → Consensus → Gate) ──
         logger.info("Cycle #%d: running strategies on %d tickers (phase 7/7)", cycle_id, len(ticker_data_map))
+        
+        # ── Cycle watchdog: abort if running too long ──
+        _elapsed_total = time.time() - start_time
+        if _elapsed_total > _CYCLE_MAX_SECONDS:
+            logger.error("Cycle #%d: ABORTING — exceeded %ds max (%.1fs elapsed)", cycle_id, _CYCLE_MAX_SECONDS, _elapsed_total)
+            raise TimeoutError(f"Cycle exceeded {_CYCLE_MAX_SECONDS}s max duration")
         signals = []
         gate_evaluations: list[dict] = []  # per-ticker audit trail of gate decisions
         v2_registry = V2StrategyRegistry()
         gate = SignalQualityGate()
 
         for ticker, data in ticker_data_map.items():
+            # ── Watchdog: abort cycle if it's running too long ──
+            if time.time() - start_time > _CYCLE_MAX_SECONDS:
+                logger.error("Cycle #%d: ABORTING during ticker loop — exceeded %ds max", cycle_id, _CYCLE_MAX_SECONDS)
+                raise TimeoutError(f"Cycle exceeded {_CYCLE_MAX_SECONDS}s max duration")
             instr_type = data["instrument_type"]
             context = data.copy()
 

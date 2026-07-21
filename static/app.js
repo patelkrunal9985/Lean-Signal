@@ -85,11 +85,19 @@ function switchSubTab(tab, sub) {
 
 async function loadStatus() {
   try {
-    var resp = await fetch('/api/status');
+    var controller = new AbortController();
+    var timeout = setTimeout(function() { controller.abort(); }, 8000);
+    var resp = await fetch('/api/status', { signal: controller.signal });
+    clearTimeout(timeout);
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
     _status = await resp.json();
     updateUI();
   } catch(e) {
-    console.error('Status fetch failed:', e);
+    if (e.name === 'AbortError') {
+      console.warn('Status fetch timed out (server busy)');
+    } else {
+      console.error('Status fetch failed:', e);
+    }
   }
 }
 
@@ -685,7 +693,10 @@ async function runCycle() {
   document.getElementById('cycle-status').textContent = 'Running...';
   document.getElementById('cycle-status').className = 'status-badge running';
   try {
-    var resp = await fetch('/api/run-cycle', { method: 'POST' });
+    var controller = new AbortController();
+    var timeout = setTimeout(function() { controller.abort(); }, 30000);
+    var resp = await fetch('/api/run-cycle', { method: 'POST', signal: controller.signal });
+    clearTimeout(timeout);
     var data = await resp.json();
     _status.last_cycle = data;
     updateUI();

@@ -1185,8 +1185,12 @@ def fetch_live_option_prices(ticker: str, expiration: str, strikes: list[float],
                 await asyncio.sleep(0.15)
 
             # ── DIAGNOSTIC: audit which generic tick fields arrived ──
-            _elapsed = _time.time() - (deadline - 35.0)
+            _deadline = deadline  # capture for elapsed calc
+            _elapsed = _time.time() - (_deadline - 35.0)
             _total = len(prices)
+            _n_contracts = len(contracts)
+
+            # Generic tick field delivery audit (count + % of total contracts)
             _with_bid = sum(1 for p in prices.values() if p.get("bid", 0) > 0)
             _with_ask = sum(1 for p in prices.values() if p.get("ask", 0) > 0)
             _with_last = sum(1 for p in prices.values() if p.get("last", 0) > 0)
@@ -1197,7 +1201,32 @@ def fetch_live_option_prices(ticker: str, expiration: str, strikes: list[float],
             _with_gamma = sum(1 for p in prices.values() if p.get("gamma", 0) != 0)
             _with_theta = sum(1 for p in prices.values() if p.get("theta", 0) != 0)
             _with_vega = sum(1 for p in prices.values() if p.get("vega", 0) != 0)
+            _with_hv = sum(1 for p in prices.values() if p.get("histVolatility", 0) > 0)
+            _with_avgvol = sum(1 for p in prices.values() if p.get("avgVolume", 0) > 0)
             _timeout = _elapsed >= 34.5
+
+            # ── Tick 106 (impliedVolatility) specific audit ──
+            # IBKR delivers implied vol via: (a) modelGreeks.impliedVol (fast, snapshot),
+            # or (b) generic tick 106 / tickOptionComputation (slow, 5-25s delayed).
+            # Contracts with zero IV after the full 35s window indicate tick 106
+            # is NOT being delivered at all (potentially a TWS permission/market data issue).
+            _zero_iv = []
+            _zero_vol = []
+            _zero_oi = []
+            _zero_greeks = []
+            for k, p in prices.items():
+                _iv_val = p.get("impliedVolatility", 0) or 0
+                if isinstance(_iv_val, float) and (math.isnan(_iv_val) or math.isinf(_iv_val)):
+                    _iv_val = 0.0
+                if _iv_val <= 0:
+                    _zero_iv.append(k)
+                if p.get("volume", 0) <= 0:
+                    _zero_vol.append(k)
+                if p.get("openInterest", 0) <= 0:
+                    _zero_oi.append(k)
+                if p.get("delta", 0) == 0 and p.get("gamma", 0) == 0:
+                    _zero_greeks.append(k)
+
             # Sample first 3 contracts with all field values
             _sample = []
             for i, (k, p) in enumerate(prices.items()):
@@ -1208,18 +1237,69 @@ def fetch_live_option_prices(ticker: str, expiration: str, strikes: list[float],
                     _iv_val = 0.0
                 _sample.append(
                     f"{k}: bid={p.get('bid',0):.2f} ask={p.get('ask',0):.2f} last={p.get('last',0):.2f} "
-                    f"vol={p.get('volume',0)} oi={p.get('openInterest',0)} iv={_iv_val:.1f}% "
+                    f"vol={p.get('volume',0)} oi={p.get('openInterest',0)} iv={_iv_val:.1f}% hv={p.get('histVolatility',0)} avgvol={p.get('avgVolume',0)} "
                     f"d={p.get('delta',0):.3f} g={p.get('gamma',0):.5f} th={p.get('theta',0):.5f} v={p.get('vega',0):.5f}"
                 )
+
+            # Main diagnostic line
             logger.info(
                 "OPT DIAG [%s]: %d/%d contracts in %.1fs (timeout=%s) | "
-                "bid=%d ask=%d last=%d | vol=%d oi=%d iv=%d | "
+                "bid=%d ask=%d last=%d | vol=%d oi=%d iv=%d hv=%d avgvol=%d | "
                 "delta=%d gamma=%d theta=%d vega=%d | samples: [%s]",
-                ticker, _total, len(contracts), _elapsed, _timeout,
+                ticker, _total, _n_contracts, _elapsed, _timeout,
                 _with_bid, _with_ask, _with_last,
-                _with_vol, _with_oi, _with_iv,
+                _with_vol, _with_oi, _with_iv, _with_hv, _with_avgvol,
                 _with_delta, _with_gamma, _with_theta, _with_vega,
                 " | ".join(_sample) if _sample else "none",
+            )
+
+            # ── Tick-106 failure detail: log exactly which contracts are missing IV ──
+            if _zero_iv:
+                _iv_pct = (1.0 - len(_zero_iv) / max(_total, 1)) * 100
+                # Show first 10 and last 5 zero-IV contracts to keep log manageable
+                _show = _zero_iv[:10]
+                if len(_zero_iv) > 10:
+                    _show += ["..."] + _zero_iv[-5:]
+                logger.warning(
+                    "OPT DIAG [%s]: tick 106 (impliedVolatility) MISSING on %d/%d contracts (%.0f%% received) | "
+                    "zero-IV strikes: %s",
+                    ticker, len(_zero_iv), _total, _iv_pct, ", ".join(_show),
+                )
+            if _zero_vol:
+                logger.info(
+                    "OPT DIAG [%s]: tickType 8 (volume) MISSING on %d/%d contracts",
+                    ticker, len(_zero_vol), _total,
+                )
+            if _zero_oi:
+                logger.info(
+                    "OPT DIAG [%s]: generic tick 101 (openInterest) MISSING on %d/%d contracts",
+                    ticker, len(_zero_oi), _total,
+                )
+            if _zero_greeks and _with_iv >= _total * 0.5:
+                # Only warn about missing greeks if IV actually arrived
+                # (if IV is also missing, the root cause is likely upstream)
+                logger.info(
+                    "OPT DIAG [%s]: modelGreeks (delta/gamma/theta/vega) MISSING on %d/%d contracts",
+                    ticker, len(_zero_greeks), _total,
+                )
+
+            # ── Generic tick delivery summary (percentage of contracts that received each field) ──
+            _pcts = {}
+            for _field, _count in [
+                ("bid", _with_bid), ("ask", _with_ask), ("last", _with_last),
+                ("vol(tick8)", _with_vol), ("oi(tick101)", _with_oi),
+                ("iv(tick106)", _with_iv), ("hv(tick104)", _with_hv),
+                ("avgvol(tick105)", _with_avgvol),
+                ("delta", _with_delta), ("gamma", _with_gamma),
+                ("theta", _with_theta), ("vega", _with_vega),
+            ]:
+                _pcts[_field] = f"{_count}/{_n_contracts} (" + (
+                    f"{_count / max(_n_contracts, 1) * 100:.0f}%"
+                ) + ")"
+            logger.info(
+                "OPT DIAG [%s]: generic tick arrival summary => %s",
+                ticker,
+                " | ".join(f"{k}={v}" for k, v in _pcts.items()),
             )
 
             if prices:

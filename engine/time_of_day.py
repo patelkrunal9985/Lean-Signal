@@ -130,6 +130,58 @@ MIN_MINUTES_BEFORE_CLOSE = 15  # block entries after 3:45 PM ET
 # -- Underlying tickers that use 4:15 PM ET close (SPXW weekly) --
 LATE_CLOSE_TICKERS = frozenset({"SPX"})
 
+# -- Globex / After-Hours regime adjustments --
+# Futures trade 24/5, but volume drops 80-95% outside RTH (9:30-16:00).
+# These thresholds compensate so strategies tuned for RTH liquidity
+# still fire during Globex when conditions warrant.
+GLOBEX_REGIME = {
+    # Confidence thresholds lowered: Globes signals are noisier but valid
+    "confidence_threshold_scale": 0.50,      # halve confidence thresholds (0.12 → 0.06)
+    "volume_gate_scale": 0.15,               # lower volume gates to 15% of RTH
+    "min_pending_cycles_boost": 1,           # +1 extra confirmation cycle needed
+    # Strategy confidence minimums per window
+    "min_confidence": {
+        "pre_market": 0.06,
+        "after_hours": 0.06,
+        "closed": 0.10,                      # weekend: still higher bar
+    },
+}
+
+
+def is_globex_session() -> bool:
+    """Check if we're currently in a Globex / after-hours session.
+
+    Returns True for pre-market, after-hours, closed (weekend), and
+    any time outside the regular RTH window (9:30-16:00 ET).
+    """
+    window = get_time_window()
+    return window in ("pre_market", "after_hours", "closed")
+
+
+def get_globex_adjusted_confidence_min() -> float:
+    """Get the minimum confidence threshold, adjusted for Globex if applicable."""
+    base = get_min_confidence()
+    if is_globex_session():
+        scale = GLOBEX_REGIME["confidence_threshold_scale"]
+        window = get_time_window()
+        globex_min = GLOBEX_REGIME["min_confidence"].get(window, 0.06)
+        return max(base * scale, globex_min)
+    return base
+
+
+def get_globex_volume_scale() -> float:
+    """Get volume gate multiplier for Globex sessions."""
+    if is_globex_session():
+        return GLOBEX_REGIME["volume_gate_scale"]
+    return 1.0
+
+
+def get_globex_pending_cycle_boost() -> int:
+    """Get extra confirmation cycles needed during Globex."""
+    if is_globex_session():
+        return GLOBEX_REGIME["min_pending_cycles_boost"]
+    return 0
+
 
 def _current_et_minutes() -> int:
     """Return minutes since midnight ET, or 9999 if weekend."""

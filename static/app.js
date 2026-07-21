@@ -9,7 +9,13 @@ let _status = {};
 let _autoRunActive = false;
 let _pollTimer = null;
 let _priceTimer = null;
+let _flowTimer = null;
 let _livePrices = {};
+let _flowData = {};
+let _notifyPermitted = false;
+let _lastFlipCount = -1;
+let _lastTpCount = -1;
+let _firstLoad = true;
 
 function formatAge(sec) {
   if (!sec || sec <= 0) return '';
@@ -62,6 +68,71 @@ function toggleCollapse(bodyId, headerEl) {
   }
 }
 
+/* ═══════════════════════════════════════════════════════════════
+   Order Flow Ticker
+   ═══════════════════════════════════════════════════════════════ */
+
+async function loadFlowData() {
+  try {
+    var controller = new AbortController();
+    var timeout = setTimeout(function() { controller.abort(); }, 3000);
+    var resp = await fetch('/api/order-flow-ticker', { signal: controller.signal });
+    clearTimeout(timeout);
+    if (resp.ok) _flowData = await resp.json();
+    renderPriceTicker();
+  } catch(e) { /* silent */ }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Desktop Notifications
+   ═══════════════════════════════════════════════════════════════ */
+
+function checkNotifyPermission() {
+  if (!('Notification' in window)) return;
+  _notifyPermitted = Notification.permission === 'granted';
+  if (Notification.permission === 'default') {
+    // Show a small prompt in the header
+    var ctrls = document.querySelector('.header-controls');
+    if (ctrls && !document.getElementById('notify-perm-btn')) {
+      var btn = document.createElement('button');
+      btn.id = 'notify-perm-btn';
+      btn.className = 'notify-perm-btn';
+      btn.textContent = '🔔 Enable Alerts';
+      btn.onclick = function() {
+        Notification.requestPermission().then(function(p) {
+          _notifyPermitted = p === 'granted';
+          btn.className = 'notify-perm-btn ' + p;
+          btn.textContent = p === 'granted' ? '🔔 Alerts On' : '🔕 Denied';
+        });
+      };
+      ctrls.appendChild(btn);
+    }
+  }
+}
+
+function sendDesktopNotification(title, body, tag) {
+  if (!_notifyPermitted || !('Notification' in window)) return;
+  try {
+    var n = new Notification(title, { body: body, tag: tag, icon: '/static/favicon.ico' });
+    setTimeout(function() { n.close(); }, 8000);
+  } catch(e) { /* silent */ }
+}
+
+function showToast(message, type) {
+  var container = document.getElementById('toast-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'toast-container';
+    container.className = 'toast-container';
+    document.body.appendChild(container);
+  }
+  var toast = document.createElement('div');
+  toast.className = 'toast ' + (type || 'flip-info');
+  toast.textContent = message;
+  container.appendChild(toast);
+  setTimeout(function() { toast.remove(); }, 5000);
+}
+
 document.addEventListener('DOMContentLoaded', function() {
   var savedInterval = localStorage.getItem('lean_signals_interval');
   if (savedInterval) document.getElementById('settings-interval').value = savedInterval;
@@ -73,6 +144,11 @@ document.addEventListener('DOMContentLoaded', function() {
   // Live price ticker — polls lightweight /api/prices (reads cache, 0 IBKR slots)
   loadPrices();
   _priceTimer = setInterval(loadPrices, 2000);
+  // Order flow ticker — cumulative delta from tick engine
+  loadFlowData();
+  _flowTimer = setInterval(loadFlowData, 5000);
+  // Check notification permission
+  checkNotifyPermission();
 });
 
 function switchTab(name) {
@@ -166,6 +242,22 @@ function updateUI() {
     if (flipPotCount > 0) {
       sigLabel += '  🔵 <span class="flip-badge potential">' + flipPotCount + ' watching</span>';
     }
+
+    // ── Desktop notifications for new flips ──
+    if (!_firstLoad && flipCount > _lastFlipCount && document.getElementById('settings-desktop-notify').checked) {
+      sendDesktopNotification('⚠️ Major Signal Flip', flipCount + ' significant flip' + (flipCount > 1 ? 's' : '') + ' detected', 'flip-alert');
+      showToast('🔴 ' + flipCount + ' major flip' + (flipCount > 1 ? 's' : '') + ' detected!', 'flip-major');
+    }
+    _lastFlipCount = flipCount;
+
+    // ── Check for take-profit events ──
+    var tpEvents = last.take_profit_events || [];
+    if (!_firstLoad && tpEvents.length > _lastTpCount && document.getElementById('settings-desktop-notify').checked) {
+      sendDesktopNotification('💰 Take Profit Opportunity', tpEvents.length + ' signal' + (tpEvents.length > 1 ? 's' : '') + ' weakening', 'tp-alert');
+      showToast('💰 Take profit: ' + tpEvents.length + ' signal' + (tpEvents.length > 1 ? 's' : '') + ' weakening', 'take-profit');
+    }
+    _lastTpCount = tpEvents.length;
+    _firstLoad = false;
     document.getElementById('total-signals').innerHTML = sigLabel;
 
     var elapsed = last.elapsed_seconds || 0;
@@ -230,6 +322,19 @@ function renderPriceTicker() {
     var arrow = e.change > 0 ? '▲' : e.change < 0 ? '▼' : '';
     html += '<span class="ticker-quote"><strong>' + e.ticker.replace('=F','') + '</strong> <span class="' + cls + '">' + e.price.toFixed(0) + ' ' + arrow + '</span></span>';
   });
+  // ── Order flow deltas (from tick engine) ──
+  if (_flowData && Object.keys(_flowData).length > 0) {
+    html += '<span class="flow-section">Flow:</span>';
+    var flows = ['ES=F','NQ=F','RTY=F','YM=F'];
+    flows.forEach(function(t) {
+      var f = _flowData[t];
+      if (f && f.cumulative_delta) {
+        var sign = f.cumulative_delta > 0 ? '+' : '';
+        var bullBear = f.cumulative_delta > 0 ? 'bullish' : 'bearish';
+        html += '<span class="ticker-quote"><strong>' + t.replace('=F','') + ' Δ</strong> <span class="flow-delta ' + bullBear + '">' + sign + formatBigNum(f.cumulative_delta) + '</span></span>';
+      }
+    });
+  }
   bar.innerHTML = html || '<span style="color:var(--text-muted)">Waiting for price data...</span>';
 }
 
@@ -280,29 +385,34 @@ function createSignalCard(signal, cycle, flips, flipPotentials, signalStates) {
   var card = document.createElement('div');
   card.className = 'signal-card';
   var dirClass = signal.direction === 'long' ? 'long' : signal.direction === 'short' ? 'short' : 'neutral';
-  var dirArrow = signal.direction === 'long' ? '▲' : signal.direction === 'short' ? '▼' : '–';
-
-  // ── Signal state badge (persistence) ──
-  var signalStateHtml = '';
-  if (signalStates && signalStates.by_state) {
-    var tickerStates = signalStates.by_state;
-    var thisState = null;
-    for (var st in tickerStates) {
-      var tickersInState = tickerStates[st] || [];
-      for (var i = 0; i < tickersInState.length; i++) {
-        if (tickersInState[i].ticker === signal.ticker) {
-          thisState = tickersInState[i];
-          break;
+  var dirArrow = signal.direction === 'long' ? '▲' : signal.direction === 'short' ? '▼' : '–';    // ── Signal state badge (persistence) ──
+    var signalStateHtml = '';
+    var isWeakening = false;
+    if (signalStates && signalStates.by_state) {
+      var tickerStates = signalStates.by_state;
+      var thisState = null;
+      for (var st in tickerStates) {
+        var tickersInState = tickerStates[st] || [];
+        for (var i = 0; i < tickersInState.length; i++) {
+          if (tickersInState[i].ticker === signal.ticker) {
+            thisState = tickersInState[i];
+            break;
+          }
+        }
+        if (thisState) break;
+      }
+      if (thisState && thisState.state && thisState.state !== 'none') {
+        var dur = stateAge(thisState.state_since);
+        var durLabel = dur ? ' for ' + dur : '';
+        var stateClass = thisState.state;
+        signalStateHtml = '<span class="state-badge ' + stateClass + '">' + thisState.state.toUpperCase() + ' x' + (thisState.consecutive_same || 1) + durLabel + '</span>';
+        if (thisState.state === 'weakening') isWeakening = true;
+        // Age decay display
+        if (thisState.age_decay && thisState.age_decay < 1.0) {
+          signalStateHtml += ' <span class="age-decay-badge">decaying (' + thisState.age_decay.toFixed(2) + ')</span>';
         }
       }
-      if (thisState) break;
     }
-    if (thisState && thisState.state && thisState.state !== 'none' && thisState.state !== 'watching') {
-      var dur = stateAge(thisState.state_since);
-      var durLabel = dur ? ' for ' + dur : '';
-      signalStateHtml = '<span class="state-badge ' + thisState.state + '">' + thisState.state.toUpperCase() + ' x' + (thisState.consecutive_same || 1) + durLabel + '</span>';
-    }
-  }
 
   // ── Entry/Exit levels ──
   var entryPrice = signal.entry_price || signal.current_price || 0;
@@ -384,23 +494,37 @@ function createSignalCard(signal, cycle, flips, flipPotentials, signalStates) {
   } else if (flipPotInfo) {
     var needed = flipPotInfo.needs_cycles || 1;
     flipRow = '<div class="row-flip"><span class="flip-badge potential">↻ WATCHING: needs ' + needed + ' more cycle' + (needed > 1 ? 's' : '') + ' to confirm</span></div>';
-  }
+  }    // ── Build card ──
+    // Conviction meter
+    var convTier = (signal.consensus_meta && signal.consensus_meta.consensus_conviction_tier) || 'bronze';
+    var convPct = signal.confidence * 100;
+    var meterWidth = Math.max(convPct, 5);
+    var convictionHtml =
+      '<div class="conviction-meter">' +
+        '<span class="meter-pct ' + convTier + '">' + convPct.toFixed(1) + '%</span>' +
+        '<div class="meter-bar ' + convTier + '" style="width:' + meterWidth + '%"></div>' +
+      '</div>';
 
-  // ── Build card ──
-  card.innerHTML =
-    '<div class="row1">' +
-      '<div><span class="ticker-name">' + signal.ticker + '</span>' +
-      '<span class="instrument-badge">' + signal.instrument_type + '</span>' +
-      signalStateHtml + '</div>' +
-      '<span class="direction-badge ' + dirClass + '">' + dirArrow + ' ' + signal.direction.toUpperCase() + '</span>' +
-    '</div>' +
-    '<div class="row2">' +
-      '<span>Confidence: <strong>' + (signal.confidence * 100).toFixed(1) + '%</strong></span>' +
-      '<span>Score: <strong>' + (signal.composite_score * 100).toFixed(1) + '%</strong></span>' +
-      '<span>Strategies: <strong>' + (signal.agreeing_count || 0) + '/' + (signal.strategy_count || 0) + '</strong></span>' +
-      '<span>Regime: <strong>' + (signal.regime || '?') + '</strong></span>' +
-    '</div>' +
-    levelsHtml + miniDashHtml + flipRow;
+    // TAKE PROFIT banner for weakening state
+    var tpBannerHtml = '';
+    if (isWeakening) {
+      tpBannerHtml = '<div class="take-profit-banner">⚠️ TAKE PROFIT — Signal Weakening</div>';
+    }
+
+    card.innerHTML =
+      '<div class="row1">' +
+        '<div><span class="ticker-name">' + signal.ticker + '</span>' +
+        '<span class="instrument-badge">' + signal.instrument_type + '</span>' +
+        signalStateHtml + '</div>' +
+        '<span class="direction-badge ' + dirClass + '">' + dirArrow + ' ' + signal.direction.toUpperCase() + '</span>' +
+      '</div>' +
+      '<div class="row2">' +
+        convictionHtml +
+        '<span>Score: <strong>' + (signal.composite_score * 100).toFixed(1) + '%</strong></span>' +
+        '<span>Strategies: <strong>' + (signal.agreeing_count || 0) + '/' + (signal.strategy_count || 0) + '</strong></span>' +
+        '<span>Regime: <strong>' + (signal.regime || '?') + '</strong></span>' +
+      '</div>' +
+      levelsHtml + miniDashHtml + tpBannerHtml + flipRow;
 
   // ── Click to popup ──
   card.onclick = function() { showSignalPopup(signal, cycle); };

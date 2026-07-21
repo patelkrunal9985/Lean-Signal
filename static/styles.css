@@ -144,6 +144,7 @@ header {
   font-variant-numeric: tabular-nums;
   overflow-x: auto;
   white-space: nowrap;
+  align-items: center;
 }
 .price-ticker-bar .ticker-quote {
   display: inline-flex;
@@ -156,6 +157,20 @@ header {
 }
 .price-ticker-bar .up { color: var(--accent); }
 .price-ticker-bar .down { color: var(--danger); }
+.price-ticker-bar .flow-section {
+  border-left: 1px solid var(--border);
+  padding-left: 12px;
+  margin-left: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.price-ticker-bar .flow-delta {
+  font-weight: 600;
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+.price-ticker-bar .flow-delta.bullish { color: var(--accent); }
+.price-ticker-bar .flow-delta.bearish { color: var(--danger); }
 
 /* ── Signal Card ── */
 .signal-card {
@@ -235,9 +250,37 @@ header {
 .state-badge.confirmed { background: var(--accent-dim); color: var(--accent); }
 .state-badge.active { background: #1a3a6e; color: var(--info); }
 .state-badge.pending { background: var(--warning-dim); color: var(--warning); }
+.state-badge.weakening { background: var(--danger-dim); color: var(--danger); animation: weakenPulse 1s ease-in-out infinite; }
 .state-badge.watching { background: var(--bg-hover); color: var(--text-muted); }
 
-/* ── Data Freshness ── */
+@keyframes weakenPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* ── Age Decay Display ── */
+.age-decay-badge {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--warning);
+  background: var(--warning-dim);
+}
+
+/* ── Take-Profit Banner ── */
+.take-profit-banner {
+  display: block;
+  padding: 6px 12px;
+  margin-top: 4px;
+  background: var(--danger-dim);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--danger);
+  animation: weakenPulse 2s ease-in-out infinite;
+}
 .freshness-badge {
   display: inline-block;
   padding: 2px 6px;

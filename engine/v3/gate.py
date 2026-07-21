@@ -132,16 +132,43 @@ def _is_macro_event_window(ticker: str, ticker_data: dict) -> tuple[bool, str]:
 
 
 def _check_correlation_conflict(ticker: str, signal_dir: str, ticker_data: dict) -> tuple[bool, str]:
-    """Check if correlated instruments are moving opposite to our signal."""
+    """Check if correlated instruments have active opposing signals.
+
+    Queries the signal persistence engine for active directions of correlated
+    tickers. If ES is LONG and NQ is SHORT/ACTIVE in the same cycle, flag
+    both with reduced confidence.
+    """
     conflicts = CORRELATION_CONFLICTS.get(ticker, [])
     if not conflicts:
         return False, ""
-    
-    # Check if any correlated ticker has strong opposite signal
+
+    if signal_dir == "neutral":
+        return False, ""
+
+    try:
+        from engine.signal_persistence import get_ticker_state
+    except ImportError:
+        return False, ""
+
+    opposite_count = 0
+    conflict_tickers = []
     for ct in conflicts:
-        # Would need other ticker data - for now check price change direction
-        # In production, this would query other tickers from the cycle
-        pass
+        ct_state = get_ticker_state(ct)
+        ct_dir = ct_state.get("active_direction", "neutral")
+        ct_sig_state = ct_state.get("state", "none")
+
+        # Only count active/confirmed opposing signals (not watching/pending noise)
+        if ct_sig_state in ("active", "confirmed") and ct_dir in ("long", "short"):
+            if ct_dir != signal_dir:
+                opposite_count += 1
+                conflict_tickers.append(f"{ct}={ct_dir}")
+
+    if opposite_count >= 2:
+        return True, f"correlation_conflict_{opposite_count}_opposing_{','.join(conflict_tickers)}"
+    if opposite_count >= 1:
+        # Single conflict: flag but don't block — reduce confidence
+        return False, f"correlation_warning_{conflict_tickers[0]}"
+
     return False, ""
 
 
@@ -327,6 +354,13 @@ class SignalQualityGate:
         # ── News sentiment filter (soft — just logs) ──
         _, news_reason = _check_news_sentiment(ticker_data)
 
+        # ── Correlation conflict check (futures: ES vs NQ, etc.) ──
+        corr_blocked, corr_reason = _check_correlation_conflict(ticker, alignment["direction"], ticker_data)
+        if corr_blocked:
+            confidence_mult *= 0.70  # Reduce confidence but don't block
+        # Store correlation info for transparency
+        correlation_info = corr_reason if corr_reason else "none"
+
         return {
             "passed": True,
             "ticker": ticker,
@@ -343,6 +377,7 @@ class SignalQualityGate:
             "macro_filter": macro_reason or "clear",
             "volume_filter": vol_reason or "ok",
             "news_filter": news_reason or "neutral",
+            "correlation_filter": correlation_info,
         }
 
     # -- Layer 2.5: Time-of-Day + VWAP structural check --

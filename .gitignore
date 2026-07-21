@@ -27,3 +27,10 @@ data/
 
 server_*.txt
 server_*.log
+
+# Live runtime logs
+live_stdout.txt
+live_stderr.txt
+
+# Windows artifacts
+nul

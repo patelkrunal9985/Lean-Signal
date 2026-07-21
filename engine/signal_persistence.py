@@ -5,6 +5,8 @@ Every ticker has a persistent signal state that builds conviction over time
 instead of flipping on every single cycle change.
 
 States: NONE → WATCHING → PENDING → ACTIVE → CONFIRMED
+         ↑                  ↓
+         └── WEAKENING ←────┘  (sticky: ACTIVE/CONFIRMED don't vanish silently)
 
 Key design decisions:
 - A direction change requires 2+ consecutive cycles before triggering a flip
@@ -12,22 +14,36 @@ Key design decisions:
 - Flip significance is scored (0-1) based on magnitude, agreement, regime alignment
 - Only flips with score >= 0.6 are surfaced as "real flips" to the dashboard
 - Lower-scoring flips are shown as "potential flips" in a separate list
+- ACTIVE/CONFIRMED signals are "sticky" — they don't disappear on one neutral cycle.
+  Instead they enter WEAKENING state, firing a "take profit" notification.
+- Signal age decay: older signals lose confidence over time.
 """
 from __future__ import annotations
 import time
 import threading
 from typing import Any
 
+from utils.logger import get_logger
+
+logger = get_logger("engine.signal_persistence")
+
 _lock = threading.RLock()  # RLock: get_all_states() calls get_ticker_state() which needs re-entrant lock
+
+# Track pre-weakening state for proper recovery
+_pre_weakening_state: dict[str, str] = {}  # ticker → state before weakening
 
 # ── All possible signal states in conviction order ──
 SIGNAL_STATES = {
     "none": 0,
     "watching": 1,
-    "pending": 2,
-    "active": 3,
-    "confirmed": 4,
+    "weakening": 2,
+    "pending": 3,
+    "active": 4,
+    "confirmed": 5,
 }
+
+# Display order for UI (highest conviction first)
+SIGNAL_STATE_DISPLAY_ORDER = ["confirmed", "active", "pending", "weakening", "watching", "none"]
 
 # ── Module-level persistence state ──
 # Thread-safe: all mutating operations acquire _lock
@@ -39,6 +55,8 @@ _consecutive_same: dict[str, int] = {}            # ticker → consecutive cycle
 _consecutive_neutral: dict[str, int] = {}         # ticker → consecutive neutral cycles
 _active_direction: dict[str, str] = {}            # ticker → the direction we're committed to
 _last_flip_cycle: dict[str, int] = {}             # ticker → cycle_id of last significant flip
+_take_profit_events: dict[str, list[dict]] = {}   # ticker → list of take-profit notifications
+_consecutive_counter: dict[str, int] = {}         # ticker → consecutive cycles in opposite direction (for sticky downgrade)
 
 # ── Dynamic strategy authority tracking ──
 # Tracks each strategy's recent prediction accuracy vs final consensus direction.
@@ -54,7 +72,22 @@ MIN_ACTIVE_CYCLES = 3              # Need 3 consecutive same-direction for pendi
 MIN_CONFIRMED_CYCLES = 5           # Need 5 consecutive same-direction for active→confirmed
 FLIP_SCORE_THRESHOLD = 0.60        # Only surface flips with score >= this
 MAX_FLIP_HISTORY = 20              # Max flip events to keep per ticker
-NEUTRAL_COOLDOWN_MAX = 3           # After this many consecutive neutrals, reset to NONE
+MAX_TAKE_PROFIT_EVENTS = 10        # Max take-profit events per ticker
+
+# ── Sticky signal thresholds ──
+# ACTIVE/CONFIRMED signals don't reset on a few neutral cycles.
+# They enter WEAKENING first, then only reset after sustained counter-evidence.
+NEUTRAL_COOLDOWN_MAX = 3           # Standard: after this many neutrals, reset to NONE
+NEUTRAL_COOLDOWN_ACTIVE = 6        # For ACTIVE signals: 6 neutrals before full reset
+NEUTRAL_COOLDOWN_CONFIRMED = 8     # For CONFIRMED signals: 8 neutrals before full reset
+STICKY_COUNTER_CYCLES = 2          # Need 2 consecutive counter-direction cycles to downgrade from ACTIVE/CONFIRMED
+
+# ── Signal age decay ──
+# Older signals (last confirmed 30+ min ago) get their confidence decayed.
+# decayed_score = score × max(0.5, 1.0 - (age_minutes / 60))
+SIGNAL_AGE_DECAY_START_MIN = 15    # Start decaying after 15 minutes
+SIGNAL_AGE_DECAY_HALF_MIN = 60     # 50% decay after 60 minutes
+SIGNAL_AGE_DECAY_FLOOR = 0.50      # Never decay below 50%
 
 
 def _get_prev_direction(ticker: str) -> str | None:
@@ -146,30 +179,69 @@ def _compute_state(direction: str, ticker: str) -> tuple[str, bool]:
     """Determine the next state for a ticker given its direction and history.
 
     Returns (new_state, significant_transition).
+
+    Sticky behavior for ACTIVE/CONFIRMED:
+    - One neutral cycle → WEAKENING (not WATCHING)
+    - One counter-direction cycle → WEAKENING
+    - 2+ consecutive counter-cycles → downgrade to WATCHING
+    - Extended neutrals → gradual downgrade (weakening → watching → none)
     """
     prev_state = _signal_state.get(ticker, "none")
     prev_dir = _active_direction.get(ticker)
     streak = _consecutive_same.get(ticker, 0)
     neutral_streak = _consecutive_neutral.get(ticker, 0)
+    counter_streak = _consecutive_counter.get(ticker, 0)
+    is_sticky = prev_state in ("active", "confirmed")
 
-    # ── Neutral cooldown logic ──
+    # ── Neutral cooldown logic (extended for sticky states) ──
     if direction == "neutral":
-        if neutral_streak >= NEUTRAL_COOLDOWN_MAX:
+        if is_sticky:
+            cooldown_max = NEUTRAL_COOLDOWN_CONFIRMED if prev_state == "confirmed" else NEUTRAL_COOLDOWN_ACTIVE
+            if neutral_streak >= cooldown_max:
+                return "none", True  # Significant: CONFIRMED → NONE after extended neutrals
+            # Don't weaken on the first neutral — sticky signals survive one neutral
+            if neutral_streak >= 3:
+                return "weakening", True  # 3rd neutral: fire take-profit
+            if neutral_streak >= 2:
+                return "weakening", False  # 2nd neutral: enter weakening silently
+            # 1st neutral: stay in current sticky state (stick!)
+            return prev_state, False
+        else:
+            if neutral_streak >= NEUTRAL_COOLDOWN_MAX:
+                return "none", False
+            if prev_state != "none":
+                return "watching", False
             return "none", False
-        if prev_state != "none":
-            return "watching", False
-        return "none", False
 
-    # ── New direction, different from active direction ──
+    # ── Counter-direction detection ──
     if prev_dir and direction != prev_dir:
-        # Direction changed! Start watching, don't flip yet
-        return "watching", False
+        if is_sticky:
+            # Sticky: need 2+ counter-cycles to fully downgrade
+            if counter_streak >= STICKY_COUNTER_CYCLES:
+                return "watching", True  # Significant: downgrade from sticky → watching
+            # First counter-cycle → WEAKENING (fire take-profit)
+            return "weakening", True  # Significant! Take-profit notification
+        else:
+            # Non-sticky: immediate downgrade to watching
+            return "watching", False
+
+    # ── Recovery from weakening (same direction again) ──
+    if prev_state == "weakening" and prev_dir and direction == prev_dir:
+        # Restore to one level below the pre-weakening state
+        # Track what state we weakened from via a module-level dict
+        pre_weaken = _pre_weakening_state.get(ticker, "pending")
+        if pre_weaken == "confirmed":
+            return "active", True  # CONFIRMED→WEAKENING→ACTIVE
+        elif pre_weaken == "active":
+            return "pending", True  # ACTIVE→WEAKENING→PENDING
+        else:
+            return "pending", True
 
     # ── Same direction, escalate based on streak ──
     if streak >= MIN_CONFIRMED_CYCLES:
-        return "confirmed", prev_state in ("active", "pending")
+        return "confirmed", prev_state not in ("confirmed",)
     if streak >= MIN_ACTIVE_CYCLES:
-        return "active", prev_state == "pending"
+        return "active", prev_state not in ("active", "confirmed")
     if streak >= MIN_PENDING_CYCLES:
         return "pending", True  # Transition from watching→pending is noteworthy
     return "watching", False
@@ -233,26 +305,63 @@ def update(
         if direction == "neutral":
             _consecutive_neutral[ticker] = _consecutive_neutral.get(ticker, 0) + 1
             _consecutive_same[ticker] = 0
+            _consecutive_counter[ticker] = 0
         elif direction == prev_direction:
             _consecutive_same[ticker] = _consecutive_same.get(ticker, 0) + 1
+            _consecutive_neutral[ticker] = 0
+            _consecutive_counter[ticker] = 0
+        elif prev_direction is not None and direction != prev_direction:
+            # Opposite direction from committed direction
+            _consecutive_counter[ticker] = _consecutive_counter.get(ticker, 0) + 1
+            _consecutive_same[ticker] = 1  # Starting new streak in current direction
             _consecutive_neutral[ticker] = 0
         else:
             _consecutive_same[ticker] = 1  # Starting new streak
             _consecutive_neutral[ticker] = 0
+            _consecutive_counter[ticker] = 0
 
         # ── Compute new state ──
         new_state, significant = _compute_state(direction, ticker)
         snapshot["state"] = new_state
 
-        if new_state != _signal_state.get(ticker):
+        old_state = _signal_state.get(ticker, "none")
+        if new_state != old_state:
             # State changed
             _signal_state[ticker] = new_state
             _state_since[ticker] = time.time()
             if new_state in ("pending", "active", "confirmed"):
                 _active_direction[ticker] = direction
+            elif new_state == "weakening":
+                # Keep the active direction — it's weakening, not flipped
+                if prev_direction and prev_direction != "neutral":
+                    _active_direction[ticker] = prev_direction
             elif new_state == "none":
-                # Clear active direction when state resets to none (after neutral cooldown)
+                # Clear active direction when state resets to none
                 _active_direction.pop(ticker, None)
+                _consecutive_counter.pop(ticker, None)
+
+            # ── Generate take-profit event when sticky signal weakens ──
+            if old_state in ("active", "confirmed") and new_state == "weakening":
+                _pre_weakening_state[ticker] = old_state  # Remember for recovery
+                tp_event = {
+                    "ticker": ticker,
+                    "type": "take_profit",
+                    "from_state": old_state,
+                    "to_state": new_state,
+                    "direction": _active_direction.get(ticker, "neutral"),
+                    "reason": _build_take_profit_reason(direction, old_state),
+                    "cycle_id": cycle_id,
+                    "timestamp": time.time(),
+                    "confidence": confidence,
+                }
+                _take_profit_events.setdefault(ticker, [])
+                _take_profit_events[ticker].append(tp_event)
+                if len(_take_profit_events[ticker]) > MAX_TAKE_PROFIT_EVENTS:
+                    _take_profit_events[ticker].pop(0)
+                logger.info(
+                    "%s: TAKE PROFIT — %s → %s (%s)",
+                    ticker, old_state.upper(), new_state.upper(), tp_event["reason"],
+                )
         else:
             # Same state, just update direction tracking
             if direction != "neutral":
@@ -310,6 +419,17 @@ def update(
         return flip_event
 
 
+def _build_take_profit_reason(current_direction: str, from_state: str) -> str:
+    """Build a readable reason for a take-profit event."""
+    parts = []
+    if current_direction == "neutral":
+        parts.append("signal_gone_neutral")
+    else:
+        parts.append("counter_direction_detected")
+    parts.append(f"from_{from_state}")
+    return "|".join(parts)
+
+
 def _build_flip_reasons(
     score: float,
     net_score_change: float,
@@ -337,6 +457,7 @@ def get_ticker_state(ticker: str) -> dict:
     """Get the current state info for a single ticker."""
     with _lock:
         mem = _signal_memory.get(ticker, [])
+        decayed_conf, decay = get_age_decayed_confidence(ticker)
         return {
             "ticker": ticker,
             "state": _signal_state.get(ticker, "none"),
@@ -344,10 +465,13 @@ def get_ticker_state(ticker: str) -> dict:
             "active_direction": _active_direction.get(ticker, "neutral"),
             "consecutive_same": _consecutive_same.get(ticker, 0),
             "consecutive_neutral": _consecutive_neutral.get(ticker, 0),
+            "consecutive_counter": _consecutive_counter.get(ticker, 0),
             "memory_depth": len(mem),
             "last_flip_cycle": _last_flip_cycle.get(ticker, 0),
             "current_signal": mem[-1] if mem else None,
             "trend": _get_trend_direction(mem) if len(mem) >= 3 else "flat",
+            "age_decay": decay,
+            "decayed_confidence": round(decayed_conf, 4),
         }
 
 
@@ -371,6 +495,7 @@ def get_all_states() -> dict:
             "confirmed": state_counts.get("confirmed", 0),
             "active": state_counts.get("active", 0),
             "pending": state_counts.get("pending", 0),
+            "weakening": state_counts.get("weakening", 0),
             "watching": state_counts.get("watching", 0),
             "none": state_counts.get("none", 0),
         }
@@ -431,15 +556,85 @@ def get_signal_strength(ticker: str) -> float:
     - State conviction weight
     - Consecutive same-direction bonus
     - Confidence from last cycle
+    - Age decay factor
     """
     with _lock:
         state = _signal_state.get(ticker, "none")
-        state_weight = SIGNAL_STATES.get(state, 0) / 4.0  # 0-1
+        state_weight = SIGNAL_STATES.get(state, 0) / 5.0  # 0-1 (now 5 states)
         streak = _consecutive_same.get(ticker, 0)
         streak_bonus = min(streak * 0.1, 0.3)
         mem = _signal_memory.get(ticker, [])
-        latest_conf = mem[-1].get("confidence", 0) if mem else 0
+        if mem:
+            latest = mem[-1]
+            latest_conf = latest.get("confidence", 0)
+            # Apply age decay
+            age_sec = time.time() - latest.get("timestamp", time.time())
+            age_min = age_sec / 60.0
+            if age_min > SIGNAL_AGE_DECAY_START_MIN:
+                decay = max(SIGNAL_AGE_DECAY_FLOOR, 1.0 - (age_min / SIGNAL_AGE_DECAY_HALF_MIN))
+                latest_conf *= decay
+        else:
+            latest_conf = 0
         return min(state_weight * 0.5 + streak_bonus * 0.3 + latest_conf * 0.2, 1.0)
+
+
+def get_age_decayed_confidence(ticker: str) -> tuple[float, float]:
+    """Get the age-decayed confidence and decay factor for a ticker.
+
+    Returns (decayed_confidence, decay_factor).
+    decay_factor = 1.0 means no decay; 0.5 means fully decayed.
+    """
+    with _lock:
+        mem = _signal_memory.get(ticker, [])
+        if not mem:
+            return 0.0, 1.0
+        latest = mem[-1]
+        conf = latest.get("confidence", 0)
+        age_sec = time.time() - latest.get("timestamp", time.time())
+        age_min = age_sec / 60.0
+        if age_min <= SIGNAL_AGE_DECAY_START_MIN:
+            return conf, 1.0
+        decay = max(SIGNAL_AGE_DECAY_FLOOR, 1.0 - (age_min / SIGNAL_AGE_DECAY_HALF_MIN))
+        return conf * decay, round(decay, 2)
+
+
+def get_signal_timeline(ticker: str, max_cycles: int = 10) -> list[dict]:
+    """Get the signal timeline (state transitions) for a ticker.
+
+    Returns the last N cycle snapshots with states.
+    Useful for rendering a compact state-transition timeline in the dashboard.
+    """
+    with _lock:
+        mem = _signal_memory.get(ticker, [])
+        if not mem:
+            return []
+        timeline = []
+        for snap in mem[-max_cycles:]:
+            timeline.append({
+                "direction": snap.get("direction", "neutral"),
+                "confidence": round(snap.get("confidence", 0), 4),
+                "state": snap.get("state", "none"),
+                "cycle_id": snap.get("cycle_id", 0),
+                "timestamp": snap.get("timestamp", 0),
+            })
+        return timeline
+
+
+def get_take_profit_events(ticker: str | None = None) -> list[dict]:
+    """Get take-profit events, optionally filtered by ticker.
+
+    Returns most recent events first.
+    """
+    with _lock:
+        all_events = []
+        if ticker:
+            events = _take_profit_events.get(ticker, [])
+            all_events.extend(events)
+        else:
+            for t, events in _take_profit_events.items():
+                all_events.extend(events)
+        all_events.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
+        return all_events
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -531,6 +726,8 @@ def reset():
         _flip_history.clear()
         _consecutive_same.clear()
         _consecutive_neutral.clear()
+        _consecutive_counter.clear()
         _active_direction.clear()
         _last_flip_cycle.clear()
+        _take_profit_events.clear()
         _strategy_performance.clear()

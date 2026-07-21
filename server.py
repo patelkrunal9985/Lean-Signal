@@ -230,6 +230,60 @@ class LeanSignalsHandler(BaseHTTPRequestHandler):
                     self._send_json({"flips": history})
                 except Exception:
                     self._send_json({"flips": []})
+            elif path == "/api/strategy-performance":
+                try:
+                    from engine.signal_persistence import get_strategy_performance_summary
+                    perf = get_strategy_performance_summary()
+                    # Sort by win rate descending
+                    sorted_perf = sorted(perf.items(), key=lambda x: x[1].get("win_rate", 0), reverse=True)
+                    top5 = sorted_perf[:5]
+                    bottom5 = sorted_perf[-5:] if len(sorted_perf) > 5 else []
+                    self._send_json({
+                        "all": {k: v for k, v in sorted_perf},
+                        "top5": {k: v for k, v in top5},
+                        "bottom5": {k: v for k, v in bottom5},
+                    })
+                except Exception:
+                    self._send_json({"all": {}, "top5": [], "bottom5": []})
+            elif path == "/api/signal-timeline":
+                try:
+                    from engine.signal_persistence import get_signal_timeline
+                    raw_ticker = params.get("ticker", [None])[0] if params.get("ticker") else None
+                    raw_cycles = params.get("cycles", ["10"])[0] if params.get("cycles") else "10"
+                    ticker_filter = raw_ticker if raw_ticker and raw_ticker.strip() else None
+                    max_cycles = int(raw_cycles)
+                    if ticker_filter:
+                        timeline = get_signal_timeline(ticker_filter, max_cycles)
+                        self._send_json({"ticker": ticker_filter, "timeline": timeline})
+                    else:
+                        self._send_json({"error": "ticker parameter required"}, 400)
+                except Exception:
+                    self._send_json({"error": "failed", "timeline": []})
+            elif path == "/api/order-flow-ticker":
+                try:
+                    from engine.tick_engine import get_tick_stats
+                    result = {}
+                    for t in ["ES=F", "NQ=F", "RTY=F", "YM=F", "CL=F", "GC=F"]:
+                        stats = get_tick_stats(t)
+                        if stats and stats.get("cumulative_delta", 0) != 0:
+                            result[t] = {
+                                "cumulative_delta": stats.get("cumulative_delta", 0),
+                                "delta_60s": stats.get("delta_60s", 0),
+                                "vpin": stats.get("vpin", 0),
+                                "last_price": stats.get("last_price", 0),
+                            }
+                    self._send_json(result)
+                except Exception:
+                    self._send_json({})
+            elif path == "/api/take-profit-events":
+                try:
+                    from engine.signal_persistence import get_take_profit_events
+                    raw_ticker = params.get("ticker", [None])[0] if params.get("ticker") else None
+                    ticker_filter = raw_ticker if raw_ticker and raw_ticker.strip() else None
+                    events = get_take_profit_events(ticker=ticker_filter)
+                    self._send_json({"events": events})
+                except Exception:
+                    self._send_json({"events": []})
             else:
                 self._send_json({"error": "not_found"}, 404)
         except Exception as e:

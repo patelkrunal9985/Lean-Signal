@@ -890,6 +890,14 @@ def run_cycle() -> dict:
             }
         result["signal_states"] = all_states
 
+        # ── Take-profit events (from sticky signal persistence) ──
+        try:
+            from engine.signal_persistence import get_take_profit_events
+            tp_events = get_take_profit_events()
+            result["take_profit_events"] = tp_events[:10]  # Last 10
+        except Exception:
+            result["take_profit_events"] = []
+
         _last_cycle_result = result
         _cycle_history.insert(0, result)
         logger.info("Cycle #%d: saving history", cycle_id)

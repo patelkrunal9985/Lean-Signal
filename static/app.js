@@ -518,12 +518,14 @@ function createSignalCard(signal, cycle, flips, flipPotentials, signalStates) {
   }
 
   // ── Build card ──
-    // Conviction meter
+    // Conviction meter + tier badge
     var convTier = (signal.consensus_meta && signal.consensus_meta.consensus_conviction_tier) || 'bronze';
     var convPct = signal.confidence * 100;
     var meterWidth = Math.max(convPct, 5);
+    var tierBadge = '<span class="tier-badge ' + convTier + '">' + convTier.toUpperCase() + '</span>';
     var convictionHtml =
       '<div class="conviction-meter">' +
+        tierBadge +
         '<span class="meter-pct ' + convTier + '">' + convPct.toFixed(1) + '%</span>' +
         '<div class="meter-bar ' + convTier + '" style="width:' + meterWidth + '%"></div>' +
       '</div>';
@@ -537,11 +539,12 @@ function createSignalCard(signal, cycle, flips, flipPotentials, signalStates) {
     if (health && health.health !== undefined) {
       var healthPct = health.health;
       var healthLabel = health.label || 'caution';
+      var healthLabelDisplay = healthLabel.toUpperCase();
       var healthColors = { robust: 'var(--accent)', caution: 'var(--warning)', fragile: 'var(--danger)', terminal: '#666' };
       var hc = healthColors[healthLabel] || 'var(--text-muted)';
       healthHtml =
         '<div class="health-bar-row">' +
-          '<span class="health-label">Health</span>' +
+          '<span class="health-label-badge ' + healthLabel + '">' + healthLabelDisplay + '</span>' +
           '<div class="health-bar-track"><div class="health-bar-fill ' + healthLabel + '" style="width:' + healthPct + '%;background:' + hc + '"></div></div>' +
           '<span class="health-pct ' + healthLabel + '">' + healthPct + '</span>' +
         '</div>';
@@ -555,20 +558,23 @@ function createSignalCard(signal, cycle, flips, flipPotentials, signalStates) {
         }
       }
 
-      // Warnings
+      // Warnings — categorized by Health Score factor
       var warnings = health.warnings || [];
       if (warnings.length > 0) {
-        var warnLabels = [];
+        var warnItems = [];
         warnings.forEach(function(w) {
-          if (w.indexOf('stale_confirmation') >= 0) warnLabels.push('Stale ' + w.split('_').pop() + 'cyc');
-          else if (w === 'net_score_fading') warnLabels.push('Fading');
-          else if (w.indexOf('strategies_dropped') >= 0) warnLabels.push(w.split('_')[0] + ' dropped');
-          else if (w === 'confidence_scattered') warnLabels.push('Scattered');
-          else if (w === 'single_family_dominant') warnLabels.push('1-family');
-          else if (w === 'near_threshold') warnLabels.push('Near neutral');
-          else if (w === 'key_families_exiting') warnLabels.push('Key exit');
+          if (w === 'net_score_fading') warnItems.push({cat: 'Net Score', label: 'Fading', cls: 'warn-momentum'});
+          else if (w.indexOf('strategies_dropped') >= 0) warnItems.push({cat: 'Strategies', label: w.split('_')[0] + ' dropped', cls: 'warn-retention'});
+          else if (w === 'confidence_scattered') warnItems.push({cat: 'Tightness', label: 'Scattered', cls: 'warn-tightness'});
+          else if (w === 'single_family_dominant') warnItems.push({cat: 'Concentration', label: '1-family', cls: 'warn-diversity'});
+          else if (w === 'near_threshold') warnItems.push({cat: 'Margin', label: 'Near neutral', cls: 'warn-margin'});
+          else if (w === 'key_families_exiting') warnItems.push({cat: 'Concentration', label: 'Key exit', cls: 'warn-diversity'});
+          else if (w.indexOf('stale_confirmation') >= 0) warnItems.push({cat: 'Age', label: 'Stale ' + w.split('_').pop() + 'cyc', cls: 'warn-staleness'});
+          else warnItems.push({cat: 'Health', label: w.replace(/_/g, ' '), cls: ''});
         });
-        warningHtml = '<div class="health-warnings">' + warnLabels.map(function(l) { return '<span class="warn-chip">' + l + '</span>'; }).join('') + '</div>';
+        warningHtml = '<div class="health-warnings">' + warnItems.map(function(item) {
+          return '<span class="warn-chip ' + item.cls + '"><span class="warn-chip-cat">' + item.cat + ':</span>' + item.label + '</span>';
+        }).join('') + '</div>';
       }
     }
 
@@ -588,7 +594,7 @@ function createSignalCard(signal, cycle, flips, flipPotentials, signalStates) {
       '<span>Confidence: <strong>' + (signal.confidence * 100).toFixed(1) + '%</strong></span>' +
       '<span>Score: <strong>' + ((signal.composite_score || 0) * 100).toFixed(1) + '%</strong></span>' +
       '<span>Strategies: <strong>' + (signal.agreeing_count || 0) + '/' + (signal.strategy_count || 0) + '</strong></span>' +
-      '<span>Regime: <strong>' + (signal.regime || '?').replace(/_/g, ' ') + '</strong></span>' +
+      '<span>Regime: <span class="regime-badge ' + (signal.regime || 'unknown') + '">' + (signal.regime || '?').replace(/_/g, ' ') + '</span></span>' +
     '</div>' +
     levelsHtml + miniDashHtml + tpBannerHtml + flipRow;
 

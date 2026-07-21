@@ -578,8 +578,14 @@ function createSignalCard(signal, cycle, flips, flipPotentials, signalStates) {
       }
     }
 
+  // ── Final Verdict (synthesizes all indicators) ──
+  var verdict = signal.verdict || 'NO ACTION';
+  var verdictClass = 'verdict-badge ' + verdict.toLowerCase().replace(/\s+/g, '-');
+  var verdictHtml = '<div class="verdict-row"><span class="' + verdictClass + '">' + verdict + '</span></div>';
+
   // ── Assemble card HTML ──
   card.innerHTML =
+    verdictHtml +
     '<div class="row1">' +
       '<div><span class="ticker-name">' + signal.ticker + '</span>' +
         '<span class="instrument-badge">' + (signal.instrument_type || '') + '</span>' +
@@ -734,6 +740,15 @@ function showSignalPopup(signal, cycle) {
   var dirEl = document.getElementById('popup-direction');
   dirEl.textContent = signal.direction.toUpperCase();
   dirEl.className = 'direction-badge ' + signal.direction;
+
+  // ── Verdict in popup ──
+  var popupVerdictEl = document.getElementById('popup-verdict');
+  if (popupVerdictEl) {
+    var v = signal.verdict || 'NO ACTION';
+    popupVerdictEl.textContent = v;
+    popupVerdictEl.className = 'verdict-badge ' + v.toLowerCase().replace(/\s+/g, '-');
+  }
+
   document.getElementById('popup-confidence').textContent = (signal.confidence * 100).toFixed(1) + '%';
   document.getElementById('popup-regime').textContent = (signal.regime || '—').replace(/_/g, ' ');
   document.getElementById('popup-price').textContent = '$' + (signal.current_price || 0).toFixed(2);

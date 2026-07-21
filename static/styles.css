@@ -479,6 +479,51 @@ header {
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 
+/* ── Final Verdict Badge (synthesizes all indicators) ── */
+.verdict-row { margin-bottom: 6px; }
+.verdict-badge {
+  display: inline-block;
+  padding: 4px 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.verdict-badge.strong-long {
+  background: #0d3d1a; color: #2ea043; border: 1px solid var(--accent);
+  box-shadow: 0 0 8px rgba(46, 160, 67, 0.3);
+}
+.verdict-badge.strong-short {
+  background: #3d0d0d; color: #f85149; border: 1px solid var(--danger);
+  box-shadow: 0 0 8px rgba(248, 81, 73, 0.3);
+}
+.verdict-badge.long {
+  background: var(--accent-dim); color: var(--accent); border: 1px solid var(--accent);
+}
+.verdict-badge.short {
+  background: var(--danger-dim); color: var(--danger); border: 1px solid var(--danger);
+}
+.verdict-badge.hold {
+  background: var(--warning-dim); color: var(--warning); border: 1px solid var(--warning);
+}
+.verdict-badge.reduce {
+  background: #3d1a0d; color: #f0883e; border: 1px solid #f0883e;
+}
+.verdict-badge.exit {
+  background: var(--danger-dim); color: var(--danger); border: 1px solid var(--danger);
+  animation: weakenPulse 1.5s ease-in-out infinite;
+}
+.verdict-badge.wait {
+  background: #1a3a6e; color: var(--info); border: 1px solid var(--info);
+}
+.verdict-badge.avoid {
+  background: #2a2a2a; color: #9e9e9e; border: 1px solid #666;
+}
+.verdict-badge.no-action {
+  background: var(--bg-hover); color: var(--text-muted); border: 1px solid var(--border);
+}
+
 /* ── Conviction Meter ── */
 .conviction-meter { display: flex; align-items: center; gap: 6px; padding: 3px 0; }
 .conviction-meter .meter-pct { font-size: 12px; font-weight: 700; min-width: 42px; }

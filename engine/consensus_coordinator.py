@@ -382,6 +382,7 @@ def compute_consensus(
     atr: float = 0,
     sma_50: float = 0,
     dte: int | None = None,
+    volume_profile: dict = None,
 ) -> tuple[str, float, dict[str, Any]]:
     meta: dict[str, Any] = {}
     regime_weights = REGIME_WEIGHTS.get(regime, REGIME_WEIGHTS["ranging"]).copy()
@@ -654,7 +655,7 @@ def compute_consensus(
     # Cross-reference signal direction with volume profile value area / POC.
     # Signals aligned with high-volume nodes get a confidence boost.
     vp_boost, vp_label = _compute_volume_profile_confluence(
-        ticker, current_price, direction, instr_type,
+        ticker, current_price, direction, instr_type, volume_profile,
     )
     if vp_boost != 1.0:
         confidence = min(confidence * vp_boost, 0.95)
@@ -729,6 +730,7 @@ VP_OUTSIDE_VA_PENALTY = 0.90  # Entry outside value area: -10%
 
 def _compute_volume_profile_confluence(
     ticker: str, current_price: float, direction: str, instr_type: str,
+    volume_profile: dict = None,
 ) -> tuple[float, str]:
     """Compute volume profile confluence boost/penalty for a signal.
 
@@ -744,19 +746,35 @@ def _compute_volume_profile_confluence(
     if instr_type != "future" or current_price <= 0:
         return 1.0, "n/a"
 
-    try:
-        from engine.signal_persistence import get_ticker_state
-    except ImportError:
-        return 1.0, "n/a"
+    # Use the actual volume profile data passed from runner
+    vp = volume_profile or {}
+    if not vp or not vp.get("poc", 0):
+        return 1.0, "no_vp_data"
 
-    st = get_ticker_state(ticker)
-    sig = st.get("current_signal") or {}
-    families = sig.get("families", {})
+    poc = vp.get("poc", 0)
+    va_high = vp.get("value_area_high", vp.get("vah", 0))
+    va_low = vp.get("value_area_low", vp.get("val", 0))
 
-    # Check if volume_profile data exists from ticker data
-    # (We need to get volume profile data from the ticker_context, not signal memory)
-    # For now, provide a simple heuristic based on price position
-    return 1.0, "no_vp_data"
+    if poc <= 0:
+        return 1.0, "no_vp_data"
+
+    # POC proximity: within 0.5% of POC = strong confluence
+    poc_pct = abs(current_price - poc) / max(poc, 0.01)
+    if poc_pct <= 0.005:
+        return VP_POC_BOOST, "at_poc"
+
+    # Value area: between VA low and VA high
+    if va_high > 0 and va_low > 0:
+        if va_low <= current_price <= va_high:
+            return VP_VALUE_AREA_BOOST, "in_value_area"
+        else:
+            return VP_OUTSIDE_VA_PENALTY, "outside_value_area"
+
+    # Fallback: POC-only check if VA boundaries aren't available
+    if poc_pct <= 0.02:
+        return VP_VALUE_AREA_BOOST, "near_poc"
+
+    return VP_OUTSIDE_VA_PENALTY, "away_from_poc"
 
 
 def _build_reasons(

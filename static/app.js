@@ -386,23 +386,11 @@ function createSignalCard(signal, cycle, flips, flipPotentials, signalStates) {
   var card = document.createElement('div');
   card.className = 'signal-card';
   var dirClass = signal.direction === 'long' ? 'long' : signal.direction === 'short' ? 'short' : 'neutral';
-  var dirArrow = signal.direction === 'long' ? '▲' : signal.direction === 'short' ? '▼' : '–';    // ── Signal state badge (persistence) ──
+  var dirArrow = signal.direction === 'long' ? '▲' : signal.direction === 'short' ? '▼' : '–';    // ── Signal state badge (persistence) — O(1) lookup via by_ticker ──
     var signalStateHtml = '';
     var isWeakening = false;
-    if (signalStates && signalStates.by_state) {
-      var tickerStates = signalStates.by_state;
-      var thisState = null;
-      for (var st in tickerStates) {
-        var tickersInState = tickerStates[st] || [];
-        for (var i = 0; i < tickersInState.length; i++) {
-          if (tickersInState[i].ticker === signal.ticker) {
-            thisState = tickersInState[i];
-            break;
-          }
-        }
-        if (thisState) break;
-      }
-      if (thisState && thisState.state && thisState.state !== 'none') {
+    var thisState = (signalStates && signalStates.by_ticker) ? signalStates.by_ticker[signal.ticker] : null;
+    if (thisState && thisState.state && thisState.state !== 'none') {
         var dur = stateAge(thisState.state_since);
         var durLabel = dur ? ' for ' + dur : '';
         var stateClass = thisState.state;
@@ -532,16 +520,9 @@ function createSignalCard(signal, cycle, flips, flipPotentials, signalStates) {
           '<span class="health-pct ' + healthLabel + '">' + healthPct + '</span>' +
         '</div>';
 
-      // Fragile signal badge: CONFIRMED but health < 40
-      var signalState = signalStates && signalStates.by_state ? (function() {
-        for (var st in signalStates.by_state) {
-          var arr = signalStates.by_state[st] || [];
-          for (var i = 0; i < arr.length; i++) {
-            if (arr[i].ticker === signal.ticker) return arr[i].state;
-          }
-        }
-        return '';
-      })() : '';
+      // Fragile signal badge: CONFIRMED but health < 40 — O(1) lookup
+      var signalState = (signalStates && signalStates.by_ticker && signalStates.by_ticker[signal.ticker])
+        ? signalStates.by_ticker[signal.ticker].state : '';
       if (healthLabel === 'fragile' || healthLabel === 'terminal') {
         if (signalState === 'confirmed' || signalState === 'active') {
           fragileHtml = '<span class="fragile-badge">⚠️ FRAGILE — Avoid Entry</span>';
@@ -737,25 +718,18 @@ function showSignalPopup(signal, cycle) {
     sessionMeta.style.display = 'none';
   }
 
-  // State duration
+  // State duration — O(1) lookup via by_ticker
   var popupState = document.getElementById('popup-state-duration');
   if (popupState) { popupState.style.display = 'none'; popupState.textContent = ''; }
   var foundState = false;
-  if (popupState && signalStates && signalStates.by_state) {
-    var tickerStates = signalStates.by_state;
-    for (var st in tickerStates) {
-      var tickersInState = tickerStates[st] || [];
-      for (var i = 0; i < tickersInState.length; i++) {
-        if (tickersInState[i].ticker === signal.ticker && tickersInState[i].state && tickersInState[i].state !== 'none' && tickersInState[i].state !== 'watching') {
-          var dur = stateAge(tickersInState[i].state_since);
-          popupState.textContent = tickersInState[i].state.toUpperCase() + ' x' + (tickersInState[i].consecutive_same || 1) + (dur ? ' for ' + dur : '');
-          popupState.className = 'state-badge ' + tickersInState[i].state;
-          popupState.style.display = 'inline-block';
-          foundState = true;
-          break;
-        }
-      }
-      if (foundState) break;
+  if (popupState && signalStates && signalStates.by_ticker) {
+    var ts = signalStates.by_ticker[signal.ticker];
+    if (ts && ts.state && ts.state !== 'none' && ts.state !== 'watching') {
+      var dur = stateAge(ts.state_since);
+      popupState.textContent = ts.state.toUpperCase() + ' x' + (ts.consecutive_same || 1) + (dur ? ' for ' + dur : '');
+      popupState.className = 'state-badge ' + ts.state;
+      popupState.style.display = 'inline-block';
+      foundState = true;
     }
   }
 

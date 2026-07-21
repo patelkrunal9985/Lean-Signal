@@ -437,7 +437,9 @@ def update(
             )
             top3 = [s.get("name", s.get("strategy", "?")) for s in sorted_votes[:3]]
             _last_top_contributors[ticker] = top3
-            _prev_strategy_count[ticker] = consensus_meta.get("consensus_active_votes", 0)
+            # _prev_strategy_count is no longer needed — health score now reads
+            # prev cycle's active_votes directly from memory snapshots (Bug #2 fix).
+            # Kept as module-level dict for backward compat but no longer written.
 
         # ── Track last strong confirmation cycle (for stale detection) ──
         if direction != "neutral" and abs(net_score) > 0.4:
@@ -512,13 +514,15 @@ def get_all_states() -> dict:
     """
     with _lock:
         tickers = set(list(_signal_state.keys()) + list(_active_direction.keys()))
-        result = {"by_state": {}, "summary": {}}
+        result = {"by_state": {}, "by_ticker": {}, "summary": {}}
         state_counts = {}
         for ticker in sorted(tickers):
             st = get_ticker_state(ticker)
             s = st["state"]
             state_counts[s] = state_counts.get(s, 0) + 1
             result["by_state"].setdefault(s, []).append(st)
+            # Flat map for O(1) ticker lookups in JS (avoids O(n×m) iteration)
+            result["by_ticker"][ticker] = st
 
         result["summary"] = {
             "total_tracked": len(tickers),
@@ -718,12 +722,17 @@ def get_signal_health_score(ticker: str) -> dict:
             net_momentum = 0.5  # Neutral if not enough data
 
         # ── Factor 2: Strategy Retention (25%) ──
+        # Read from memory snapshot (prev cycle) instead of _prev_strategy_count
+        # which was being overwritten every cycle and always matched curr_votes.
         curr_votes = current.get("active_votes", 0)
-        prev_votes_count = _prev_strategy_count.get(ticker, curr_votes)
+        prev_votes_count = prev.get("active_votes", 0) if prev else curr_votes
+        # _prev_strategy_count is tracked separately for other uses
         if prev_votes_count > 0:
             retention = min(curr_votes / max(prev_votes_count, 1), 1.0)
         else:
             retention = 0.5
+        # Track dropped count for warning
+        _dropped = max(prev_votes_count - curr_votes, 0)
         # Count how many families are in current vs previous
         curr_families = set(current.get("families", {}).keys())
         prev_families = set(prev.get("families", {}).keys())
@@ -790,9 +799,10 @@ def get_signal_health_score(ticker: str) -> dict:
         if net_momentum < 0.35:
             warnings.append("net_score_fading")
         if retention_score < 0.5:
-            dropped = prev_votes_count - curr_votes
-            if dropped > 0:
-                warnings.append(f"{dropped}_strategies_dropped")
+            # Use actual dropped count from snapshot comparison (was previously broken —
+            # _prev_strategy_count always matched curr_votes so this never fired)
+            if _dropped > 0:
+                warnings.append(f"{_dropped}_strategies_dropped")
         if tightness < 0.4:
             warnings.append("confidence_scattered")
         if diversity < 0.4:

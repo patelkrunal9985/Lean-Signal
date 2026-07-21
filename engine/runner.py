@@ -597,6 +597,7 @@ def run_cycle() -> dict:
                 regime.get("primary_regime", "ranging"),
                 ticker, instr_type, data.get("current_price", 0), atr, sma_50,
                 dte=dte_val,
+                volume_profile=data.get("volume_profile_intraday", {}),
             )
 
             all_strategy_votes = v2_results + v3_results_raw
@@ -673,6 +674,7 @@ def run_cycle() -> dict:
                     "consensus_regime_boost": consensus_meta.get("consensus_regime_boost", 0),
                     "consensus_tod_window": consensus_meta.get("consensus_tod_window", "—"),
                     "consensus_action": consensus_meta.get("consensus_action", "—"),
+                    "consensus_families": consensus_meta.get("consensus_families", {}),
                 },
             }
             gate_evaluations.append(gate_eval_entry)

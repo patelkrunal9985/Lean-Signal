@@ -222,15 +222,7 @@ def _check_news_sentiment(ticker_data: dict) -> tuple[bool, str]:
     # Strong negative news = potential short, strong positive = potential long
     # This is a soft filter - just logging for now
     return True, f"news_sentiment_{avg_sentiment:.2f}"
-    """Stateless 3-layer quality filter for trade signals.
 
-    Usage:
-        gate = SignalQualityGate()
-        result = gate.evaluate(ticker_data, signal_direction, confidence,
-                               active_strategies, regime, consensus_meta)
-        if result["passed"]:
-            signal = result  # contains direction, confidence, reasoning
-    """
 
 class SignalQualityGate:
     """Stateless 4-layer quality filter for trade signals.
@@ -308,6 +300,16 @@ class SignalQualityGate:
 
         # ── Layer 3: Conviction (uses alignment-derived direction for consistency) ──
         cg = self._apply_settings(CONVICTION_GATE)
+        # ── Globex adjustment: lower conviction minimums for after-hours futures ──
+        if instr_type == "future":
+            try:
+                from engine.time_of_day import is_globex_session, get_globex_adjusted_confidence_min
+                if is_globex_session():
+                    globex_min = get_globex_adjusted_confidence_min()
+                    cg["gate_min_confidence_future"] = max(globex_min, 0.06)
+                    cg["gate_strategy_confidence_min"] = max(globex_min * 0.5, 0.06)
+            except ImportError:
+                pass
         conviction = self._check_conviction(
             active_strategies, alignment["direction"], regime, instr_type,
             cg, confidence_mult,

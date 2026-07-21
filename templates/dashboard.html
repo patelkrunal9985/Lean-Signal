@@ -29,6 +29,7 @@
     <button class="tab active" data-tab="signals" onclick="switchTab('signals')">Active Signals</button>
     <button class="tab" data-tab="history" onclick="switchTab('history')">History</button>
     <button class="tab" data-tab="watchlist" onclick="switchTab('watchlist')">Watchlist</button>
+    <button class="tab" data-tab="cheatsheet" onclick="switchTab('cheatsheet')">📖 Cheat Sheet</button>
     <button class="tab" data-tab="settings" onclick="switchTab('settings')">Settings</button>
   </nav>
 
@@ -66,6 +67,10 @@
         <h2>Subscribed Tickers</h2>
         <div id="subscribed-tickers" class="ticker-list"></div>
       </div>
+    </div>
+
+    <div id="tab-cheatsheet" class="tab-content">
+      <div id="cheatsheet-content"></div>
     </div>
 
     <div id="tab-settings" class="tab-content">

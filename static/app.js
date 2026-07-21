@@ -160,6 +160,7 @@ function switchTab(name) {
     tc.classList.toggle('active', tc.id === 'tab-' + name);
   });
   if (name === 'watchlist') loadWatchlist();
+  if (name === 'cheatsheet') renderCheatSheet();
   if (name === 'signals' && _status.last_cycle) renderSignals(_status.last_cycle);
   if (name === 'history') renderHistory();
 }
@@ -1084,6 +1085,223 @@ function showValidatePopup(data) {
   renderValidateSignals(sigs.stock || [], stockContainer);
   renderValidateSignals(sigs.future || [], futureContainer);
   renderValidateSignals(sigs.option || [], optionContainer);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Cheat Sheet — Signal & Parameter Reference
+   ═══════════════════════════════════════════════════════════════
+
+   CHEAT SHEET RULE: Every time you add or modify a signal state,
+   conviction tier, health score factor, regime type, warning chip,
+   card field, market dashboard metric, or any user-facing parameter,
+   you MUST update the cheatSheetData object below with the new/changed
+   information. This keeps the dashboard self-documenting for traders.
+   ═══════════════════════════════════════════════════════════════ */
+
+function renderCheatSheet() {
+  var container = document.getElementById('cheatsheet-content');
+  if (!container) return;
+
+  /* ── Structured Cheat Sheet Data ──
+     Add/update sections here when features change.
+     Each section: { id, title, icon, items: [{ term, badge, badgeClass, desc, interpret }] }
+     - term: the name of the concept
+     - badge: optional visual preview (shows a mini badge)
+     - badgeClass: CSS class for the badge preview
+     - desc: what it means (1-2 sentences)
+     - interpret: how to use it for trading decisions
+  */
+  var sections = [
+    {
+      id: 'signal-states', title: 'Signal States', icon: '📊',
+      desc: 'The state machine that tracks conviction over multiple cycles. States build from NONE → CONFIRMED. WEAKENING is a warning before signals disappear.',
+      items: [
+        { term: 'NONE', badge: 'NONE', badgeClass: 'watching', desc: 'No signal has been detected for this ticker yet.', interpret: 'Ignore — nothing actionable.' },
+        { term: 'WATCHING', badge: 'WATCHING', badgeClass: 'watching', desc: 'A potential flip or new direction is forming. Needs more cycles to confirm.', interpret: 'Monitor but do NOT enter. Wait for PENDING or higher.' },
+        { term: 'WEAKENING', badge: 'WEAKENING', badgeClass: 'weakening', desc: 'A previously ACTIVE/CONFIRMED signal is losing conviction. Fires TAKE PROFIT notification.', interpret: '⚠️ Close or reduce position. Signal is dying.' },
+        { term: 'PENDING', badge: 'PENDING x2', badgeClass: 'pending', desc: '2+ consecutive cycles in the same direction. Building conviction.', interpret: 'Small pilot position OK. Wait for ACTIVE for full size.' },
+        { term: 'ACTIVE', badge: 'ACTIVE x3', badgeClass: 'active', desc: '3+ consecutive cycles in the same direction. Strong conviction.', interpret: '✅ Safe to enter with standard position size.' },
+        { term: 'CONFIRMED', badge: 'CONFIRMED x5', badgeClass: 'confirmed', desc: '5+ consecutive cycles in the same direction. Maximum conviction.', interpret: '✅✅ Highest confidence. Can scale up position.' }
+      ]
+    },
+    {
+      id: 'conviction-tiers', title: 'Conviction Tiers', icon: '🏆',
+      desc: 'Confidence bands that determine position sizing and signal quality. Tier is based on confidence % and regime alignment.',
+      items: [
+        { term: 'Bronze', badge: '<80%', badgeClass: 'watching', desc: 'Confidence below 80%. Weak signal — insufficient agreement or low net score.', interpret: 'Skip or use minimum position size.' },
+        { term: 'Silver', badge: '80-90%', badgeClass: 'pending', desc: 'Confidence 80-90%. Decent agreement among strategies.', interpret: 'Standard position, proceed with caution.' },
+        { term: 'Gold', badge: '90-95%', badgeClass: 'active', desc: 'Confidence 90-95%. Strong agreement AND regime-aligned (not counter-trend).', interpret: 'Full position size, high conviction.' },
+        { term: 'Platinum', badge: '>95%', badgeClass: 'confirmed', desc: 'Confidence 95%+. Near-unanimous strategy agreement + regime-aligned + high family diversity.', interpret: 'Maximum conviction. Best possible signal.' }
+      ]
+    },
+    {
+      id: 'health-score', title: 'Signal Health Score', icon: '💚',
+      desc: 'A parallel quality metric that runs ALONGSIDE the state machine with zero lag. A CONFIRMED signal with low Health is dangerous — the state machine is slow to react, but Health detects decay immediately.',
+      items: [
+        { term: 'Robust (70+)', badge: 'ROBUST', badgeClass: 'confirmed', desc: 'Health score >= 70. All 5 vital signs are strong.', interpret: '✅ Signal is healthy. Confidently enter/hold.' },
+        { term: 'Caution (40-69)', badge: 'CAUTION', badgeClass: 'pending', desc: 'Health score 40-69. Some weakening detected in one or more factors.', interpret: '⚠️ Monitor closely. Reduce size or wait.' },
+        { term: 'Fragile (<40)', badge: 'FRAGILE', badgeClass: 'weakening', desc: 'Health score < 40 AND signal is ACTIVE/CONFIRMED. Signal is deteriorating but state hasn\'t changed yet.', interpret: '🔴 AVOID ENTRY. If holding, tighten stops.' },
+        { term: 'Terminal (0)', badge: 'TERMINAL', badgeClass: 'watching', desc: 'Health score = 0. All factors have collapsed. Signal is dead.', interpret: '❌ Do not trade. Signal about to flip.' }
+      ]
+    },
+    {
+      id: 'health-factors', title: 'Health Score Factors', icon: '🔬',
+      desc: 'The 5 component factors that make up the Signal Health Score. Each contributes a weighted percentage to the total.',
+      items: [
+        { term: 'Net Score Momentum', badge: '30%', badgeClass: 'watching', desc: 'Is the net score improving or deteriorating over the last 3 cycles?', interpret: 'Fading net score = early warning of a flip.' },
+        { term: 'Strategy Retention', badge: '25%', badgeClass: 'watching', desc: 'What % of strategies that voted last cycle are still voting this cycle?', interpret: 'Dropping strategies = conviction is eroding.' },
+        { term: 'Confidence Tightness', badge: '20%', badgeClass: 'watching', desc: 'How tightly clustered are strategy confidence values? (CV = coefficient of variation)', interpret: 'Wide spread = strategies are fighting each other.' },
+        { term: 'Family Diversity', badge: '15%', badgeClass: 'watching', desc: 'How many strategy families are contributing? Single-family dominance = fragile.', interpret: '1-family signals are vulnerable to regime shifts.' },
+        { term: 'Margin Above Threshold', badge: '10%', badgeClass: 'watching', desc: 'How far is the net score above the minimum threshold (0.20)?', interpret: 'Close to threshold = one weak cycle could kill the signal.' }
+      ]
+    },
+    {
+      id: 'regime-types', title: 'Regime Types', icon: '🌤️',
+      desc: 'The market\'s current personality. Regime determines which strategies get weighted and whether counter-trend signals are allowed.',
+      items: [
+        { term: 'strong_uptrend', badge: 'STRONG UP', badgeClass: 'confirmed', desc: 'ADX > 25, EMA sloping up, RSI > 65, price above SMA50.', interpret: 'Trend strategies boosted (1.2x). Mean reversion crushed (0.15x). SHORT signals penalized 0.25x.' },
+        { term: 'strong_downtrend', badge: 'STRONG DOWN', badgeClass: 'weakening', desc: 'ADX > 25, EMA sloping down, RSI < 35, price below SMA50.', interpret: 'Trend strategies boosted. LONG signals penalized 0.25x. Higher threshold to clear (0.50).' },
+        { term: 'ranging', badge: 'RANGING', badgeClass: 'pending', desc: 'ADX < 20, Bollinger Bands squeezed, RSI ~50, price near SMA20.', interpret: 'All strategy families balanced. Full position sizing. Both LONG/SHORT allowed.' },
+        { term: 'high_volatility', badge: 'HIGH VOL', badgeClass: 'weakening', desc: 'ATR% > 3%, BB bandwidth > 8%, volume spike.', interpret: 'Position sizing reduced to 0.50x. Counter-trend blocked entirely. Wider stops recommended.' }
+      ]
+    },
+    {
+      id: 'card-fields', title: 'Signal Card Fields', icon: '🃏',
+      desc: 'Every field shown on the signal cards in the Active Signals tab.',
+      items: [
+        { term: 'Confidence %', badge: '73.2%', badgeClass: 'watching', desc: 'Weighted confidence from all agreeing strategies (0-100%).', interpret: 'Higher = stronger agreement. Compare with Health Score.' },
+        { term: 'Net Score', badge: '+0.45', badgeClass: 'watching', desc: 'Composite score from -1.0 (max short) to +1.0 (max long).', interpret: 'Magnitude matters more than sign. ±0.20 = weak, ±0.70 = strong.' },
+        { term: 'Strategy Count', badge: '7/12', badgeClass: 'watching', desc: 'Agreeing strategies / total strategies that ran.', interpret: '7/12 voting LONG = decent. 3/12 = weak consensus.' },
+        { term: 'Regime', badge: 'strong_uptrend', badgeClass: 'watching', desc: 'Current market regime classification.', interpret: 'Counter-trend signals are risky. Aligned signals are safer.' },
+        { term: 'Price', badge: '$584.20', badgeClass: 'watching', desc: 'Current market price of the underlying (midpoint).', interpret: 'Use with entry/SL/TP levels for trade planning.' },
+        { term: 'Entry / SL / TP', badge: 'R:R 2.5', badgeClass: 'watching', desc: 'Entry price, Stop Loss, Take Profit, and Risk:Reward ratio.', interpret: 'R:R > 2.0 is good. R:R < 1.0 is risky.' },
+        { term: 'State xN', badge: 'CONFIRMED x8', badgeClass: 'confirmed', desc: 'Current signal state + number of consecutive same-direction cycles.', interpret: 'Streak length shows persistence. Long streaks are reliable.' },
+        { term: 'Age Decay', badge: 'decaying (0.72)', badgeClass: 'watching', desc: 'Confidence multiplier from signal age. Starts decaying after 15 min.', interpret: 'Old signals (decay < 0.70) are less actionable.' },
+        { term: 'Gate', badge: '✅ Passed', badgeClass: 'confirmed', desc: 'Pre-filter check. ✅ = passed all checks. ❌ = blocked (see reason).', interpret: 'Gate-rejected signals are unreliable. Only trade gate-passed signals.' }
+      ]
+    },
+    {
+      id: 'warning-chips', title: 'Warning Chips', icon: '⚠️',
+      desc: 'Small colored badges that appear on signal cards when the Health Score detects specific problems.',
+      items: [
+        { term: 'Fading', badge: 'Fading', badgeClass: 'weakening', desc: 'Net score is trending downward over the last 3 cycles.', interpret: 'Signal is losing steam. Watch for flip.' },
+        { term: 'Scattered', badge: 'Scattered', badgeClass: 'weakening', desc: 'Strategy confidence values have high variance (CV > 0.6).', interpret: 'Strategies disagree on strength even if they agree on direction.' },
+        { term: '1-family', badge: '1-family', badgeClass: 'weakening', desc: 'Only one strategy family is contributing to the signal.', interpret: 'Vulnerable — if that family\'s regime changes, signal dies.' },
+        { term: 'Near neutral', badge: 'Near neutral', badgeClass: 'weakening', desc: 'Net score is within 0.05 of the minimum threshold.', interpret: 'One weak cycle could drop the signal below threshold.' },
+        { term: 'Key exit', badge: 'Key exit', badgeClass: 'weakening', desc: 'One or more top-contributing strategies from the previous cycle have dropped out.', interpret: 'The strongest supporters are abandoning the signal.' },
+        { term: 'Stale', badge: 'Stale 8cyc', badgeClass: 'weakening', desc: 'No strong cycle (net score > 0.4) in the last N cycles.', interpret: 'Signal is CONFIRMED but coasting on past glory.' },
+        { term: 'X dropped', badge: '5 dropped', badgeClass: 'weakening', desc: 'N strategies that voted last cycle have dropped out this cycle.', interpret: 'Mass strategy exodus — signal may collapse soon.' }
+      ]
+    },
+    {
+      id: 'direction-badges', title: 'Direction & Badges', icon: '🎯',
+      desc: 'Visual indicators that appear on signal cards for direction, flips, and special conditions.',
+      items: [
+        { term: 'LONG', badge: '▲ LONG', badgeClass: 'long', desc: 'Strategies predict price will go UP.', interpret: 'Buy calls, go long futures, or buy stock.' },
+        { term: 'SHORT', badge: '▼ SHORT', badgeClass: 'short', desc: 'Strategies predict price will go DOWN.', interpret: 'Buy puts, go short futures, or short stock.' },
+        { term: 'Major Flip', badge: '↻ FLIP', badgeClass: 'weakening', desc: 'Significant direction change detected (score >= 0.6). Requires 2+ counter-cycles.', interpret: 'Close existing position. Consider reversing.' },
+        { term: 'Potential Flip', badge: '↻ WATCHING', badgeClass: 'pending', desc: 'Early flip signal detected but needs more cycles to confirm.', interpret: 'Tighten stops. Don\'t add to position.' },
+        { term: 'TAKE PROFIT', badge: '⚠️ TAKE PROFIT', badgeClass: 'weakening', desc: 'Signal has entered WEAKENING state. Time to close.', interpret: 'Close position and take profit. Do NOT re-enter.' },
+        { term: 'FRAGILE', badge: '⚠️ FRAGILE', badgeClass: 'weakening', desc: 'Signal is CONFIRMED but Health Score < 40. Dangerous to enter.', interpret: 'Do NOT enter new positions. If holding, exit or tighten stops.' }
+      ]
+    },
+    {
+      id: 'market-dashboard', title: 'Market Dashboard Metrics', icon: '📈',
+      desc: 'Metrics shown in the mini-dashboard row on option signal cards and in the full dashboard popup.',
+      items: [
+        { term: 'ATM IV', badge: 'IV 18.5%', badgeClass: 'watching', desc: 'At-the-money implied volatility. Higher = options are more expensive.', interpret: 'IV > 30% = expensive options (sell premium). IV < 15% = cheap (buy options).' },
+        { term: 'P/C Vol Ratio', badge: 'P/C 0.85', badgeClass: 'watching', desc: 'Put/Call volume ratio. > 1.0 = more puts traded (bearish). < 0.7 = more calls (bullish).', interpret: 'Extreme readings (>1.5 or <0.4) signal sentiment extremes.' },
+        { term: 'VIX Spot', badge: 'VIX 16.2', badgeClass: 'watching', desc: 'CBOE Volatility Index. Measures expected S&P 500 volatility.', interpret: 'VIX > 25 = fear (buy). VIX < 12 = complacency (caution).' },
+        { term: 'Breadth State', badge: 'bullish ⚡', badgeClass: 'confirmed', desc: 'Market breadth across ES/NQ/YM/RTY futures + VIX alignment.', interpret: 'Bullish breadth + thrust = strong uptrend. Bearish breadth = downtrend.' },
+        { term: 'Gamma Flip', badge: '$582.50', badgeClass: 'watching', desc: 'Price level where dealer gamma flips from long to short (or vice versa).', interpret: 'Above gamma flip = dealers are short gamma (amplifies moves). Below = stabilizing.' },
+        { term: 'DTE', badge: 'DTE 3', badgeClass: 'watching', desc: 'Days to expiration for the recommended option.', interpret: '0DTE = very risky. 7+ DTE = more time for thesis to play out.' },
+        { term: 'Delta Positioning', badge: '0.65', badgeClass: 'watching', desc: 'Net delta exposure of options market. Positive = dealers long, negative = dealers short.', interpret: 'Extreme positioning can cause squeezes when unwinding.' },
+        { term: 'Skew 1M', badge: 'Skew +3.2', badgeClass: 'watching', desc: '1-month put vs call IV skew. Positive = puts more expensive (fear).', interpret: 'High skew = fear premium in puts. Low/negative skew = complacency.' }
+      ]
+    },
+    {
+          {
+      id: 'consensus-meta', title: 'Consensus Meta', icon: '📐',
+      desc: "Metrics shown in the 'Consensus Detail' section of signal popups. These explain how the final signal was constructed from individual strategy votes.",
+      items: [
+        { term: 'Net Score', badge: '+0.45', badgeClass: 'watching', desc: 'Weighted sum of all strategy votes (-1.0 = max short, +1.0 = max long).', interpret: 'Magnitude matters: |score| > 0.50 = strong, |score| < 0.20 = weak.' },
+        { term: 'Active Votes', badge: '12', badgeClass: 'watching', desc: 'Number of strategies that produced a non-neutral vote this cycle.', interpret: 'More active votes = broader signal foundation.' },
+        { term: 'Weighted Long/Short', badge: '+0.65 / -0.12', badgeClass: 'watching', desc: 'Total weight on each side. The larger side determines direction.', interpret: 'Wide gap between long/short = strong consensus. Close gap = uncertain.' },
+        { term: 'Counter-Trend', badge: 'Yes', badgeClass: 'weakening', desc: 'Signal direction opposes the current market regime (e.g., LONG in strong_downtrend).', interpret: 'Counter-trend signals need higher confidence (0.50 threshold) and are penalized 0.25x.' },
+        { term: 'Family Count', badge: '4 families', badgeClass: 'confirmed', desc: 'Number of distinct strategy families that contributed votes.', interpret: '3+ families = diverse signal. 1 family = fragile.' },
+        { term: 'Authority Weighted', badge: 'Yes', badgeClass: 'confirmed', desc: 'Whether strategy authority multipliers (based on historical accuracy) were applied.', interpret: 'Authority weighting gives more weight to strategies with better track records.' },
+        { term: 'Regime Boost', badge: '+0.15', badgeClass: 'confirmed', desc: 'Bonus added when signal direction matches the current market regime.', interpret: 'Regime-aligned signals get a small confidence boost.' },
+        { term: 'Total Weight', badge: '14.20', badgeClass: 'watching', desc: 'Sum of all strategy weights (before normalization).', interpret: 'Higher total weight = more strategies contributing meaningfully.' }
+      ]
+    },
+        {
+      id: 'gate-system', title: 'Gate System', icon: '🚦',
+      desc: "The gate is a pre-filter that runs before signals are emitted. It checks market conditions and blocks signals likely to be false positives. Each signal card shows 'Gate: ✅' (passed) or 'Gate: ❌ <reason>' (rejected).",
+      items: [
+        { term: 'Macro Event', badge: '❌ macro', badgeClass: 'weakening', desc: 'Major economic event window (FOMC, CPI, NFP, etc.). Gate blocks signals during these.', interpret: 'Never trade during macro events — volatility is unpredictable.' },
+        { term: 'Volume Gate', badge: '❌ volume', badgeClass: 'weakening', desc: 'Current volume is below the minimum threshold for reliable signals.', interpret: 'Low volume = unreliable price action. Wait for volume to pick up.' },
+        { term: 'Spread Gate', badge: '❌ spread', badgeClass: 'weakening', desc: 'Bid-ask spread is too wide, making entries/exits too expensive.', interpret: 'Wide spreads kill profitability. Avoid unless spread < 0.1% of price.' },
+        { term: 'Correlation Conflict', badge: '❌ conflict', badgeClass: 'weakening', desc: 'Correlated instruments disagree. E.g., ES is LONG but NQ is SHORT.', interpret: 'When ES and NQ conflict, both signals are less reliable.' },
+        { term: 'Globex Regime', badge: '⚠️ globex', badgeClass: 'pending', desc: 'After-hours session. Thresholds are relaxed but more confirmation is needed.', interpret: 'Globex signals need 3 cycles instead of 2. Lower confidence is expected.' },
+        { term: 'Min Signal Threshold', badge: '0.20', badgeClass: 'watching', desc: 'Net score must exceed 0.20 (or 0.50 if counter-trend) to pass.', interpret: 'Signals below threshold are noise, not actionable.' }
+      ]
+    },
+    id: 'time-windows', title: 'Time Windows', icon: '🕐',
+      desc: 'Session time windows that affect strategy weights and signal behavior.',
+      items: [
+        { term: 'power_hour', badge: 'power_hour', badgeClass: 'confirmed', desc: 'Last hour of regular trading (3:00-4:00 PM ET). Highest volume and liquidity.', interpret: 'Best time for entries. Volume confirms moves.' },
+        { term: 'midday_lull', badge: 'midday_lull', badgeClass: 'watching', desc: 'Middle of the session (11:30-2:00 PM ET). Lower volume, more noise.', interpret: 'Reduce position size. Avoid breakout strategies.' },
+        { term: 'market_open', badge: 'market_open', badgeClass: 'pending', desc: 'First 30 min of regular trading (9:30-10:00 AM ET). High volatility, gap fills.', interpret: 'Wait for initial range to form. Don\'t chase opening spike.' },
+        { term: 'market_close', badge: 'market_close', badgeClass: 'pending', desc: 'Last 15 min of regular trading (3:45-4:00 PM ET). Positioning for overnight.', interpret: 'Be aware of end-of-day positioning flows.' },
+        { term: 'after_hours', badge: 'after_hours', badgeClass: 'watching', desc: 'Globex / pre-market / post-market. Low volume, wider spreads.', interpret: 'Use relaxed thresholds. More confirmation needed. Lower confidence.' }
+      ]
+    }
+  ];
+
+  // ── Build HTML ──
+  var html = '';
+  html += '<div class="cheatsheet-header">';
+  html += '<h2>📖 Signal & Parameter Cheat Sheet</h2>';
+  html += '<p class="cheatsheet-subtitle">Quick reference for every signal state, metric, badge, and parameter in Lean Signals. Click any section to expand.</p>';
+  html += '</div>';
+
+  // Table of contents
+  html += '<div class="cheatsheet-toc">';
+  sections.forEach(function(sec) {
+    html += '<a href="#cs-' + sec.id + '" class="toc-link">' + sec.icon + ' ' + sec.title + '</a>';
+  });
+  html += '</div>';
+
+  // Sections
+  sections.forEach(function(sec) {
+    html += '<div id="cs-' + sec.id + '" class="cheatsheet-section">';
+    html += '<div class="cheatsheet-section-header" onclick="toggleCollapse(\'cs-body-' + sec.id + '\', this)">';
+    html += '<span>' + sec.icon + ' <strong>' + sec.title + '</strong></span>';
+    html += '<span class="collapse-icon">▼</span>';
+    html += '</div>';
+    html += '<div id="cs-body-' + sec.id + '" class="cheatsheet-section-body" style="display:none">';
+    html += '<p class="cheatsheet-section-desc">' + sec.desc + '</p>';
+    html += '<table class="cheatsheet-table">';
+    html += '<thead><tr><th>Term</th><th>Preview</th><th>Description</th><th>How to Interpret</th></tr></thead>';
+    html += '<tbody>';
+    sec.items.forEach(function(item) {
+      html += '<tr>';
+      html += '<td class="cs-term">' + item.term + '</td>';
+      html += '<td class="cs-badge"><span class="state-badge ' + (item.badgeClass || 'watching') + '">' + (item.badge || '') + '</span></td>';
+      html += '<td class="cs-desc">' + item.desc + '</td>';
+      html += '<td class="cs-interpret">' + item.interpret + '</td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+    html += '</div>';
+    html += '</div>';
+  });
+
+  html += '<div class="cheatsheet-footer">';
+  html += '<p>💡 <strong>Tip:</strong> This cheat sheet is updated whenever new features are added. If something is missing, check the <code>renderCheatSheet()</code> function in <code>static/app.js</code>.</p>';
+  html += '</div>';
+
+  container.innerHTML = html;
 }
 
 function switchValidateSubTab(sub) {

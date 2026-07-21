@@ -133,6 +133,30 @@ header {
   color: var(--text-muted);
 }
 
+/* ── Live Price Ticker ── */
+.price-ticker-bar {
+  display: flex;
+  gap: 16px;
+  padding: 6px 24px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.price-ticker-bar .ticker-quote {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+.price-ticker-bar .ticker-quote strong {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.price-ticker-bar .up { color: var(--accent); }
+.price-ticker-bar .down { color: var(--danger); }
+
 /* ── Signal Card ── */
 .signal-card {
   background: var(--bg-card);

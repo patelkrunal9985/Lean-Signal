@@ -190,6 +190,25 @@ class LeanSignalsHandler(BaseHTTPRequestHandler):
                     self._send_json(_VALIDATION_RESULT)
                 else:
                     self._send_json({"status": "no_data", "message": "No validation results. POST /api/validate first."})
+            elif path == "/api/prices":
+                # Lightweight endpoint: live prices only (no cycle data).
+                # Safe to poll every 1-2s — reads cache, no IBKR slots burned.
+                try:
+                    from engine.ibkr_data_feed import get_all_live_prices
+                    prices = get_all_live_prices()
+                    # Return only the fields the ticker needs: ticker, price, bid, ask, change
+                    slim = {}
+                    for t, p in prices.items():
+                        slim[t] = {
+                            "price": p.get("price", 0),
+                            "bid": p.get("bid", 0),
+                            "ask": p.get("ask", 0),
+                            "change": p.get("change_pct", 0),
+                            "age": round(p.get("age_seconds", 0), 1),
+                        }
+                    self._send_json(slim)
+                except Exception:
+                    self._send_json({})
             elif path == "/api/health":
                 self._send_json({"status": "ok", "timestamp": time.time()})
             elif path == "/api/signal-states":

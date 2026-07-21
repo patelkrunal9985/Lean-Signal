@@ -8,6 +8,21 @@ let _currentSubTab = 'stock';
 let _status = {};
 let _autoRunActive = false;
 let _pollTimer = null;
+let _priceTimer = null;
+let _livePrices = {};
+
+function formatAge(sec) {
+  if (!sec || sec <= 0) return '';
+  if (sec < 60) return Math.round(sec) + 's';
+  if (sec < 3600) return Math.round(sec / 60) + 'm';
+  return Math.round(sec / 3600) + 'h';
+}
+
+function stateAge(ts) {
+  if (!ts) return '';
+  var age = (Date.now() / 1000) - ts;
+  return formatAge(age);
+}
 
 function formatBigNum(n) {
   if (!n || n === 0) return '0';
@@ -55,6 +70,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
   loadStatus();
   _pollTimer = setInterval(loadStatus, 5000);
+  // Live price ticker — polls lightweight /api/prices (reads cache, 0 IBKR slots)
+  loadPrices();
+  _priceTimer = setInterval(loadPrices, 2000);
 });
 
 function switchTab(name) {
@@ -178,6 +196,44 @@ function updateUI() {
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   Live Price Ticker (polls /api/prices — reads cache, 0 IBKR slots)
+   ═══════════════════════════════════════════════════════════════ */
+
+async function loadPrices() {
+  try {
+    var controller = new AbortController();
+    var timeout = setTimeout(function() { controller.abort(); }, 3000);
+    var resp = await fetch('/api/prices', { signal: controller.signal });
+    clearTimeout(timeout);
+    if (resp.ok) _livePrices = await resp.json();
+    renderPriceTicker();
+  } catch(e) { /* silent — ticker is non-critical */ }
+}
+
+function renderPriceTicker() {
+  var bar = document.getElementById('price-ticker-bar');
+  if (!bar) return;
+  // Show all tickers with live prices, stocks first then futures
+  var entries = [];
+  for (var t in _livePrices) {
+    var p = _livePrices[t];
+    if (p && p.price > 0) entries.push({ticker: t, price: p.price, change: p.change || 0});
+  }
+  entries.sort(function(a, b) {
+    var aFut = a.ticker.indexOf('=F') >= 0, bFut = b.ticker.indexOf('=F') >= 0;
+    if (aFut !== bFut) return aFut - bFut;
+    return a.ticker.localeCompare(b.ticker);
+  });
+  var html = '';
+  entries.forEach(function(e) {
+    var cls = e.change > 0 ? 'up' : e.change < 0 ? 'down' : '';
+    var arrow = e.change > 0 ? '▲' : e.change < 0 ? '▼' : '';
+    html += '<span class="ticker-quote"><strong>' + e.ticker.replace('=F','') + '</strong> <span class="' + cls + '">' + e.price.toFixed(0) + ' ' + arrow + '</span></span>';
+  });
+  bar.innerHTML = html || '<span style="color:var(--text-muted)">Waiting for price data...</span>';
+}
+
+/* ═══════════════════════════════════════════════════════════════
    Signal Rendering with 4-State Management
    ═══════════════════════════════════════════════════════════════ */
 
@@ -241,8 +297,10 @@ function createSignalCard(signal, cycle, flips, flipPotentials, signalStates) {
       }
       if (thisState) break;
     }
-    if (thisState && thisState.state && thisState.state !== 'none') {
-      signalStateHtml = '<span class="state-badge ' + thisState.state + '">' + thisState.state.toUpperCase() + ' x' + (thisState.consecutive_same || 1) + '</span>';
+    if (thisState && thisState.state && thisState.state !== 'none' && thisState.state !== 'watching') {
+      var dur = stateAge(thisState.state_since);
+      var durLabel = dur ? ' for ' + dur : '';
+      signalStateHtml = '<span class="state-badge ' + thisState.state + '">' + thisState.state.toUpperCase() + ' x' + (thisState.consecutive_same || 1) + durLabel + '</span>';
     }
   }
 
@@ -494,6 +552,28 @@ function showSignalPopup(signal, cycle) {
     document.getElementById('popup-vwap-pos').textContent = vw || '--';
   } else {
     sessionMeta.style.display = 'none';
+  }
+
+  // State duration
+  var popupState = document.getElementById('popup-state-duration');
+  if (popupState) { popupState.style.display = 'none'; popupState.textContent = ''; }
+  var foundState = false;
+  if (popupState && signalStates && signalStates.by_state) {
+    var tickerStates = signalStates.by_state;
+    for (var st in tickerStates) {
+      var tickersInState = tickerStates[st] || [];
+      for (var i = 0; i < tickersInState.length; i++) {
+        if (tickersInState[i].ticker === signal.ticker && tickersInState[i].state && tickersInState[i].state !== 'none' && tickersInState[i].state !== 'watching') {
+          var dur = stateAge(tickersInState[i].state_since);
+          popupState.textContent = tickersInState[i].state.toUpperCase() + ' x' + (tickersInState[i].consecutive_same || 1) + (dur ? ' for ' + dur : '');
+          popupState.className = 'state-badge ' + tickersInState[i].state;
+          popupState.style.display = 'inline-block';
+          foundState = true;
+          break;
+        }
+      }
+      if (foundState) break;
+    }
   }
 
   // Gate reason (rejected signals)

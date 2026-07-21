@@ -105,7 +105,7 @@ CORRELATION_CONFLICTS = {
 # Volume/liquidity minimums per instrument type
 VOLUME_MINIMUMS = {
     "stock": 500000,      # avg daily volume
-    "future": 10000,      # contracts
+    "future": 2000,       # contracts (scaled to 300 during Globex via get_globex_volume_scale)
     "option": 500,        # contracts
 }
 
@@ -173,11 +173,25 @@ def _check_correlation_conflict(ticker: str, signal_dir: str, ticker_data: dict)
 
 
 def _check_volume_liquidity(ticker: str, ticker_data: dict, instr_type: str) -> tuple[bool, str]:
-    """Check if there's sufficient volume/liquidity for the trade."""
+    """Check if there's sufficient volume/liquidity for the trade.
+
+    Futures volume minimums are scaled down during Globex (after-hours)
+    using get_globex_volume_scale() from time_of_day (default: 0.15x).
+    Globex futures volume is structurally 5-15% of RTH — filtering at
+    RTH thresholds would block all valid after-hours signals.
+    """
     min_vol = VOLUME_MINIMUMS.get(instr_type, 0)
     if min_vol <= 0:
         return True, ""
-    
+
+    # ── Globex volume scaling for futures ──
+    if instr_type == "future":
+        try:
+            from engine.time_of_day import get_globex_volume_scale
+            min_vol = int(min_vol * get_globex_volume_scale())
+        except ImportError:
+            pass
+
     indicators = ticker_data.get("indicators", {})
     ohlcv = ticker_data.get("ohlcv", [])
     
@@ -455,7 +469,16 @@ class SignalQualityGate:
         # The data_source guard above already verified the source is legit.
         if ds != "ibkr_ohlcv":
             price_age = ticker_data.get("price_age_seconds", 0)
-            if price_age > ig["gate_max_price_age_seconds"]:
+            max_age = ig["gate_max_price_age_seconds"]
+            # ── Globex: relax price age for futures (tick frequency is lower after-hours) ──
+            if instr_type == "future":
+                try:
+                    from engine.time_of_day import is_globex_session
+                    if is_globex_session():
+                        max_age = 30.0  # futures update less frequently during Globex; 5s is too strict
+                except ImportError:
+                    pass
+            if price_age > max_age:
                 return {"passed": False, "reason": f"stale_price_{price_age:.0f}s"}
 
         # ── Completeness ──

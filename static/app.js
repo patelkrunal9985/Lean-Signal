@@ -428,7 +428,6 @@ function createSignalCard(signal, cycle, flips, flipPotentials, signalStates) {
           signalStateHtml += ' <span class="age-decay-badge">decaying (' + thisState.age_decay.toFixed(2) + ')</span>';
         }
       }
-    }
 
   // ── Entry/Exit levels ──
   var entryPrice = signal.entry_price || signal.current_price || 0;
@@ -749,6 +748,7 @@ function showSignalPopup(signal, cycle) {
   var popupState = document.getElementById('popup-state-duration');
   if (popupState) { popupState.style.display = 'none'; popupState.textContent = ''; }
   var foundState = false;
+  var signalStates = cycle.signal_states || {};
   if (popupState && signalStates && signalStates.by_ticker) {
     var ts = signalStates.by_ticker[signal.ticker];
     if (ts && ts.state && ts.state !== 'none' && ts.state !== 'watching') {
@@ -1221,7 +1221,6 @@ function renderCheatSheet() {
       ]
     },
     {
-          {
       id: 'consensus-meta', title: 'Consensus Meta', icon: '📐',
       desc: "Metrics shown in the 'Consensus Detail' section of signal popups. These explain how the final signal was constructed from individual strategy votes.",
       items: [
@@ -1247,7 +1246,8 @@ function renderCheatSheet() {
         { term: 'Min Signal Threshold', badge: '0.20', badgeClass: 'watching', desc: 'Net score must exceed 0.20 (or 0.50 if counter-trend) to pass.', interpret: 'Signals below threshold are noise, not actionable.' }
       ]
     },
-    id: 'time-windows', title: 'Time Windows', icon: '🕐',
+    {
+      id: 'time-windows', title: 'Time Windows', icon: '🕐',
       desc: 'Session time windows that affect strategy weights and signal behavior.',
       items: [
         { term: 'power_hour', badge: 'power_hour', badgeClass: 'confirmed', desc: 'Last hour of regular trading (3:00-4:00 PM ET). Highest volume and liquidity.', interpret: 'Best time for entries. Volume confirms moves.' },

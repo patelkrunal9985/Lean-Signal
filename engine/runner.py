@@ -695,7 +695,7 @@ def run_cycle() -> dict:
                 market_dashboard = {
                     "underlying": data.get("underlying", ""),
                     "underlying_price": data.get("underlying_price", 0),
-                    "iv": round(data.get("iv", 0) * 100, 1) if data.get("iv", 0) else 0,
+                    "iv": round(data.get("iv", 0), 1) if data.get("iv", 0) else 0,
                     "hv_10": round(data.get("hv_10", 0) * 100, 1) if data.get("hv_10", 0) else 0,
                     "dte": data.get("dte", 0),
                     "expiry": data.get("expiry", ""),

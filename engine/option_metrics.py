@@ -118,7 +118,7 @@ def compute_option_metrics(ticker: str, underlying_price: float, ticker_data_map
             data = sides.get(right, {})
             if not data:
                 continue
-            iv = data.get("iv", 0) or 0
+            iv = data.get("impliedVolatility", 0) or 0
             delta = data.get("delta", 0) or 0
             gamma = data.get("gamma", 0) or 0
             theta = data.get("theta", 0) or 0
@@ -157,6 +157,69 @@ def compute_option_metrics(ticker: str, underlying_price: float, ticker_data_map
 
     if not option_chain["calls"] and not option_chain["puts"]:
         return None
+
+    # ── Diagnostic: count contracts with non-zero data fields ──
+    # IBKR requires a paid OPRA (US Options) subscription to deliver
+    # volume (tick 100), OI (tick 101), and greeks (tick 106). Without
+    # OPRA, you only get bid/ask/last — volume/OI/IV/greeks are all zero.
+    all_entries = option_chain["calls"] + option_chain["puts"]
+    total_contracts = len(all_entries)
+    with_volume = sum(1 for e in all_entries if e.get("volume", 0) > 0)
+    with_oi = sum(1 for e in all_entries if e.get("openInterest", 0) > 0)
+    with_iv = sum(1 for e in all_entries if e.get("impliedVolatility", 0) > 0)
+    with_greeks = sum(1 for e in all_entries if (e.get("delta", 0) != 0 or e.get("gamma", 0) != 0))
+    with_bidask = sum(1 for e in all_entries if e.get("bid", 0) > 0 or e.get("ask", 0) > 0)
+    has_full_data = (with_volume >= total_contracts * 0.3 and with_iv >= total_contracts * 0.3)
+    data_quality = {
+        "total": total_contracts,
+        "with_volume": with_volume, "with_oi": with_oi,
+        "with_iv": with_iv, "with_greeks": with_greeks,
+        "with_bidask": with_bidask,
+        "has_full_data": has_full_data,
+    }
+
+    # ── Health monitor: warn when data is incomplete ──
+    if total_contracts > 0:
+        if with_iv == 0 and with_volume == 0 and with_oi == 0:
+            engine_health_monitor(
+                ticker,
+                status="option_data_degraded",
+                details=(
+                    f"{total_contracts} contracts with bid/ask only. "
+                    f"No IV, volume, or OI received. "
+                    f"Likely requires OPRA (US Options) market data subscription from IBKR. "
+                    f"Without OPRA: IV-based + volume/OI strategies cannot fire. "
+                    f"Bid/ask data is available — strategies using only price levels may still work."
+                ),
+            )
+        elif with_iv == 0:
+            engine_health_monitor(
+                ticker,
+                status="option_iv_missing",
+                details=(
+                    f"{total_contracts} contracts: IV=0 on all. "
+                    f"IV strategies (iv_skew, iv_rv_spread, etc.) will be neutral. "
+                    f"May need OPRA subscription or Greek-enabled market data."
+                ),
+            )
+        elif not has_full_data:
+            engine_health_monitor(
+                ticker,
+                status="option_data_partial",
+                details=(
+                    f"{total_contracts} contracts: vol={with_volume}/{total_contracts} "
+                    f"oi={with_oi}/{total_contracts} iv={with_iv}/{total_contracts} "
+                    f"greeks={with_greeks}/{total_contracts}. "
+                    f"Some strategies may not fire."
+                ),
+            )
+        else:
+            engine_health_monitor(
+                ticker,
+                status="option_data_healthy",
+                details=f"{total_contracts} contracts with full data: iv={with_iv}/{total_contracts} "
+                        f"vol={with_volume}/{total_contracts} oi={with_oi}/{total_contracts}",
+            )
 
     pc_ratio = total_put_vol / max(total_call_vol, 1)
     call_prem = total_call_prem
@@ -329,7 +392,12 @@ def compute_option_metrics(ticker: str, underlying_price: float, ticker_data_map
         otm_call_iv = option_chain["calls"][-1].get("impliedVolatility", 0) or 0
         skew_term_1m = otm_put_iv - otm_call_iv
 
-    logger.info("compute_option_metrics(%s): done — pc_ratio=%.3f, atm_iv=%.1f%%, gamma_flip=%.2f, charm=%s", ticker, pc_ratio, atm_iv * 100, gamma_flip, charm_direction)
+    logger.info(
+        "compute_option_metrics(%s): done — pc_ratio=%.3f, atm_iv=%.1f%%, gamma_flip=%.2f, charm=%s "
+        "[data: %d contracts, vol=%d, oi=%d, iv=%d, greeks=%d, bidask=%d]",
+        ticker, pc_ratio, atm_iv * 100, gamma_flip, charm_direction,
+        total_contracts, with_volume, with_oi, with_iv, with_greeks, with_bidask,
+    )
     return {
         "ticker": f"{ticker}_OPT",
         "instrument_type": "option",
@@ -371,4 +439,5 @@ def compute_option_metrics(ticker: str, underlying_price: float, ticker_data_map
         "ohlcv": ohlcv,
         "current_price": underlying_price,
         "data_source": "ibkr",
+        "data_quality": data_quality,
     }

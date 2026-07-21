@@ -692,11 +692,12 @@ class IBKRStreamer:
             "BRK.B": "BRK-B",
             "BRK-B": "BRK-B",
             "SPX": "SPX",
+            "NDX": "NDX",
             "VIX": "VIX",
         }
         if ticker in special_map:
             mapped = special_map[ticker]
-            if mapped in ("SPX", "VIX"):
+            if mapped in ("SPX", "VIX", "NDX"):
                 return Index(mapped, exchange="CBOE", currency="USD")
             return Stock(mapped, exchange="SMART", currency="USD")
         # Futures mapping (IBKR uses different symbols than yahoo)

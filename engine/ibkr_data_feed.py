@@ -1095,11 +1095,11 @@ def fetch_live_option_prices(ticker: str, expiration: str, strikes: list[float],
                     # aggregate, NOT for individual option contracts.
                     streamer._ib.reqMktData(contract, '101,104,105,106', False, False)
 
-            # Poll for data up to 25 seconds.
-            # Generic ticks 100/101/106 (volume, OI, IV) arrive 5-15s after
-            # bid/ask/last. The 25s window + 50% generic-tick break condition
-            # ensures we collect them before cancelling subscriptions.
-            deadline = _time.time() + 25.0
+            # Poll for data up to 35 seconds.
+            # Generic ticks 101/106 (OI, IV) arrive 5-25s after
+            # bid/ask/last. The 35s window + 50% generic-tick break condition
+            # ensures we collect slow generic tick 106 (IV) before cancelling subscriptions.
+            deadline = _time.time() + 35.0
             while _time.time() < deadline:
                 for c in contracts:
                     td = streamer._ib.ticker(c)
@@ -1185,7 +1185,7 @@ def fetch_live_option_prices(ticker: str, expiration: str, strikes: list[float],
                 await asyncio.sleep(0.15)
 
             # ── DIAGNOSTIC: audit which generic tick fields arrived ──
-            _elapsed = _time.time() - (deadline - 25.0)
+            _elapsed = _time.time() - (deadline - 35.0)
             _total = len(prices)
             _with_bid = sum(1 for p in prices.values() if p.get("bid", 0) > 0)
             _with_ask = sum(1 for p in prices.values() if p.get("ask", 0) > 0)
@@ -1197,7 +1197,7 @@ def fetch_live_option_prices(ticker: str, expiration: str, strikes: list[float],
             _with_gamma = sum(1 for p in prices.values() if p.get("gamma", 0) != 0)
             _with_theta = sum(1 for p in prices.values() if p.get("theta", 0) != 0)
             _with_vega = sum(1 for p in prices.values() if p.get("vega", 0) != 0)
-            _timeout = _elapsed >= 24.5
+            _timeout = _elapsed >= 34.5
             # Sample first 3 contracts with all field values
             _sample = []
             for i, (k, p) in enumerate(prices.items()):
@@ -1250,7 +1250,7 @@ def fetch_live_option_prices(ticker: str, expiration: str, strikes: list[float],
             event.set()
 
     asyncio.run_coroutine_threadsafe(_do_fetch_async(), streamer._loop)
-    event.wait(timeout=15)
+    event.wait(timeout=45)  # must exceed inner polling loop (35s) + margin
     return result
 
 

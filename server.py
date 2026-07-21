@@ -182,6 +182,25 @@ class LeanSignalsHandler(BaseHTTPRequestHandler):
                     self._send_json({"status": "no_data", "message": "No validation results. POST /api/validate first."})
             elif path == "/api/health":
                 self._send_json({"status": "ok", "timestamp": time.time()})
+            elif path == "/api/signal-states":
+                try:
+                    from engine.signal_persistence import get_all_states, get_significant_flips
+                    states = get_all_states()
+                    flips = get_significant_flips(min_score=0.60)
+                    self._send_json({"states": states, "flips": flips})
+                except Exception:
+                    self._send_json({"states": {"summary": {}}, "flips": {"real": [], "potential": []}})
+            elif path == "/api/flip-history":
+                try:
+                    from engine.signal_persistence import get_flip_history
+                    raw_ticker = params.get("ticker", [None])[0] if params.get("ticker") else None
+                    ticker_filter = raw_ticker if raw_ticker and raw_ticker.strip() else None
+                    raw_score = params.get("min_score", ["0.0"])[0] if params.get("min_score") else "0.0"
+                    min_score = float(raw_score)
+                    history = get_flip_history(ticker=ticker_filter, min_score=min_score)
+                    self._send_json({"flips": history})
+                except Exception:
+                    self._send_json({"flips": []})
             else:
                 self._send_json({"error": "not_found"}, 404)
         except Exception as e:

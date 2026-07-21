@@ -1,10 +1,13 @@
+// ── Lean Signals Dashboard — Full State Management ──
+// Every render function handles 4 states: loading, error, empty, data
+// Signal flips require 2+ cycle confirmation via persistence engine
+// Data freshness indicators on all displayed data
+
 let _currentTab = 'signals';
 let _currentSubTab = 'stock';
 let _status = {};
 let _autoRunActive = false;
 let _pollTimer = null;
-let _lastFlipCount = 0;
-let _flipNotifiedCycles = {};
 
 function formatBigNum(n) {
   if (!n || n === 0) return '0';
@@ -23,6 +26,14 @@ function formatTinyNum(n) {
   return n.toFixed(4);
 }
 
+function dataFreshness(timestamp) {
+  if (!timestamp) return { cls: 'stale', label: 'unknown' };
+  var age = (Date.now() - new Date(timestamp).getTime()) / 1000;
+  if (age < 15) return { cls: 'fresh', label: 'Live' };
+  if (age < 120) return { cls: 'recent', label: Math.round(age) + 's ago' };
+  return { cls: 'stale', label: '⚠ ' + Math.round(age / 60) + 'm ago' };
+}
+
 function toggleCollapse(bodyId, headerEl) {
   var body = document.getElementById(bodyId);
   if (!body) return;
@@ -37,7 +48,6 @@ function toggleCollapse(bodyId, headerEl) {
 }
 
 document.addEventListener('DOMContentLoaded', function() {
-  // Restore saved settings
   var savedInterval = localStorage.getItem('lean_signals_interval');
   if (savedInterval) document.getElementById('settings-interval').value = savedInterval;
   var savedNotify = localStorage.getItem('lean_signals_desktop_notify') === 'true';
@@ -84,6 +94,7 @@ async function loadStatus() {
 }
 
 function updateUI() {
+  // ── Connection state ──
   var conn = _status.connection || {};
   var ibkrEl = document.getElementById('ibkr-status');
   if (conn.connected) {
@@ -94,6 +105,7 @@ function updateUI() {
     ibkrEl.className = 'status-badge disconnected';
   }
 
+  // ── Cycle state ──
   var cycleEl = document.getElementById('cycle-status');
   if (_status.cycle_in_progress) {
     cycleEl.textContent = 'Running...';
@@ -106,59 +118,127 @@ function updateUI() {
     cycleEl.className = 'status-badge idle';
   }
 
-  if (_status.auto_run) {
-    document.getElementById('auto-run-btn').textContent = 'Stop';
-  } else {
-    document.getElementById('auto-run-btn').textContent = 'Auto-Run';
-  }
+  // ── Auto-run button ──
+  document.getElementById('auto-run-btn').textContent = _status.auto_run ? 'Stop' : 'Auto-Run';
 
+  // ── Last cycle summary ──
   var last = _status.last_cycle;
   if (last) {
     document.getElementById('total-scanned').textContent = 'Scanned: ' + (last.tickers_scanned || 0);
     var sigCount = last.signals_count || 0;
     var flipCount = last.flip_count || 0;
+    var flipPotCount = last.flip_count_potential || 0;
     var sigLabel = 'Signals: ' + sigCount;
+
+    // Show significant flips
     if (flipCount > 0) {
       var flips = last.flips || {};
-      var flipNames = Object.keys(flips).join(', ');
-      sigLabel += '  ⚠️ <span class="flip-count" title="' + flipNames + '">' + flipCount + ' flip' + (flipCount > 1 ? 's' : '') + ': ' + flipNames + '</span>';
+      var flipNames = Object.keys(flips);
+      sigLabel += '  🔴 <span class="flip-badge major" title="' + flipNames.join(', ') + '">' + flipCount + ' major flip' + (flipCount > 1 ? 's' : '') + '</span>';
+    }
+    // Show potential flips (watching)
+    if (flipPotCount > 0) {
+      sigLabel += '  🔵 <span class="flip-badge potential">' + flipPotCount + ' watching</span>';
     }
     document.getElementById('total-signals').innerHTML = sigLabel;
+
     var elapsed = last.elapsed_seconds || 0;
     document.getElementById('cycle-elapsed').textContent = 'Last cycle: ' + elapsed.toFixed(1) + 's';
+
+    // Data freshness
+    if (last.timestamp) {
+      var fresh = dataFreshness(last.timestamp);
+      var freshEl = document.getElementById('data-freshness');
+      if (!freshEl) {
+        freshEl = document.createElement('span');
+        freshEl.id = 'data-freshness';
+        freshEl.className = 'freshness-badge';
+        document.getElementById('summary-bar-extra')?.appendChild(freshEl);
+      }
+      freshEl.textContent = fresh.label;
+      freshEl.className = 'freshness-badge ' + fresh.cls;
+    }
   }
 
+  // Render current tab
   if (_currentTab === 'signals' && last && last.status === 'completed') {
     renderSignals(last);
   }
   if (_currentTab === 'history') {
     renderHistory();
   }
-
-  // Desktop notifications for flips
-  _sendFlipNotifications(last);
 }
 
+/* ═══════════════════════════════════════════════════════════════
+   Signal Rendering with 4-State Management
+   ═══════════════════════════════════════════════════════════════ */
+
 function renderSignals(cycle) {
+  // STATE: Error
+  if (cycle.status === 'error') {
+    ['stock','future','option'].forEach(function(type) {
+      var container = document.getElementById('signals-' + type);
+      if (container) container.innerHTML = '<div class="error-state">❌ Cycle failed: ' + (cycle.reason || 'unknown') + '</div>';
+    });
+    return;
+  }
+
   var groups = cycle.signals || {};
+  var flips = cycle.flips || {};
+  var flipPotentials = cycle.flips_potential || {};
+  var signalStates = cycle.signal_states || {};
+
   ['stock', 'future', 'option'].forEach(function(type) {
     var container = document.getElementById('signals-' + type);
     if (!container) return;
+
     var signals = groups[type] || [];
+
+    // STATE: Empty
     if (signals.length === 0) {
-      container.innerHTML = '<div class="signal-card" style="opacity:0.6"><em>No signals</em></div>';
+      var emptyMsg = (type === 'option') ? '📭 No option signals — check chain health or wait for confluence'
+        : (type === 'future') ? '📭 No futures signals — market conditions below threshold'
+        : '📭 No stock signals — no tickers meeting criteria';
+      container.innerHTML = '<div class="empty-state">' + emptyMsg + '</div>';
       return;
     }
+
+    // STATE: Data
     container.innerHTML = '';
-    signals.forEach(function(s) { container.appendChild(createSignalCard(s, cycle)); });
+    signals.forEach(function(s) {
+      var card = createSignalCard(s, cycle, flips, flipPotentials, signalStates);
+      container.appendChild(card);
+    });
   });
 }
 
-function createSignalCard(signal, cycle) {
+function createSignalCard(signal, cycle, flips, flipPotentials, signalStates) {
   var card = document.createElement('div');
   card.className = 'signal-card';
   var dirClass = signal.direction === 'long' ? 'long' : signal.direction === 'short' ? 'short' : 'neutral';
   var dirArrow = signal.direction === 'long' ? '▲' : signal.direction === 'short' ? '▼' : '–';
+
+  // ── Signal state badge (persistence) ──
+  var signalStateHtml = '';
+  if (signalStates && signalStates.by_state) {
+    var tickerStates = signalStates.by_state;
+    var thisState = null;
+    for (var st in tickerStates) {
+      var tickersInState = tickerStates[st] || [];
+      for (var i = 0; i < tickersInState.length; i++) {
+        if (tickersInState[i].ticker === signal.ticker) {
+          thisState = tickersInState[i];
+          break;
+        }
+      }
+      if (thisState) break;
+    }
+    if (thisState && thisState.state && thisState.state !== 'none') {
+      signalStateHtml = '<span class="state-badge ' + thisState.state + '">' + thisState.state.toUpperCase() + ' x' + (thisState.consecutive_same || 1) + '</span>';
+    }
+  }
+
+  // ── Entry/Exit levels ──
   var entryPrice = signal.entry_price || signal.current_price || 0;
   var sl = signal.stop_loss || 0;
   var tp = signal.take_profit || 0;
@@ -173,10 +253,10 @@ function createSignalCard(signal, cycle) {
         '<span class="level-label">R:R</span><span class="level-val rr">' + rr.toFixed(1) + '</span>' +
       '</div>';
   }
-  // Option premium levels for options
+
+  // ── Option premium levels ──
   var optPrem = signal.option_entry_premium || 0;
   if (optPrem > 0 && signal.instrument_type === 'option') {
-    // Recommended strike
     var recStrike = signal.recommended_strike || 0;
     var recOtm = signal.recommended_otm || '';
     var recType = signal.recommended_option_type || '';
@@ -188,11 +268,8 @@ function createSignalCard(signal, cycle) {
         '<span class="level-val tp">$' + recStrike.toFixed(0) + '</span>' +
         '<span class="level-label">Est Win</span><span class="level-val rr">' + estWin + '</span>';
     }
-    // Position: always 1 contract for options (signal-only system)
-    var posLine = '';
-    if (signal.instrument_type === 'option' && signal.direction !== 'neutral') {
-      posLine = '<span class="level-label">Size</span><span class="level-val">1 contract</span>';
-    }
+    var posLine = (signal.instrument_type === 'option' && signal.direction !== 'neutral')
+      ? '<span class="level-label">Size</span><span class="level-val">1 contract</span>' : '';
     var todLabel = signal.time_window || '';
     var vwapLabel = signal.vwap_position || '';
     var metaLine = '';
@@ -211,7 +288,8 @@ function createSignalCard(signal, cycle) {
       (posLine ? '<div class="row3 option-size">' + posLine + '</div>' : '') +
       (metaLine ? '<div class="row3 option-meta">' + metaLine + '</div>' : '');
   }
-  // Mini-dashboard for option signals: key metrics at a glance
+
+  // ── Mini dashboard for options ──
   var miniDash = signal.market_dashboard || {};
   var miniDashHtml = '';
   if (Object.keys(miniDash).length > 0 && signal.instrument_type === 'option') {
@@ -228,727 +306,520 @@ function createSignalCard(signal, cycle) {
         '<span>DTE <strong>' + (miniDash.dte != null ? miniDash.dte : '—') + '</strong></span>' +
       '</div>';
   }
-  // Flip badge
-  var flips = (cycle && cycle.flips) || {};
+
+  // ── Flip badge (from persistence engine) ──
   var flipInfo = flips[signal.ticker] || null;
+  var flipPotInfo = (!flipInfo) ? (flipPotentials[signal.ticker] || null) : null;
   var flipRow = '';
   if (flipInfo) {
-    flipRow = '<div class="row-flip"><span class="flip-badge">↻ FLIP from ' + flipInfo.from.toUpperCase() + '</span></div>';
+    var score = flipInfo.score || 0;
+    var flipClass = score >= 0.8 ? 'flip-badge major' : 'flip-badge';
+    flipRow = '<div class="row-flip"><span class="' + flipClass + '">↻ FLIP ' + (flipInfo.from || '').toUpperCase() + ' → ' + (flipInfo.to || '').toUpperCase() + ' score=' + score.toFixed(2) + '</span></div>';
+  } else if (flipPotInfo) {
+    var needed = flipPotInfo.needs_cycles || 1;
+    flipRow = '<div class="row-flip"><span class="flip-badge potential">↻ WATCHING: needs ' + needed + ' more cycle' + (needed > 1 ? 's' : '') + ' to confirm</span></div>';
   }
 
+  // ── Build card ──
   card.innerHTML =
     '<div class="row1">' +
       '<div><span class="ticker-name">' + signal.ticker + '</span>' +
-      '<span class="instrument-badge">' + signal.instrument_type + '</span></div>' +
+      '<span class="instrument-badge">' + signal.instrument_type + '</span>' +
+      signalStateHtml + '</div>' +
       '<span class="direction-badge ' + dirClass + '">' + dirArrow + ' ' + signal.direction.toUpperCase() + '</span>' +
     '</div>' +
     '<div class="row2">' +
       '<span>Confidence: <strong>' + (signal.confidence * 100).toFixed(1) + '%</strong></span>' +
       '<span>Score: <strong>' + (signal.composite_score * 100).toFixed(1) + '%</strong></span>' +
-      '<span>Strategies: <strong>' + signal.agreeing_count + '/' + signal.strategy_count + '</strong></span>' +
-      '<span>Regime: <strong>' + signal.regime + '</strong></span>' +
-      '<span>Price: <strong>$' + (signal.current_price || 0).toFixed(2) + '</strong></span>' +
+      '<span>Strategies: <strong>' + (signal.agreeing_count || 0) + '/' + (signal.strategy_count || 0) + '</strong></span>' +
+      '<span>Regime: <strong>' + (signal.regime || '?') + '</strong></span>' +
     '</div>' +
-    flipRow +
-    miniDashHtml +
-    levelsHtml;
-  card.addEventListener('click', function() { showSignalPopup(signal, cycle); });
+    levelsHtml + miniDashHtml + flipRow;
+
+  // ── Click to popup ──
+  card.onclick = function() { showSignalPopup(signal, cycle); };
   return card;
 }
 
+/* ═══════════════════════════════════════════════════════════════
+   History Rendering
+   ═══════════════════════════════════════════════════════════════ */
+
+function renderHistory() {
+  var container = document.getElementById('history-list');
+  if (!container) return;
+
+  // STATE: Loading
+  var history = _status.history || [];
+  if (!history || history.length === 0) {
+    container.innerHTML = '<div class="empty-state">📜 No cycle history yet. Run a cycle first.</div>';
+    return;
+  }
+
+  // STATE: Data
+  var sub = _currentSubTab || 'stock';
+  container.innerHTML = '';
+  history.forEach(function(cycle) {
+    var cycleDiv = document.createElement('div');
+    cycleDiv.className = 'history-cycle';
+
+    var ts = cycle.timestamp || '';
+    var timeStr = ts ? new Date(ts).toLocaleTimeString() : '--';
+    var signals = cycle.signals || {};
+    var typeSignals = signals[sub] || [];
+    var sigCount = typeSignals.length;
+    var flipCount = cycle.flip_count || 0;
+    var wasError = cycle.status === 'error';
+
+    cycleDiv.innerHTML =
+      '<div class="history-header" onclick="this.nextElementSibling.classList.toggle(\'expanded\')">' +
+        '<span><strong>#' + (cycle.cycle_id || '?') + '</strong> ' + timeStr + ' — ' + sigCount + ' ' + sub + ' signals' +
+        (flipCount > 0 ? ' | 🔴 ' + flipCount + ' flip' + (flipCount > 1 ? 's' : '') : '') +
+        (wasError ? ' | ❌ ERROR' : '') +
+        '</span>' +
+        '<span>' + (cycle.elapsed_seconds || 0).toFixed(1) + 's</span>' +
+      '</div>' +
+      '<div class="history-body">';
+
+    if (wasError) {
+      cycleDiv.querySelector('.history-body').innerHTML = '<div class="error-state">Error: ' + (cycle.reason || 'unknown') + '</div>';
+    } else if (typeSignals.length === 0) {
+      cycleDiv.querySelector('.history-body').innerHTML = '<em style="color:var(--text-muted)">No ' + sub + ' signals this cycle</em>';
+    } else {
+      var bodyHtml = '';
+      typeSignals.forEach(function(s) {
+        var dirArrow = s.direction === 'long' ? '▲' : s.direction === 'short' ? '▼' : '–';
+        bodyHtml +=
+          '<div class="history-signal">' +
+            '<span class="direction-badge ' + s.direction + '" style="padding:1px 6px;font-size:10px">' + dirArrow + '</span>' +
+            '<strong>' + s.ticker + '</strong>' +
+            '<span>' + (s.confidence * 100).toFixed(1) + '%</span>' +
+            '<span style="color:var(--text-muted)">' + (s.regime || '') + '</span>' +
+          '</div>';
+      });
+      cycleDiv.querySelector('.history-body').innerHTML = bodyHtml;
+    }
+
+    cycleDiv.querySelector('.history-body').innerHTML += '</div>';
+    container.appendChild(cycleDiv);
+  });
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Watchlist (Slot Usage)
+   ═══════════════════════════════════════════════════════════════ */
+
+function loadWatchlist() {
+  var slotEl = document.getElementById('slot-usage');
+  var tickerEl = document.getElementById('subscribed-tickers');
+  if (!slotEl || !tickerEl) return;
+
+  var slots = _status.slot_usage || {};
+  var limits = slots.limits || {};
+  var byType = slots.by_type || {};
+
+  // STATE: Loading / Empty
+  if (!slots.total_limit) {
+    slotEl.innerHTML = '<div class="empty-state">No slot data yet</div>';
+    tickerEl.innerHTML = '';
+    return;
+  }
+
+  // STATE: Data
+  var slotHtml = '';
+  ['stock', 'future', 'option'].forEach(function(t) {
+    var used = byType[t] || 0;
+    var limit = limits[t] || 10;
+    var pct = Math.min((used / limit) * 100, 100);
+    var barClass = pct > 80 ? 'red' : pct > 60 ? 'yellow' : 'green';
+    slotHtml +=
+      '<div class="slot-card">' +
+        '<div class="slot-label">' + t.charAt(0).toUpperCase() + t.slice(1) + '</div>' +
+        '<div class="slot-value">' + used + '/' + limit + '</div>' +
+        '<div class="slot-bar"><div class="slot-bar-fill ' + barClass + '" style="width:' + pct + '%"></div></div>' +
+      '</div>';
+  });
+  slotEl.innerHTML = slotHtml;
+
+  var fixedStocks = slots.fixed_stocks || 0;
+  var fixedFutures = slots.fixed_futures || 0;
+  var pinned = slots.pinned || 0;
+  slotHtml +=
+    '<div class="slot-card"><div class="slot-label">Fixed Stocks</div><div class="slot-value">' + fixedStocks + '</div></div>' +
+    '<div class="slot-card"><div class="slot-label">Fixed Futures</div><div class="slot-value">' + fixedFutures + '</div></div>' +
+    '<div class="slot-card"><div class="slot-label">Pinned</div><div class="slot-value">' + pinned + '</div></div>';
+  slotEl.innerHTML = slotHtml;
+
+  var subTickers = _status.connection ? (_status.connection.subscribed || []) : [];
+  if (subTickers.length === 0) {
+    tickerEl.innerHTML = '<div class="empty-state" style="padding:12px">No tickers subscribed yet</div>';
+  } else {
+    tickerEl.innerHTML = subTickers.map(function(t) { return '<span class="ticker-item">' + t + '</span>'; }).join('');
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Signal Popup
+   ═══════════════════════════════════════════════════════════════ */
+
 function showSignalPopup(signal, cycle) {
-  try {
   var overlay = document.getElementById('signal-popup-overlay');
-  var dirClass = signal.direction === 'long' ? 'long' : signal.direction === 'short' ? 'short' : 'neutral';
-  document.getElementById('popup-title').textContent = signal.ticker + ' — Signal Detail';
-  document.getElementById('popup-direction').textContent = signal.direction.toUpperCase();
-  document.getElementById('popup-direction').className = 'direction-badge ' + dirClass;
+  if (!overlay) return;
+  overlay.style.display = 'flex';
+
+  // Populate header
+  document.getElementById('popup-title').textContent = signal.ticker + ' — ' + signal.instrument_type.toUpperCase();
+  var dirEl = document.getElementById('popup-direction');
+  dirEl.textContent = signal.direction.toUpperCase();
+  dirEl.className = 'direction-badge ' + signal.direction;
   document.getElementById('popup-confidence').textContent = (signal.confidence * 100).toFixed(1) + '%';
-  document.getElementById('popup-regime').textContent = signal.regime + ' (' + (signal.regime_confidence * 100).toFixed(0) + '%)';
+  document.getElementById('popup-regime').textContent = (signal.regime || '—').replace(/_/g, ' ');
   document.getElementById('popup-price').textContent = '$' + (signal.current_price || 0).toFixed(2);
 
-  // Restore levels section + hide gate reason
-  document.getElementById('popup-levels-section').style.display = '';
-  document.getElementById('popup-gate-reason').style.display = 'none';
-
-  // Entry/Exit levels
-  var entryPrice = signal.entry_price || signal.current_price || 0;
-  var sl = signal.stop_loss || 0;
-  var tp = signal.take_profit || 0;
-  var rr = signal.risk_reward || 0;
-  document.getElementById('popup-entry').textContent = '$' + entryPrice.toFixed(2);
-  document.getElementById('popup-sl').textContent = '$' + sl.toFixed(2);
-  document.getElementById('popup-tp').textContent = '$' + tp.toFixed(2);
-  document.getElementById('popup-rr').textContent = rr.toFixed(1) + ':1';
-
-  // Highlight direction on SL
-  var slEl = document.getElementById('popup-sl');
-  slEl.className = signal.direction === 'long' ? 'level-sl-long' : 'level-sl-short';
-
-  // Option premium levels
-  var optSection = document.getElementById('popup-option-levels');
-  var optPrem = signal.option_entry_premium || 0;
-  if (optPrem > 0 && signal.instrument_type === 'option') {
-    optSection.style.display = 'block';
-    document.getElementById('popup-opt-entry').textContent = '$' + optPrem.toFixed(2);
-    document.getElementById('popup-opt-sl').textContent = '$' + (signal.option_sl_premium || 0).toFixed(2);
-    document.getElementById('popup-opt-tp').textContent = '$' + (signal.option_tp_premium || 0).toFixed(2);
-    document.getElementById('popup-premium-rr').textContent = ((signal.premium_risk_reward || 0)).toFixed(1) + ':1';
+  // Session meta
+  var sessionMeta = document.getElementById('popup-session-meta');
+  var tw = signal.time_window || '';
+  var vw = signal.vwap_position || '';
+  if (tw || vw) {
+    sessionMeta.style.display = 'flex';
+    document.getElementById('popup-time-window').textContent = tw.replace(/_/g, ' ') || '--';
+    document.getElementById('popup-vwap-pos').textContent = vw || '--';
   } else {
-    optSection.style.display = 'none';
+    sessionMeta.style.display = 'none';
+  }
+
+  // Gate reason (rejected signals)
+  var gateReason = document.getElementById('popup-gate-reason');
+  if (!signal.gate_passed) {
+    gateReason.style.display = 'block';
+    document.getElementById('popup-gate-reason-text').textContent = signal.gate_reason || 'unknown';
+  } else {
+    gateReason.style.display = 'none';
+  }
+
+  // Levels
+  document.getElementById('popup-entry').textContent = (signal.entry_price || signal.current_price || 0) > 0 ? '$' + (signal.entry_price || signal.current_price || 0).toFixed(2) : '--';
+  document.getElementById('popup-sl').textContent = signal.stop_loss ? '$' + signal.stop_loss.toFixed(2) : '--';
+  document.getElementById('popup-tp').textContent = signal.take_profit ? '$' + signal.take_profit.toFixed(2) : '--';
+  document.getElementById('popup-rr').textContent = signal.risk_reward ? signal.risk_reward.toFixed(1) : '--';
+
+  // Option levels
+  var optLevels = document.getElementById('popup-option-levels');
+  var optPrem = signal.option_entry_premium || 0;
+  if (signal.instrument_type === 'option' && optPrem > 0) {
+    optLevels.style.display = 'block';
+    document.getElementById('popup-opt-entry').textContent = '$' + optPrem.toFixed(2);
+    document.getElementById('popup-opt-sl').textContent = signal.option_sl_premium ? '$' + signal.option_sl_premium.toFixed(2) : '--';
+    document.getElementById('popup-opt-tp').textContent = signal.option_tp_premium ? '$' + signal.option_tp_premium.toFixed(2) : '--';
+    document.getElementById('popup-premium-rr').textContent = signal.premium_risk_reward ? signal.premium_risk_reward.toFixed(1) : '--';
+  } else {
+    optLevels.style.display = 'none';
   }
 
   // Strike recommendation
-  var strikeSection = document.getElementById('popup-strike-recommendation');
+  var strikeSec = document.getElementById('popup-strike-recommendation');
   var recStrike = signal.recommended_strike || 0;
-  if (recStrike > 0 && signal.instrument_type === 'option') {
-    strikeSection.style.display = 'block';
-    document.getElementById('popup-strike').textContent = '$' + recStrike.toFixed(0) + ' ' + (signal.recommended_otm || '');
-    document.getElementById('popup-opt-type').textContent = signal.recommended_option_type || '';
-    document.getElementById('popup-est-win').textContent = (signal.estimated_win_rate ? (signal.estimated_win_rate * 100).toFixed(0) + '%' : '--');
-    document.getElementById('popup-est-payoff').textContent = (signal.estimated_payoff || 0).toFixed(1) + ':1';
+  if (signal.instrument_type === 'option' && recStrike > 0) {
+    strikeSec.style.display = 'block';
+    document.getElementById('popup-strike').textContent = '$' + recStrike.toFixed(signal.ticker === 'SPX' ? 0 : 2);
+    document.getElementById('popup-opt-type').textContent = (signal.recommended_otm || '') + ' ' + (signal.recommended_option_type || '');
+    document.getElementById('popup-est-win').textContent = signal.estimated_win_rate ? (signal.estimated_win_rate * 100).toFixed(0) + '%' : '--';
+    document.getElementById('popup-est-payoff').textContent = signal.estimated_payoff ? signal.estimated_payoff.toFixed(1) + 'x' : '--';
     document.getElementById('popup-strike-rationale').textContent = signal.strike_rationale || '';
   } else {
-    strikeSection.style.display = 'none';
+    strikeSec.style.display = 'none';
   }
 
-  // Position: always 1 contract for options
-  var posSection = document.getElementById('popup-position-sizing');
+  // Position
+  var posSec = document.getElementById('popup-position-sizing');
   if (signal.instrument_type === 'option' && signal.direction !== 'neutral') {
-    posSection.style.display = 'block';
-    document.getElementById('popup-contracts').textContent = '1';
-    document.getElementById('popup-total-prem').textContent = '$' + ((signal.option_entry_premium || 0)).toFixed(2);
+    posSec.style.display = 'block';
+    document.getElementById('popup-contracts').textContent = signal.position_contracts || 1;
+    document.getElementById('popup-total-prem').textContent = optPrem > 0 ? '$' + (optPrem * (signal.position_contracts || 1)).toFixed(2) : '--';
   } else {
-    posSection.style.display = 'none';
+    posSec.style.display = 'none';
   }
 
-  // Time window & VWAP
-  var metaSection = document.getElementById('popup-session-meta');
-  var todLabel = signal.time_window || '';
-  var vwapLabel = signal.vwap_position || '';
-  if (todLabel || vwapLabel) {
-    metaSection.style.display = 'flex';
-    document.getElementById('popup-time-window').textContent = todLabel ? todLabel.replace(/_/g, ' ') : '--';
-    document.getElementById('popup-vwap-pos').textContent = vwapLabel || '--';
-  } else {
-    metaSection.style.display = 'none';
-  }
-
-  // ── Market Dashboard (option signals only, collapsed by default) ──
-  var dashSection = document.getElementById('popup-market-dashboard');
-  var dash = signal.market_dashboard || {};
-  if (Object.keys(dash).length > 0 && signal.instrument_type === 'option') {
-    dashSection.style.display = 'block';
-    // Reset to collapsed state
-    var dashBody = document.getElementById('dashboard-body');
-    dashBody.style.display = 'none';
-    var dashIcon = dashSection.querySelector('.collapse-icon');
-    if (dashIcon) dashIcon.textContent = '▼';
-    var dashGrid = document.getElementById('dashboard-grid');
-    var dashItems = [
-      ['Underlying', '$' + (dash.underlying_price || 0).toFixed(2)],
-      ['ATM IV', (dash.iv || 0).toFixed(1) + '%'],
-      ['HV(10d)', (dash.hv_10 || 0).toFixed(1) + '%'],
-      ['DTE', dash.dte],
-      ['P/C Ratio', dash.pc_ratio],
-      ['P/C 5d Avg', dash.pc_ratio_5d],
-      ['Gamma Flip', '$' + (dash.gamma_flip || 0).toFixed(0)],
-      ['γ Walls', dash.gamma_walls_count],
-      ['Delta Pos', formatBigNum(dash.delta_positioning)],
-      ['Straddle', '$' + (dash.atm_straddle || 0).toFixed(2)],
-      ['Skew(1m)', (dash.skew_1m || 0).toFixed(1) + ' pts'],
-      ['Charm', dash.charm_direction + ' ' + formatTinyNum(dash.charm_magnitude)],
-      ['Vanna', formatBigNum(dash.total_vanna)],
-      ['VIX Spot', dash.vix_spot],
-      ['Breadth', dash.breadth_state + ' (' + (dash.breadth_composite > 0 ? '+' : '') + dash.breadth_composite.toFixed(2) + ')'],
-      ['Breadth Trend', dash.breadth_trend],
-      ['VIX State', dash.vix_state],
-      ['Futures Align', dash.futures_alignment + '%'],
-      ['Tech Div', (dash.tech_divergence > 0 ? '+' : '') + (dash.tech_divergence * 100).toFixed(2) + '%'],
-      ['Small Cap', dash.small_cap_participating ? '✓ Participating' : '✗ Lagging'],
-      ['Thrust', dash.breadth_thrust ? '⚡ ACTIVE' : '—'],
+  // Market dashboard
+  var dashSec = document.getElementById('popup-market-dashboard');
+  var miniDash = signal.market_dashboard || {};
+  if (Object.keys(miniDash).length > 0 && signal.instrument_type === 'option') {
+    dashSec.style.display = 'block';
+    var grid = document.getElementById('dashboard-grid');
+    grid.innerHTML = '';
+    var metrics = [
+      {k:'underlying',l:'Underlying',v:miniDash.underlying||'--'},
+      {k:'underlying_price',l:'Price',v:'$'+(miniDash.underlying_price||0).toFixed(2)},
+      {k:'iv',l:'ATM IV',v:(miniDash.iv||0).toFixed(1)+'%'},
+      {k:'hv_10',l:'HV(10)',v:(miniDash.hv_10||0).toFixed(1)+'%'},
+      {k:'dte',l:'DTE',v:miniDash.dte||'--'},
+      {k:'pc_ratio',l:'P/C Vol',v:(miniDash.pc_ratio||0).toFixed(2)},
+      {k:'pc_ratio_5d',l:'P/C 5d Avg',v:(miniDash.pc_ratio_5d||0).toFixed(2)},
+      {k:'gamma_flip',l:'Gamma Flip',v:'$'+(miniDash.gamma_flip||0).toFixed(1)},
+      {k:'delta_positioning',l:'Delta Pos',v:miniDash.delta_positioning||0},
+      {k:'atm_straddle',l:'ATM Straddle',v:'$'+(miniDash.atm_straddle||0).toFixed(2)},
+      {k:'skew_1m',l:'Skew 1M',v:(miniDash.skew_1m||0).toFixed(1)},
+      {k:'charm_direction',l:'Charm Dir',v:miniDash.charm_direction||'--'},
+      {k:'vix_spot',l:'VIX',v:(miniDash.vix_spot||0).toFixed(1)},
+      {k:'breadth_state',l:'Breadth',v:(miniDash.breadth_state||'--')+(miniDash.breadth_thrust?'⚡':'')},
+      {k:'futures_alignment',l:'Futures Align',v:(miniDash.futures_alignment||0)+'%'},
+      {k:'tech_divergence',l:'Tech Diverg',v:(miniDash.tech_divergence||0).toFixed(4)},
     ];
-    dashGrid.innerHTML = dashItems.map(function(p) {
-      return '<div class="dash-metric"><label>' + p[0] + '</label><span>' + p[1] + '</span></div>';
-    }).join('');
-    // Inline summary: always visible in the header (even when collapsed)
-    var dashSummary = document.getElementById('dashboard-summary');
-    if (dashSummary) {
-      var breadthLabel = dash.breadth_state || '—';
-      dashSummary.textContent =
-        'IV ' + (dash.iv || 0).toFixed(1) + '% · ' +
-        'P/C ' + (dash.pc_ratio != null ? dash.pc_ratio : '—') + ' · ' +
-        'VIX ' + (dash.vix_spot != null ? dash.vix_spot : '—') + ' · ' +
-        'Breadth ' + breadthLabel + ' · ' +
-        'DTE ' + (dash.dte != null ? dash.dte : '—');
-    }
+    metrics.forEach(function(m) {
+      var div = document.createElement('div');
+      div.className = 'dashboard-metric';
+      div.innerHTML = '<label>' + m.l + '</label><span>' + m.v + '</span>';
+      grid.appendChild(div);
+    });
+    var summEl = document.getElementById('dashboard-summary');
+    var dashSummary = 'IV ' + (miniDash.iv||0).toFixed(0) + '% | Breadth ' + (miniDash.breadth_state||'--') + ' | VIX ' + (miniDash.vix_spot||0).toFixed(1);
+    summEl.textContent = dashSummary;
   } else {
-    dashSection.style.display = 'none';
+    dashSec.style.display = 'none';
   }
 
+  // Strategies
+  var strategies = signal.strategies || [];
   var stratContainer = document.getElementById('popup-strategies');
-  var strats = signal.strategies || [];
-  if (strats.length === 0) {
-    stratContainer.innerHTML = '<div style="color:var(--text-muted)">No strategies fired</div>';
-  } else {
-    stratContainer.innerHTML = '';
-    strats.sort(function(a, b) { return b.confidence - a.confidence; });
-    strats.forEach(function(s) {
+  stratContainer.innerHTML = '';
+  if (strategies.length > 0) {
+    strategies.forEach(function(s) {
       var item = document.createElement('div');
       item.className = 'strategy-item';
-      var sDirClass = s.direction === 'long' ? 'long' : s.direction === 'short' ? 'short' : 'neutral';
-      var reasoning = s.reasoning ? '<div class="strat-reasoning">' + s.reasoning + '</div>' : '';
-
-      // Build diagnostics section
-      var diag = s.diagnostics || {};
-      var diagHtml = '';
-      if (Object.keys(diag).length > 0) {
-        var diagPairs = [];
-        for (var k in diag) {
-          if (diag.hasOwnProperty(k)) {
-            var v = diag[k];
-            var displayVal = typeof v === 'number' ? (Math.abs(v) < 0.001 ? formatTinyNum(v) : (Math.abs(v) > 1000 ? formatBigNum(v) : (Number.isInteger(v) ? v : v.toFixed(4)))) : v;
-            diagPairs.push('<span class="diag-kv"><em>' + k.replace(/_/g, ' ') + '</em>: ' + displayVal + '</span>');
-          }
-        }
-        diagHtml = '<div class="strat-diag">' + diagPairs.join(' · ') + '</div>';
-      }
-
+      var dirArrow = s.direction === 'long' ? '▲' : s.direction === 'short' ? '▼' : '–';
+      var dirClass = s.direction === 'long' ? 'accent' : s.direction === 'short' ? 'danger' : '';
+      var reason = s.reasoning || '';
       item.innerHTML =
-        '<div><span class="strat-name">' + s.name + '</span><span class="strat-source">' + (s.source || '') + '</span>' + reasoning + diagHtml + '</div>' +
-        '<div class="strat-dir-conf">' +
-          '<span class="direction-badge ' + sDirClass + '" style="font-size:10px">' + s.direction.toUpperCase() + '</span>' +
-          '<span style="font-weight:600">' + (s.confidence * 100).toFixed(1) + '%</span>' +
-        '</div>';
+        '<span class="strat-name">' + (s.name || '?') + '</span>' +
+        '<span style="color:var(--' + dirClass + ');font-weight:600">' + dirArrow + '</span>' +
+        '<span>' + (s.confidence * 100).toFixed(1) + '%</span>' +
+        '<span style="color:var(--text-muted);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + reason.substring(0,100) + '</span>';
       stratContainer.appendChild(item);
     });
+  } else {
+    stratContainer.innerHTML = '<em style="color:var(--text-muted);font-size:11px">No active strategies</em>';
   }
 
-  // ── Consensus Meta (collapsed by default) ──
-  var consSection = document.getElementById('popup-consensus-meta');
-  var consMeta = signal.consensus_meta || {};
-  var consVotes = consMeta.consensus_votes || [];
-  if (consVotes.length > 0 || consMeta.consensus_net_score != null) {
-    consSection.style.display = 'block';
-    // Reset to collapsed state
-    var consBody = document.getElementById('consensus-body');
-    consBody.style.display = 'none';
-    var consIcon = consSection.querySelector('.collapse-icon');
-    if (consIcon) consIcon.textContent = '▼';
-    // Aggregate grid
+  // Consensus meta
+  var cm = signal.consensus_meta || {};
+  var consSec = document.getElementById('popup-consensus-meta');
+  var hasConsensus = Object.keys(cm).length > 0 && cm.consensus_net_score !== undefined;
+  if (hasConsensus) {
+    consSec.style.display = 'block';
     var consGrid = document.getElementById('consensus-grid');
-    var consItems = [
-      ['Net Score', (consMeta.consensus_net_score || 0).toFixed(2)],
-      ['Active Votes', consMeta.consensus_active_votes || 0],
-      ['Neutral Votes', consMeta.consensus_neutral_votes || 0],
-      ['Weighted Long', (consMeta.consensus_weighted_long || 0).toFixed(2)],
-      ['Weighted Short', (consMeta.consensus_weighted_short || 0).toFixed(2)],
-      ['Total Weight', (consMeta.consensus_total_weight || 0).toFixed(2)],
-      ['Counter Trend', consMeta.consensus_counter_trend || 'no'],
-      ['Regime Boost', ((consMeta.consensus_regime_boost || 0) > 0 ? '+' + consMeta.consensus_regime_boost.toFixed(2) : '0')],
-      ['TOD Window', consMeta.consensus_tod_window || '—'],
-      ['Consensus Action', consMeta.consensus_action || '—'],
+    consGrid.innerHTML = '';
+    var consMetrics = [
+      {k:'consensus_net_score',l:'Net Score',v:cm.consensus_net_score!==undefined?(cm.consensus_net_score).toFixed(4):'--'},
+      {k:'consensus_active_votes',l:'Active Votes',v:cm.consensus_active_votes||0},
+      {k:'consensus_weighted_long',l:'Weighted Long',v:cm.consensus_weighted_long!==undefined?cm.consensus_weighted_long.toFixed(4):'--'},
+      {k:'consensus_weighted_short',l:'Weighted Short',v:cm.consensus_weighted_short!==undefined?cm.consensus_weighted_short.toFixed(4):'--'},
+      {k:'consensus_total_weight',l:'Total Weight',v:cm.consensus_total_weight!==undefined?cm.consensus_total_weight.toFixed(4):'--'},
+      {k:'consensus_counter_trend',l:'Counter Trend',v:cm.consensus_counter_trend||'--'},
+      {k:'consensus_conviction_tier',l:'Conviction',v:cm.consensus_conviction_tier||'--'},
+      {k:'consensus_regime',l:'Regime',v:cm.consensus_regime||'--'},
+      {k:'consensus_family_count',l:'Families',v:cm.consensus_family_count||0},
+      {k:'consensus_authority_weighted',l:'Authority Wtd',v:cm.consensus_authority_weighted?'Yes':'No'},
     ];
-    consGrid.innerHTML = consItems.map(function(p) {
-      return '<div class="dash-metric"><label>' + p[0] + '</label><span>' + p[1] + '</span></div>';
-    }).join('');
-    // Inline summary: always visible in the header
-    var consSummary = document.getElementById('consensus-summary');
-    if (consSummary) {
-      var netScore = (consMeta.consensus_net_score != null ? consMeta.consensus_net_score : 0).toFixed(2);
-      var activeVotes = consMeta.consensus_active_votes || 0;
-      var counterTrend = consMeta.consensus_counter_trend || 'no';
-      var action = consMeta.consensus_action || '—';
-      consSummary.textContent =
-        'Net ' + (netScore > 0 ? '+' : '') + netScore + ' · ' +
-        activeVotes + ' active · ' +
-        'Counter: ' + counterTrend + ' · ' +
-        'Action: ' + action;
-    }
-    // Vote breakdown list
-    var voteSection = document.getElementById('vote-breakdown');
-    if (consVotes.length > 0) {
-      consVotes.sort(function(a, b) { return b.contribution - a.contribution; });
-      var voteHtml = '<h5>Vote Breakdown</h5><div class="vote-list">';
-      consVotes.forEach(function(v) {
-        var vDirClass = v.direction === 'long' ? 'long' : v.direction === 'short' ? 'short' : 'neutral';
+    consMetrics.forEach(function(m) {
+      var div = document.createElement('div');
+      div.className = 'dashboard-metric';
+      div.innerHTML = '<label>' + m.l + '</label><span>' + m.v + '</span>';
+      consGrid.appendChild(div);
+    });
+    var summEl2 = document.getElementById('consensus-summary');
+    summEl2.textContent = 'Net ' + (cm.consensus_net_score||0).toFixed(3) + ' | Tier ' + (cm.consensus_conviction_tier||'--') + ' | ' + (cm.consensus_active_votes||0) + ' votes';
+
+    // Vote breakdown
+    var votes = cm.consensus_votes || [];
+    var voteBreakdown = document.getElementById('vote-breakdown');
+    if (votes.length > 0) {
+      var voteHtml = '<div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">Vote contributions:</div>';
+      votes.forEach(function(v) {
+        var dirArrow2 = v.direction === 'long' ? '▲' : v.direction === 'short' ? '▼' : '–';
         voteHtml +=
           '<div class="vote-item">' +
-            '<span class="vote-name">' + v.name + ' <em>' + (v.type || '') + '</em></span>' +
-            '<span class="direction-badge ' + vDirClass + '" style="font-size:9px">' + v.direction.toUpperCase() + '</span>' +
-            '<span class="vote-conf">' + ((v.confidence || 0) * 100).toFixed(0) + '%</span>' +
-            '<span class="vote-weight">×' + (v.weight || 0).toFixed(2) + '</span>' +
-            '<span class="vote-contrib">=' + (v.contribution || 0).toFixed(3) + '</span>' +
+            '<span class="vote-name">' + v.name + '</span>' +
+            '<span>' + dirArrow2 + '</span>' +
+            '<span>' + (v.confidence * 100).toFixed(0) + '%</span>' +
+            '<span class="vote-contribution">weight=' + v.weight.toFixed(4) + ' contrib=' + v.contribution.toFixed(4) + '</span>' +
+            (v.authority ? '<span class="vote-contribution">auth=' + v.authority.toFixed(1) + 'x</span>' : '') +
           '</div>';
       });
-      voteHtml += '</div>';
-      voteSection.innerHTML = voteHtml;
-      voteSection.style.display = 'block';
+      voteBreakdown.innerHTML = voteHtml;
     } else {
-      voteSection.style.display = 'none';
+      voteBreakdown.innerHTML = '';
     }
   } else {
-    consSection.style.display = 'none';
+    consSec.style.display = 'none';
   }
 
-  var newsContainer = document.getElementById('popup-news');
+  // News
   var news = signal.news || [];
-  if (news.length === 0) {
-    newsContainer.innerHTML = '<div style="color:var(--text-muted)">No recent news</div>';
+  var newsContainer = document.getElementById('popup-news');
+  if (news.length > 0) {
+    newsContainer.innerHTML = news.map(function(n) {
+      var h = n.headline || '';
+      var s = n.sentiment !== undefined ? ' (' + (n.sentiment > 0 ? '+' : '') + n.sentiment.toFixed(2) + ')' : '';
+      return '<div class="news-item">' + h.substring(0, 120) + s + '</div>';
+    }).join('');
   } else {
-    newsContainer.innerHTML = '';
-    news.slice(0, 5).forEach(function(n) {
-      var item = document.createElement('div');
-      item.className = 'news-item';
-      item.innerHTML =
-        '<div class="headline" onclick="window.open(\'' + (n.url || '#') + '\',\'_blank\')">' + n.headline + '</div>' +
-        '<div class="source">' + (n.source || '') + '</div>';
-      newsContainer.appendChild(item);
-    });
-  }
-
-  overlay.style.display = 'flex';
-  } catch(e) {
-    console.error('showSignalPopup crashed:', e.message, e.stack);
+    newsContainer.innerHTML = '<em style="color:var(--text-muted)">No recent news</em>';
   }
 }
 
 function closePopup(e) {
   if (e && e.target !== e.currentTarget) return;
   document.getElementById('signal-popup-overlay').style.display = 'none';
-}
-
-async function runCycle() {
-  var btn = document.getElementById('run-cycle-btn');
-  btn.disabled = true;
-  btn.textContent = 'Running...';
-  try {
-    var resp = await fetch('/api/run-cycle', { method: 'POST' });
-    var result = await resp.json();
-    _status.last_cycle = result;
-    _status.cycle_in_progress = false;
-    updateUI();
-  } catch(e) {
-    console.error('Run cycle failed:', e);
-  }
-  btn.disabled = false;
-  btn.textContent = 'Run Cycle';
-}
-
-async function toggleAutoRun() {
-  if (_status.auto_run) {
-    await fetch('/api/auto-run/stop');
-    _status.auto_run = false;
-  } else {
-    await fetch('/api/auto-run/start');
-    _status.auto_run = true;
-  }
-  updateUI();
-}
-
-function loadWatchlist() {
-  var status = _status;
-  var slots = status.slot_usage || {};
-  var slotContainer = document.getElementById('slot-usage');
-  var limits = slots.limits || {};
-  var byType = slots.by_type || {};
-  var html = '<div class="slot-card"><h3>Total</h3><div class="used">' + (slots.total_fixed || 0) + '/' + (slots.total_limit || 100) + '</div><div class="limit">fixed</div></div>';
-  ['stock', 'future', 'option'].forEach(function(t) {
-    var used = byType[t] || 0;
-    var limit = limits[t] || 0;
-    html += '<div class="slot-card"><h3>' + t.charAt(0).toUpperCase() + t.slice(1) + '</h3><div class="used">' + used + '/' + limit + '</div><div class="limit">slots</div></div>';
-  });
-  slotContainer.innerHTML = html;
-}
-
-function _findSignal(cycle, ticker, instrType) {
-  var groups = cycle.signals || {};
-  var list = groups[instrType] || [];
-  for (var i = 0; i < list.length; i++) {
-    if (list[i].ticker === ticker) return list[i];
-  }
-  return null;
-}
-
-function _fmtTime(ts) {
-  if (!ts) return '--';
-  try {
-    var d = new Date(ts);
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  } catch(e) { return ts; }
-}
-
-function _fmtDate(ts) {
-  if (!ts) return '--';
-  try {
-    var d = new Date(ts);
-    return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
-  } catch(e) { return ts; }
-}
-
-function _fmtConf(v) {
-  return v ? (v * 100).toFixed(1) + '%' : '0%';
-}
-
-function buildCycleCard(cycle) {
-  var cid = 'cycle-' + cycle.cycle_id;
-  var sigCount = cycle.signals_count || 0;
-  var tickerCount = (cycle.gate_evaluations || []).length;
-  var elaped = (cycle.elapsed_seconds || 0).toFixed(1);
-  var statusBadge = cycle.status === 'completed' ? '✅' : '❌';
-  var breakdown = cycle.gate_rejection_breakdown || {};
-  var breakdownHtml = '';
-  var bkKeys = Object.keys(breakdown);
-  if (bkKeys.length > 0) {
-    breakdownHtml = '<div style="margin-top:4px;font-size:11px;color:var(--text-muted)">⛔ ' +
-      bkKeys.map(function(k) { return '<span class="rejection-chip">' + k + ' (' + breakdown[k] + ')</span>'; }).join(' ') +
-      '</div>';
-  }
-
-  var rows = cycle.gate_evaluations || [];
-  // Filter by active sub-tab
-  rows = rows.filter(function(e) { return e.instrument_type === _currentSubTab; });
-  var cycleFlips = cycle.flips || {};
-
-  var bodyHtml = '';
-  if (rows.length === 0) {
-    bodyHtml = '<div style="padding:16px;color:var(--text-muted);font-size:12px">No ' + _currentSubTab + ' evaluations in this cycle</div>';
-  } else {
-    bodyHtml = rows.map(function(e) {
-      var dirClass = e.direction === 'long' ? 'long' : e.direction === 'short' ? 'short' : 'neutral';
-      var dirArrow = e.direction === 'long' ? '▲' : e.direction === 'short' ? '▼' : '–';
-      var passed = e.gate_passed;
-      var gateLabel = passed ? 'PASSED' : 'REJECTED';
-      var gateClass = passed ? 'gate-badge passed' : 'gate-badge rejected';
-      var rowClass = passed ? 'ticker-row passed' : e.direction === 'neutral' ? 'ticker-row neutral' : 'ticker-row rejected';
-      var conf = e.consensus_confidence || 0;
-      var reason = e.gate_reason || '';
-      var regime = e.regime || '';
-      var tw = (e.time_window || '').replace(/_/g, ' ');
-      var vp = e.vwap_position || '';
-
-      var flipInfo = cycleFlips[e.ticker] || null;
-      var flipBadge = '';
-      if (flipInfo) {
-        flipBadge = '<span class="flip-badge" style="margin-right:4px">↻ ' + flipInfo.from.toUpperCase() + '→' + flipInfo.to.toUpperCase() + '</span>';
-      }
-
-      var regimeHtml = regime && regime !== 'unknown' ? '<span class="row-meta">' + regime + '</span>' : '';
-      var twHtml = tw && tw !== 'unknown' ? '<span class="row-meta">' + tw + '</span>' : '';
-      var vpHtml = vp && vp !== 'unknown' ? '<span class="row-meta">VWAP: ' + vp + '</span>' : '';
-
-      return '<div class="' + rowClass + '" onclick="_onHistoryRowClick(\'' + cid + '\',\'' + e.ticker + '\',\'' + e.instrument_type + '\')">' +
-        flipBadge +
-        '<span class="direction-badge ' + dirClass + '" style="font-size:11px;padding:2px 8px">' + dirArrow + ' ' + e.direction.toUpperCase() + '</span>' +
-        '<span class="ticker-name" style="font-weight:600">' + e.ticker + '</span>' +
-        '<span class="instrument-badge" style="font-size:10px">' + e.instrument_type + '</span>' +
-        '<span style="font-size:12px;color:var(--text-secondary)">' + _fmtConf(conf) + '</span>' +
-        '<span class="' + gateClass + '">' + gateLabel + '</span>' +
-        (passed ? '' : '<span class="gate-reason" title="' + reason + '">' + reason.replace(/_/g, ' ') + '</span>') +
-        regimeHtml + twHtml + vpHtml +
-        '</div>';
-    }).join('');
-  }
-
-  // Add flip count to cycle header if flips exist
-  var flipSummary = '';
-  var flipKeys = Object.keys(cycleFlips);
-  if (flipKeys.length > 0) {
-    flipSummary = ' · <span class="flip-count">⚠️ ' + flipKeys.length + ' flip' + (flipKeys.length > 1 ? 's' : '') + '</span>';
-  }
-
-  return '<div class="history-cycle">' +
-    '<div class="cycle-header" onclick="toggleCollapse(\'' + cid + '-body\', this)">' +
-      '<span><span class="collapse-icon">▼</span>Cycle #' + cycle.cycle_id + ' — ' + _fmtDate(cycle.timestamp) + ' ' + _fmtTime(cycle.timestamp) + '</span>' +
-      '<span class="cycle-summary-stats">' + statusBadge + ' ' + elaped + 's · ' + tickerCount + ' tickers · ' + sigCount + ' signals' + flipSummary + '</span>' +
-    '</div>' +
-    breakdownHtml +
-    '<div id="' + cid + '-body" class="cycle-body" style="display:none">' + bodyHtml + '</div>' +
-    '</div>';
-}
-
-function renderHistory() {
-  var container = document.getElementById('history-list');
-  if (!container) return;
-  var cycles = _status.history || [];
-  if (cycles.length === 0) {
-    container.innerHTML = '<div style="padding:16px;color:var(--text-muted);font-size:13px"><em>No cycle history yet</em></div>';
-    return;
-  }
-
-  // Save which cycles are currently expanded before re-render
-  var expanded = {};
-  container.querySelectorAll('.cycle-body').forEach(function(b) {
-    if (b.style.display !== 'none') {
-      expanded[b.id] = true;
-    }
-  });
-
-  container.innerHTML = cycles.map(buildCycleCard).join('');
-
-  // Restore expanded state after re-render
-  Object.keys(expanded).forEach(function(id) {
-    var body = document.getElementById(id);
-    if (body) {
-      body.style.display = 'block';
-      var header = body.previousElementSibling;
-      if (header && header.classList.contains('cycle-header')) {
-        var icon = header.querySelector('.collapse-icon');
-        if (icon) icon.textContent = '▲';
-      }
-    }
-  });
-}
-
-function _onHistoryRowClick(cycleId, ticker, instrType) {
-  var cycles = _status.history || [];
-  var cycle = null;
-  for (var i = 0; i < cycles.length; i++) {
-    if ('cycle-' + cycles[i].cycle_id === cycleId) { cycle = cycles[i]; break; }
-  }
-  if (!cycle) return;
-
-  var evalRows = cycle.gate_evaluations || [];
-  var evalEntry = null;
-  for (var j = 0; j < evalRows.length; j++) {
-    if (evalRows[j].ticker === ticker && evalRows[j].instrument_type === instrType) {
-      evalEntry = evalRows[j];
-      break;
-    }
-  }
-  if (!evalEntry) return;
-
-  if (evalEntry.gate_passed) {
-    var signal = _findSignal(cycle, ticker, instrType);
-    if (signal) {
-      showSignalPopup(signal, cycle);
-    } else {
-      // Fallback: show evaluation popup with signal-like structure
-      showRejectedPopup(evalEntry, cycle);
-    }
-  } else {
-    showRejectedPopup(evalEntry, cycle);
-  }
-}
-
-function showRejectedPopup(evalEntry, cycle) {
-  var overlay = document.getElementById('signal-popup-overlay');
-  var dirClass = evalEntry.direction === 'long' ? 'long' : evalEntry.direction === 'short' ? 'short' : 'neutral';
-  document.getElementById('popup-title').textContent = evalEntry.ticker + ' — Gate Rejected';
-  document.getElementById('popup-direction').textContent = evalEntry.direction.toUpperCase();
-  document.getElementById('popup-direction').className = 'direction-badge ' + dirClass;
-  document.getElementById('popup-confidence').textContent = _fmtConf(evalEntry.consensus_confidence);
-  document.getElementById('popup-regime').textContent = evalEntry.regime ? evalEntry.regime + ' regime' : '--';
-  document.getElementById('popup-price').textContent = '--';
-
-  // Hide optional sections not relevant for rejected
-  document.getElementById('popup-levels-section').style.display = 'none';
-  document.getElementById('popup-option-levels').style.display = 'none';
-  document.getElementById('popup-strike-recommendation').style.display = 'none';
-  document.getElementById('popup-position-sizing').style.display = 'none';
-  document.getElementById('popup-market-dashboard').style.display = 'none';
-  document.getElementById('popup-consensus-meta').style.display = 'none';
-
-  // Show gate reason section
-  var gateSection = document.getElementById('popup-gate-reason');
-  gateSection.style.display = 'flex';
-  var gateReason = (evalEntry.gate_reason || 'unknown').replace(/_/g, ' ');
-  document.getElementById('popup-gate-decision').textContent = 'REJECTED';
-  document.getElementById('popup-gate-reason-text').textContent = gateReason;
-
-  // Session meta
-  var metaSection = document.getElementById('popup-session-meta');
-  var tw = (evalEntry.time_window || '').replace(/_/g, ' ');
-  var vp = evalEntry.vwap_position || '';
-  if (tw || vp) {
-    metaSection.style.display = 'flex';
-    document.getElementById('popup-time-window').textContent = tw || '--';
-    document.getElementById('popup-vwap-pos').textContent = vp || '--';
-  } else {
-    metaSection.style.display = 'none';
-  }
-
-  // Strategy votes
-  var votes = evalEntry.strategy_votes || [];
-  var stratContainer = document.getElementById('popup-strategies');
-  if (votes.length === 0) {
-    stratContainer.innerHTML = '<div style="color:var(--text-muted);font-size:12px">No strategy votes recorded</div>';
-  } else {
-    votes.sort(function(a, b) { return b.confidence - a.confidence; });
-    stratContainer.innerHTML = '';
-    votes.forEach(function(s) {
-      var item = document.createElement('div');
-      item.className = 'strategy-item';
-      var sDirClass = s.direction === 'long' ? 'long' : s.direction === 'short' ? 'short' : 'neutral';
-      item.innerHTML =
-        '<div><span class="strat-name">' + s.name + '</span><span class="strat-source">' + (s.source || '') + '</span></div>' +
-        '<div class="strat-dir-conf">' +
-          '<span class="direction-badge ' + sDirClass + '" style="font-size:10px">' + s.direction.toUpperCase() + '</span>' +
-          '<span style="font-weight:600">' + _fmtConf(s.confidence) + '</span>' +
-        '</div>';
-      stratContainer.appendChild(item);
-    });
-  }
-
-  // News section — show rejection note
-  document.getElementById('popup-news').innerHTML = '<div style="color:var(--text-muted);font-size:12px">No signal generated (gate rejected)</div>';
-
-  overlay.style.display = 'flex';
-}
-
-function _sendFlipNotifications(cycle) {
-  if (!cycle || !cycle.flips || cycle.flip_count === 0) return;
-  var notifyEnabled = localStorage.getItem('lean_signals_desktop_notify') === 'true';
-  if (!notifyEnabled) return;
-
-  // Only notify once per cycle
-  if (_flipNotifiedCycles[cycle.cycle_id]) return;
-  _flipNotifiedCycles[cycle.cycle_id] = true;
-
-  if (typeof Notification === 'undefined') return;
-  if (Notification.permission === 'denied') return;
-
-  var flips = cycle.flips || {};
-  var tickerList = Object.keys(flips);
-  if (tickerList.length === 0) return;
-
-  var title = tickerList.length + ' signal flip' + (tickerList.length > 1 ? 's' : '') + ' detected';
-  var body = tickerList.slice(0, 5).map(function(t) {
-    var f = flips[t];
-    return t + ': ' + f.from.toUpperCase() + ' → ' + f.to.toUpperCase();
-  }).join('\n');
-  if (tickerList.length > 5) body += '\n+' + (tickerList.length - 5) + ' more...';
-
-  try {
-    var n = new Notification(title, { body: body, icon: '/static/favicon.ico' });
-    setTimeout(function() { n.close(); }, 8000);
-  } catch(e) {
-    // Silently fail — desktop notification not supported
-  }
-}
-
-function saveSettings() {
-  var interval = parseInt(document.getElementById('settings-interval').value) || 300;
-  localStorage.setItem('lean_signals_interval', interval);
-
-  var notifyEnabled = document.getElementById('settings-desktop-notify').checked;
-  localStorage.setItem('lean_signals_desktop_notify', notifyEnabled);
-
-  if (notifyEnabled && typeof Notification !== 'undefined' && Notification.permission === 'default') {
-    Notification.requestPermission();
-  }
-
-  alert('Settings saved.');
-}
-
-var _validateDetails = [];
-
-async function runValidate() {
-  var btn = document.getElementById('validate-btn');
-  var statusEl = document.getElementById('validate-status');
-  btn.disabled = true;
-  statusEl.textContent = 'Running validation... (may take 30-60s)';
-  try {
-    var resp = await fetch('/api/validate', { method: 'POST' });
-    var result = await resp.json();
-    showValidatePopup(result);
-    statusEl.textContent = 'Validation complete (cycle ' + (result.created_at_cycle || '?') + ')';
-  } catch(e) {
-    console.error('Validate failed:', e);
-    statusEl.textContent = 'Error: ' + e.message;
-  }
-  btn.disabled = false;
-}
-
-function showValidatePopup(result) {
-  document.getElementById('validate-total').textContent = result.total || 0;
-  document.getElementById('validate-passed').textContent = result.passed || 0;
-  document.getElementById('validate-failed').textContent = result.failed || 0;
-  document.getElementById('validate-skipped').textContent = result.skipped || 0;
-  document.getElementById('validate-cycle').textContent = result.created_at_cycle || '-';
-
-  var badgePass = document.getElementById('validate-badge-pass');
-  var badgeFail = document.getElementById('validate-badge-fail');
-  if (result.all_ok) {
-    badgePass.style.display = 'inline';
-    badgePass.textContent = 'ALL PASSED';
-    badgeFail.style.display = 'none';
-  } else {
-    badgeFail.style.display = 'inline';
-    badgeFail.textContent = result.failed + ' FAILED';
-    badgePass.style.display = 'none';
-  }
-
-  _validateDetails = result.details || [];
-
-  ['all', 'stock', 'future', 'option'].forEach(function(type) {
-    var container = document.getElementById('validate-signals-' + type);
-    if (!container) return;
-    var items = type === 'all' ? _validateDetails : _validateDetails.filter(function(d) { return d.type === type; });
-    if (items.length === 0) {
-      container.innerHTML = '<div class="signal-card" style="opacity:0.6"><em>No ' + type + ' tests</em></div>';
-      return;
-    }
-    container.innerHTML = '';
-    items.forEach(function(d) { container.appendChild(createValidateCard(d)); });
-  });
-
-  document.getElementById('validate-popup-overlay').style.display = 'flex';
-  resetValidateSubTabs();
-}
-
-function resetValidateSubTabs() {
-  document.querySelectorAll('#validate-popup-body .sub-tab').forEach(function(t) { t.classList.remove('active'); });
-  var first = document.querySelector('#validate-popup-body .sub-tab[data-subtab="all"]');
-  if (first) first.classList.add('active');
-  document.querySelectorAll('#validate-popup-body .signals-group').forEach(function(g) { g.classList.remove('active'); });
-  var all = document.getElementById('validate-signals-all');
-  if (all) all.classList.add('active');
-}
-
-function switchValidateSubTab(type) {
-  document.querySelectorAll('#validate-popup-body .sub-tab').forEach(function(t) {
-    t.classList.toggle('active', t.getAttribute('data-subtab') === type);
-  });
-  document.querySelectorAll('#validate-popup-body .signals-group').forEach(function(g) {
-    g.classList.toggle('active', g.id === 'validate-signals-' + type);
-  });
-}
-
-function createValidateCard(d) {
-  var card = document.createElement('div');
-  card.className = 'signal-card';
-  var dirArrow = d.direction === 'long' ? '▲' : d.direction === 'short' ? '▼' : '–';
-  var dirClass = d.direction === 'long' ? 'long' : d.direction === 'short' ? 'short' : 'neutral';
-
-  var badgeHtml = d.passed
-    ? '<span class="gate-badge passed">PASS</span>'
-    : '<span class="gate-badge rejected">FAIL</span>';
-
-  var errHtml = '';
-  if (!d.passed && d.error) {
-    errHtml = '<div class="row3" style="margin-top:4px"><span style="color:var(--danger);font-size:11px">' + escHtml(d.error) + '</span></div>';
-  }
-
-  var nameSpan = document.createElement('span');
-  nameSpan.className = 'ticker-name';
-  nameSpan.textContent = d.name;
-
-  card.innerHTML =
-    '<div class="row1">' +
-      '<div>' + nameSpan.outerHTML + '<span class="instrument-badge">' + d.type + '</span></div>' +
-      '<div style="display:flex;align-items:center;gap:8px">' +
-        badgeHtml +
-        '<span class="direction-badge ' + dirClass + '">' + dirArrow + ' ' + d.direction.toUpperCase() + '</span>' +
-      '</div>' +
-    '</div>' +
-    '<div class="row2">' +
-      '<span>Confidence: <strong>' + (d.confidence * 100).toFixed(1) + '%</strong></span>' +
-    '</div>' +
-    errHtml;
-  return card;
+  document.getElementById('validate-popup-overlay').style.display = 'none';
 }
 
 function closeValidatePopup() {
   document.getElementById('validate-popup-overlay').style.display = 'none';
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Cycle / Auto-Run Controls
+   ═══════════════════════════════════════════════════════════════ */
+
+async function runCycle() {
+  document.getElementById('cycle-status').textContent = 'Running...';
+  document.getElementById('cycle-status').className = 'status-badge running';
+  try {
+    var resp = await fetch('/api/run-cycle', { method: 'POST' });
+    var data = await resp.json();
+    _status.last_cycle = data;
+    updateUI();
+  } catch(e) {
+    console.error('Cycle run failed:', e);
+    document.getElementById('cycle-status').textContent = 'Failed';
+    document.getElementById('cycle-status').className = 'status-badge disconnected';
+  }
+}
+
+async function toggleAutoRun() {
+  var active = !_status.auto_run;
+  try {
+    await fetch('/api/auto-run/' + (active ? 'start' : 'stop'), { method: 'POST' });
+    _status.auto_run = active;
+    updateUI();
+  } catch(e) {
+    console.error('Auto-run toggle failed:', e);
+  }
+}
+
+async function saveSettings() {
+  var interval = document.getElementById('settings-interval').value;
+  var desktopNotify = document.getElementById('settings-desktop-notify').checked;
+  localStorage.setItem('lean_signals_interval', interval);
+  localStorage.setItem('lean_signals_desktop_notify', desktopNotify);
+  alert('Settings saved (refresh may be required for interval change)');
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Validation
+   ═══════════════════════════════════════════════════════════════ */
+
+async function runValidate() {
+  var btn = document.getElementById('validate-btn');
+  var status = document.getElementById('validate-status');
+  btn.disabled = true;
+  btn.textContent = 'Running...';
+  status.textContent = 'Validating all strategies...';
+
+  try {
+    var resp = await fetch('/api/validate', { method: 'POST' });
+    var data = await resp.json();
+    btn.disabled = false;
+    btn.textContent = 'Validate Strategies';
+
+    if (data.status === 'error') {
+      status.textContent = 'Error: ' + (data.message || 'unknown').substring(0, 200);
+      return;
+    }
+
+    showValidatePopup(data);
+    status.textContent = 'Validation complete: ' + (data.passed || 0) + ' passed, ' + (data.failed || 0) + ' failed';
+  } catch(e) {
+    btn.disabled = false;
+    btn.textContent = 'Validate Strategies';
+    status.textContent = 'Error: ' + e.message;
+  }
+}
+
+function showValidatePopup(data) {
+  var overlay = document.getElementById('validate-popup-overlay');
+  if (!overlay) return;
+  overlay.style.display = 'flex';
+
+  document.getElementById('validate-total').textContent = data.total || data.tests_run || 0;
+  document.getElementById('validate-passed').textContent = data.passed || 0;
+  document.getElementById('validate-failed').textContent = data.failed || 0;
+  document.getElementById('validate-skipped').textContent = data.skipped || 0;
+  document.getElementById('validate-cycle').textContent = data.created_at_cycle || '-';
+
+  // Badges
+  var passBadge = document.getElementById('validate-badge-pass');
+  var failBadge = document.getElementById('validate-badge-fail');
+  passBadge.style.display = 'none';
+  failBadge.style.display = 'none';
+  if ((data.failed || 0) === 0 && (data.total || data.tests_run || 0) > 0) {
+    passBadge.style.display = 'inline';
+    passBadge.textContent = 'All Passed ✓';
+  } else if ((data.failed || 0) > 0) {
+    failBadge.style.display = 'inline';
+    failBadge.textContent = (data.failed || 0) + ' Failed ✗';
+  }
+
+  // Populate signal groups
+  var allContainer = document.getElementById('validate-signals-all');
+  var stockContainer = document.getElementById('validate-signals-stock');
+  var futureContainer = document.getElementById('validate-signals-future');
+  var optionContainer = document.getElementById('validate-signals-option');
+
+  var renderValidateSignals = function(signals, container) {
+    if (!container) return;
+    if (!signals || signals.length === 0) {
+      container.innerHTML = '<div class="empty-state">No signals</div>';
+      return;
+    }
+    container.innerHTML = '';
+    signals.forEach(function(s) {
+      var card = document.createElement('div');
+      card.className = 'signal-card';
+      var dirClass = s.direction === 'long' ? 'long' : s.direction === 'short' ? 'short' : 'neutral';
+      card.innerHTML =
+        '<div class="row1">' +
+          '<span class="ticker-name">' + s.ticker + '</span>' +
+          '<span class="direction-badge ' + dirClass + '">' + s.direction.toUpperCase() + '</span>' +
+        '</div>' +
+        '<div class="row2">' +
+          '<span>Confidence: <strong>' + (s.confidence * 100).toFixed(1) + '%</strong></span>' +
+          '<span>Score: <strong>' + (s.composite_score ? (s.composite_score * 100).toFixed(1) : '--') + '%</strong></span>' +
+          '<span>Strategies: <strong>' + (s.agreeing_count || 0) + '/' + (s.strategy_count || 0) + '</strong></span>' +
+          '<span>Regime: <strong>' + (s.regime || '?') + '</strong></span>' +
+        '</div>' +
+        '<div class="row3" style="color:var(--text-muted)">' +
+          '<span>Gate: ' + (s.gate_passed ? '✅' : '❌ ' + (s.gate_reason || '')) + '</span>' +
+          '<span>Price: $' + (s.current_price || 0).toFixed(2) + '</span>' +
+        '</div>';
+      container.appendChild(card);
+    });
+  };
+
+  var sigs = data.signals || {};
+  renderValidateSignals(sigs.all || sigs.stock || [], allContainer);
+  renderValidateSignals(sigs.stock || [], stockContainer);
+  renderValidateSignals(sigs.future || [], futureContainer);
+  renderValidateSignals(sigs.option || [], optionContainer);
+}
+
+function switchValidateSubTab(sub) {
+  var container = document.getElementById('validate-popup-body');
+  container.querySelectorAll('.sub-tab').forEach(function(st) {
+    st.classList.toggle('active', st.dataset.subtab === sub);
+  });
+  ['all', 'stock', 'future', 'option'].forEach(function(t) {
+    var el = document.getElementById('validate-signals-' + t);
+    if (el) el.classList.toggle('active', t === sub);
+  });
 }

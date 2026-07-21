@@ -36,6 +36,9 @@ def seed_fixed_options():
     slots are populated immediately and IBKR market data flows for these
     critical tickers from cycle 1. Falls back gracefully if IBKR is not
     connected or the chain fetch fails.
+
+    FIXED: Now includes 0DTE options (removed the dte >= 2 filter) since
+    0DTE gamma scalping is the most active market and needs real-time data.
     """
     try:
         from engine.ibkr_data_feed import fetch_option_chain_ibkr
@@ -46,7 +49,7 @@ def seed_fixed_options():
                 chain = fetch_option_chain_ibkr(ticker)
                 if not chain or not chain.get("calls"):
                     continue
-                # Find nearest expiry with >= 2 DTE
+                # Find nearest expiry (including 0DTE)
                 expirations = chain.get("expirations", [])
                 best_exp = ""
                 best_dte = 9999
@@ -55,7 +58,7 @@ def seed_fixed_options():
                         exp_clean = exp_str.replace("-", "").replace("/", "")[:8]
                         exp_date = datetime.strptime(exp_clean, "%Y%m%d")
                         dte = (exp_date - now).days
-                        if 2 <= dte < best_dte:
+                        if 0 <= dte < best_dte:  # FIXED: was '2 <= dte', now '0 <= dte'
                             best_dte = dte
                             best_exp = exp_str
                     except Exception:
@@ -331,7 +334,7 @@ def _resolve_fixed_options(priorities: dict) -> set[str]:
             try:
                 exp_date = datetime.strptime(exp_str.replace("-", "").replace("/", "")[:8], "%Y%m%d")
                 dte = (exp_date - now).days
-                if 2 <= dte < best_dte:
+                if 0 <= dte < best_dte:  # FIXED: was '2 <= dte', now '0 <= dte' to include 0DTE
                     best_dte = dte
                     best = c
             except Exception:

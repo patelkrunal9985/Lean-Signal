@@ -13,6 +13,29 @@ logger = get_logger("engine.option_metrics")
 _chain_cache = {}
 _pcr_history = {}  # ticker -> list of pc_ratio values (last 5)
 _chain_snapshots = {}  # ticker -> previous chain snapshot
+_option_health_events: list[dict] = []  # health monitoring log
+
+
+def engine_health_monitor(ticker: str, status: str = "", details: str = ""):
+    """Log option chain health event for diagnostics dashboard."""
+    event = {
+        "ticker": ticker,
+        "status": status,
+        "details": details,
+        "timestamp": datetime.now().isoformat(),
+    }
+    _option_health_events.append(event)
+    if len(_option_health_events) > 100:
+        _option_health_events.pop(0)
+    if "failed" in status or "error" in status:
+        logger.warning("Option health [%s]: %s - %s", ticker, status, details)
+    else:
+        logger.info("Option health [%s]: %s - %s", ticker, status, details)
+
+
+def get_option_health_events() -> list[dict]:
+    """Return recent option health events for diagnostics UI."""
+    return list(_option_health_events)
 
 
 def _normalize_expiry(exp: str) -> str:
@@ -40,9 +63,18 @@ def compute_option_metrics(ticker: str, underlying_price: float, ticker_data_map
     """
     from engine.ibkr_data_feed import fetch_option_chain_ibkr, fetch_live_option_prices
 
+    # ── Fetch option chain with retry ──
+    # IBKR can transiently fail to return chains during high load.
+    # Retry once after short delay to reduce silent failures.
+    import time as _time_module
     chain_struct = fetch_option_chain_ibkr(ticker)
     if not chain_struct or not chain_struct.get("expirations") or not chain_struct.get("strikes"):
-        logger.warning("compute_option_metrics(%s): no chain returned", ticker)
+        logger.info("compute_option_metrics(%s): chain empty, retrying once...", ticker)
+        _time_module.sleep(2.0)
+        chain_struct = fetch_option_chain_ibkr(ticker)
+    if not chain_struct or not chain_struct.get("expirations") or not chain_struct.get("strikes"):
+        logger.warning("compute_option_metrics(%s): no chain returned after retry", ticker)
+        engine_health_monitor(ticker, status="chain_fetch_failed")
         return None
 
     expirations = chain_struct["expirations"]

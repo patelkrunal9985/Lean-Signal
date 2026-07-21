@@ -6,6 +6,7 @@ weighted consensus across ALL strategies (V2 + V3). Counter-trend signals
 are heavily penalized unless supported by overwhelming evidence.
 """
 from __future__ import annotations
+import statistics
 from typing import Any
 
 STRATEGY_TAXONOMY: dict[str, str] = {
@@ -142,6 +143,118 @@ INSTR_TYPE_V3_MULTIPLIER: dict[str, float] = {
     "future": 2.0,
     "option": 1.0,
 }
+
+# ── V2 Strategy Weight Map ──
+# V2 strategies don't have default_weight or authority fields on their classes.
+# This map assigns equivalent per-strategy baseline weights to normalize them
+# against V3 strategies (which use default_weight × authority).
+# Values represent the effective weight contribution (0.03-0.12 range).
+V2_STRATEGY_WEIGHT: dict[str, float] = {
+    # ── V2 Advanced strategies (stronger) ──
+    "mtf_confluence": 0.08,
+    "vw_momentum": 0.07,
+    "order_flow_delta": 0.08,
+    "market_structure": 0.07,
+    "advanced_momentum": 0.07,
+    "volatility_regime": 0.08,
+    # ── V2 Mid strategies ──
+    "volume_momentum_surge": 0.06,
+    "sector_relative_zscore": 0.06,
+    "rvol_absorption": 0.06,
+    "vwap_deviation": 0.05,
+    "sr_levels": 0.05,
+    "opening_range": 0.05,
+    "stop_hunt": 0.05,
+    "pullback": 0.05,
+    "volume_profile": 0.06,
+    "spread_compression": 0.05,
+    # ── V2 Legacy / basic strategies ──
+    "mean_reversion": 0.04,
+    "trend_momentum": 0.05,
+    "volatility_breakout": 0.05,
+    "ml_ensemble": 0.10,
+}
+
+# ── Strategy Authority / Power Rating ──
+# Multiplier applied on top of regime weights and default_weight.
+# More powerful strategies (dealer positioning, gamma analysis, whale flow)
+# have higher authority than basic strategies (max_pain, theta_decay, etc.).
+# This ensures that a high-confidence signal from a powerful strategy
+# carries more weight than a high-confidence signal from a basic one.
+STRATEGY_AUTHORITY: dict[str, float] = {
+    # ── High authority (1.5-2.0x) — dealer positioning, gamma, whale flow ──
+    "gamma_exposure": 1.8,
+    "zero_dte_gamma": 1.8,
+    "delta_gamma_imbalance": 1.6,
+    "vanna_charm_flow": 1.5,
+    "unusual_whale_flow": 1.5,
+    "delta_hedging_imbalance": 1.5,
+    "call_put_wall_breakout": 1.5,
+    "large_option_flow": 1.4,
+    "delta_positioning": 1.4,
+    "gamma_flip_levels": 1.4,
+    "gamma_flip_acceleration": 1.4,
+    # ── Medium-high authority (1.2-1.4x) — flow, IV structure ──
+    "option_volume_flow": 1.3,
+    "vwap_option_flow": 1.3,
+    "oi_concentration": 1.3,
+    "oi_change_rate": 1.3,
+    "iv_skew": 1.2,
+    "iv_rv_spread": 1.2,
+    "vol_smile_curvature": 1.2,
+    "skew_term_structure": 1.2,
+    "prior_hl_magnetism": 1.2,
+    "breadth_confirmation": 1.2,
+    "strike_volume_surge": 1.2,
+    "sector_etf_option_rotation": 1.2,
+    "put_call_divergence": 1.2,
+    "vix_spx_convexity": 1.2,
+    # ── Medium authority (1.0x) — standard strategies ──
+    "expected_vs_actual": 1.0,
+    "earnings_vol_arbitrage": 1.0,
+    "opening_drive": 1.0,
+    "iv_rank_percentile": 1.0,
+    "theta_decay": 1.0,
+    "credit_spread_detector": 1.0,
+    "iron_condor_detector": 1.0,
+    "expiry_day_gamma": 1.0,
+    "max_pain": 1.0,
+    # ── Futures strategies (default 1.0, some elevated) ──
+    "mtf_core": 1.3,
+    "cot_sentiment": 1.3,
+    "vix_term_structure": 1.2,
+    "order_flow_burst": 1.2,
+    "cumulative_delta_flow": 1.2,
+    "vpin": 1.2,
+    "order_imbalance": 1.1,
+    "delta_absorption": 1.1,
+    "delta_divergence": 1.1,
+    "fvg_liquidity_sweep": 1.1,
+    "iceberg_detection": 1.1,
+    # ── Stock strategies ──
+    "short_squeeze": 1.3,
+    "premarket_gapper": 1.1,
+    "sector_rotation": 1.1,
+    "earnings_momentum": 1.1,
+    "dark_pool_proxy": 1.1,
+    "insider_flow": 1.0,
+    "pairs_trading": 1.0,
+}
+
+# Weak signal dampening: if total active weight is below this threshold,
+# confidence gets capped proportionally. Prevents many weak strategies
+# with low default_weight from building high confidence.
+WEAK_SIGNAL_WEIGHT_FLOOR = 0.15
+WEAK_SIGNAL_WEIGHT_STRONG = 0.50  # Above this, no dampening
+
+# DTE-aware threshold configuration for options
+# 0DTE -> 0.25, 1-2DTE -> 0.30, 3-5DTE -> 0.35, 6+DTE -> 0.40
+DTE_THRESHOLD_MAP: list[tuple[int, float]] = [
+    (0, 0.25),
+    (2, 0.30),
+    (5, 0.35),
+    (999, 0.40),
+]
 
 # ── Conviction Tiers ──
 # Each tier has minimum requirements. A signal must meet ALL criteria
@@ -313,7 +426,7 @@ def compute_consensus(
     total_votes = len(v2_results) + len(v3_results)
     neutral_count = 0
 
-    # ── V2 votes ──
+    # ── V2 votes (with per-strategy weight to normalize against V3 scale) ──
     for r in v2_results:
         direction = r.get("direction", "neutral")
         confidence = r.get("confidence", 0)
@@ -323,7 +436,11 @@ def compute_consensus(
         sname = r.get("strategy", r.get("name", "unknown"))
         taxo = _get_taxonomy(sname)
         fam = _get_family(sname)
+        # ── Base weight = regime_weight × per-strategy V2 weight ──
         w = regime_weights.get(taxo, 0.5)
+        # Apply per-strategy V2 weight to normalize against V3 default_weight × authority
+        v2_w = V2_STRATEGY_WEIGHT.get(sname, 0.05)
+        w *= v2_w
         if instr_type == "future":
             w *= 0.5
         tod_mult = get_strategy_time_weight(sname)
@@ -337,10 +454,10 @@ def compute_consensus(
         active_votes += 1
         all_votes.append({
             "name": sname, "direction": direction, "confidence": confidence,
-            "weight": w, "family": fam, "type": "V2",
+            "weight": w, "authority": 1.0, "family": fam, "type": "V2",
         })
 
-    # ── V3 votes (with per-instrument-type multiplier) ──
+    # ── V3 votes (with per-instrument-type + default_weight + authority multipliers) ──
     v3_mult = INSTR_TYPE_V3_MULTIPLIER.get(instr_type, 1.0)
     for r in v3_results:
         direction = r.get("direction", "neutral")
@@ -351,10 +468,24 @@ def compute_consensus(
         sname = r.get("strategy", r.get("name", "unknown"))
         taxo = _get_taxonomy(sname)
         fam = _get_family(sname)
+        # ── Base weight = regime_weight × instrument_mult ──
         w = regime_weights.get(taxo, 0.5) * v3_mult
+        # ── Multiply by strategy's default_weight to incorporate per-strategy power ──
+        dw = float(r.get("default_weight", 0.05) or 0.05)
+        w *= dw
+        # ── Multiply by strategy authority rating (dynamic, performance-adjusted) ──
+        try:
+            from engine.signal_persistence import get_strategy_authority
+            static_auth = STRATEGY_AUTHORITY.get(sname, 1.0)
+            authority = get_strategy_authority(sname, static_authority=static_auth)
+        except Exception:
+            authority = STRATEGY_AUTHORITY.get(sname, 1.0)
+        w *= authority
+        # ── Time-of-day adjustment ──
         tod_mult = get_strategy_time_weight(sname)
         tod_weights[sname] = tod_mult
         w *= tod_mult
+        # ── Counter-trend penalty ──
         if trend_dir is not None and direction != trend_dir:
             w *= COUNTER_TREND_PENALTY
         weighted_long += confidence * w if direction == "long" else 0
@@ -363,7 +494,7 @@ def compute_consensus(
         active_votes += 1
         all_votes.append({
             "name": sname, "direction": direction, "confidence": confidence,
-            "weight": w, "family": fam, "type": "V3",
+            "weight": w, "authority": authority, "family": fam, "type": "V3",
         })
 
     # ── Family diversity computation ──
@@ -387,30 +518,39 @@ def compute_consensus(
     # ── Per-strategy vote breakdown for UI detail panel ──
     meta["consensus_votes"] = []
     for v in all_votes:
+        authority = v.get("authority", 1.0)
         meta["consensus_votes"].append({
             "name": v["name"], "type": v["type"], "direction": v["direction"],
             "confidence": round(v["confidence"], 4), "weight": round(v["weight"], 4),
-            "contribution": round(v["confidence"] * v["weight"], 4), "family": v["family"],
+            "contribution": round(v["confidence"] * v["weight"], 4),
+            "family": v["family"], "authority": authority,
+            "effective_power": round(v["weight"] * v["confidence"] * authority, 4),
         })
     meta["consensus_votes"].sort(key=lambda x: -x["contribution"])
 
     # ── Net score: -1 (strong short) to +1 (strong long) ──
+    # FIXED: Neutral votes no longer inflate the denominator.
+    # Previously, each neutral V3 vote added 0.25 to participation, which
+    # diluted real signals into oblivion (e.g. 27 neutral × 0.25 = 6.75,
+    # making net score = 0.3/6.75 = 0.044, far below 0.40 threshold).
     participation = max(total_weight, MIN_PARTICIPATION_WEIGHT)
-    # Only V3 neutral votes count against participation. V2 strategies were designed
-    # for a different system and most return "neutral" because they can't load
-    # (missing engine.core/engine.indicators modules). Including them inflates
-    # the denominator and kills stock/option consensus.
-    if neutral_count > 0:
-        v2_neutral = sum(1 for r in v2_results if r.get("confidence", 0) <= 0 or r.get("direction", "neutral") == "neutral")
-        v3_neutral = neutral_count - v2_neutral
-        participation = max(participation, max(v3_neutral, 0) * 0.25)
     net = (weighted_long - weighted_short) / max(participation, 0.01) if total_weight > 0 else 0.0
 
     net = max(-1.0, min(1.0, net))
     meta["consensus_net_score"] = round(net, 4)
 
     # ── Determine direction with adaptive threshold ──
-    threshold = CONSENSUS_THRESHOLD_OPTION if instr_type == "option" else CONSENSUS_THRESHOLD
+    # DTE-aware threshold sliding: tighter threshold for 0DTE (more reactive),
+    # wider threshold for longer-dated options (need more conviction).
+    if instr_type == "option" and dte is not None:
+        threshold = CONSENSUS_THRESHOLD_OPTION
+        for max_dte, dte_threshold in DTE_THRESHOLD_MAP:
+            if dte <= max_dte:
+                threshold = dte_threshold
+                break
+    else:
+        threshold = CONSENSUS_THRESHOLD
+    meta["consensus_threshold"] = threshold
     if trend_dir is not None:
         inferred = "long" if net > 0 else "short"
         if inferred != trend_dir:
@@ -439,6 +579,47 @@ def compute_consensus(
         if trend_dir is not None and direction != trend_dir:
             base_confidence = max(base_confidence, 0.75)
 
+    # ── Weak signal dampening ──
+    # If total active weight is low, cap confidence proportionally.
+    # This prevents a single weak strategy or many very-low-weight
+    # strategies from producing high confidence.
+    if total_weight < WEAK_SIGNAL_WEIGHT_STRONG:
+        dampening_ratio = min(total_weight / WEAK_SIGNAL_WEIGHT_STRONG, 1.0)
+        if dampening_ratio < 0.3:
+            # Very weak: cap confidence at 50%
+            base_confidence = min(base_confidence, 0.50)
+        elif dampening_ratio < 0.5:
+            # Weak: cap confidence at 70%
+            base_confidence = min(base_confidence, 0.70)
+        meta["consensus_dampening"] = round(dampening_ratio, 4)
+    meta["consensus_authority_weighted"] = True
+
+    # ── Confidence agreement-spread factor ──
+    # Strategies tightly clustered at high confidence = more reliable signal.
+    # Wide spread (some high, some low) = less reliable, penalize.
+    # Computed only when there are 2+ active non-neutral votes.
+    if active_votes >= 2:
+        try:
+            confidences = [v.get("confidence", 0) for v in all_votes]
+            if len(confidences) >= 2:
+                mean_c = sum(confidences) / len(confidences)
+                std_c = statistics.stdev(confidences) if len(confidences) >= 2 else 0
+                # Coefficient of variation: std/mean. Lower = tighter cluster.
+                cv = std_c / max(mean_c, 0.01) if mean_c > 0 else 1.0
+                # CV < 0.3 = tight cluster → boost confidence up to 1.10x
+                # CV > 0.6 = wide spread → penalize down to 0.85x
+                if cv < 0.3:
+                    agreement_mult = 1.0 + (0.3 - cv) * 0.3  # 1.0x to 1.09x
+                elif cv > 0.6:
+                    agreement_mult = 1.0 - min(cv - 0.6, 0.4) * 0.25  # 1.0x down to 0.90x
+                else:
+                    agreement_mult = 1.0
+                base_confidence = min(base_confidence * agreement_mult, 0.95)
+                meta["consensus_agreement_cv"] = round(cv, 4)
+                meta["consensus_agreement_mult"] = round(agreement_mult, 4)
+        except Exception:
+            pass
+
     # ── Conviction tier classification ──
     tier_info = _classify_conviction_tier(
         direction, base_confidence, active_votes, fam_div["family_count"],
@@ -461,6 +642,10 @@ def compute_consensus(
     )
     meta["consensus_regime_boost"] = 0.15 if (direction != "neutral" and trend_dir is not None and direction == trend_dir) else 0.0
     meta["consensus_family_bonus"] = round(family_bonus, 4)
+    meta["consensus_top_authority_vote"] = (
+        max((v.get("authority", 1.0) for v in all_votes), default=1.0)
+        if all_votes else 1.0
+    )
     meta["consensus_reasons"] = _build_reasons(
         direction, net, regime, active_votes, total_weight, threshold,
         weighted_long=weighted_long, weighted_short=weighted_short,

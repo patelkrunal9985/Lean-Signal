@@ -28,6 +28,7 @@ from engine.subscription_manager import (
     set_priority, refresh, reset_non_pinned, get_slot_summary,
     seed_fixed_options, sync_from_ibkr,
 )
+from engine.signal_persistence import update as update_signal_state, get_significant_flips, get_all_states, update_strategy_performance
 
 logger = get_logger("engine.runner")
 
@@ -107,6 +108,13 @@ def _is_new_trading_day(last_utc_iso: str, now_ny_dt: datetime) -> bool:
 
 
 def get_status() -> dict:
+    # Include option health events in status
+    option_health = []
+    try:
+        from engine.option_metrics import get_option_health_events
+        option_health = get_option_health_events()[-10:]  # last 10
+    except Exception:
+        pass
     return {
         "cycle_in_progress": _cycle_in_progress,
         "cycle_count": _cycle_count,
@@ -115,6 +123,7 @@ def get_status() -> dict:
         "history": _cycle_history[:MAX_HISTORY],
         "connection": get_connection_status(),
         "slot_usage": get_slot_summary(),
+        "option_health": option_health,
     }
 
 
@@ -545,6 +554,7 @@ def run_cycle() -> dict:
                                 "source": "v3",
                                 "reasoning": result.get("reasoning", ""),
                                 "action": result.get("action", ""),
+                                "default_weight": float(getattr(strategy, 'default_weight', 0.05) or 0.05),
                                 "diagnostics": diagnostics,
                             })
                 except Exception:
@@ -572,6 +582,24 @@ def run_cycle() -> dict:
 
             all_strategy_votes = v2_results + v3_results_raw
             set_priority(ticker, instr_type, int(conf * 100))
+
+            # ── Feed back strategy performance to dynamic authority tracker ──
+            # Records whether each strategy's prediction direction matched the
+            # final consensus direction. This adjusts their authority multiplier
+            # over time: strategies that predict well gain influence, poor ones
+            # lose it.
+            if direction != "neutral":
+                for sv in all_strategy_votes:
+                    try:
+                        # Only track V3 strategies — V2 has no dynamic authority
+                        if sv.get("source") != "v3":
+                            continue
+                        sv_dir = sv.get("direction", "neutral")
+                        sv_name = sv.get("name", sv.get("strategy", ""))
+                        if sv_dir != "neutral" and sv_name:
+                            update_strategy_performance(sv_name, sv_dir, direction)
+                    except Exception:
+                        pass
 
             # ── 3-layer Quality Gate ──
             gate_result = gate.evaluate(
@@ -787,29 +815,54 @@ def run_cycle() -> dict:
             },
         }
 
-        # ── Compute direction flips vs previous cycle ──
-        # A "flip" is any change in consensus direction (long/short/neutral)
-        # between consecutive cycles for the same ticker.  Flips persist in
-        # cycle_history.json so they're visible in both live and history views.
-        prev_cycle = _cycle_history[0] if _cycle_history else None
-        flips: dict[str, dict] = {}
-        if prev_cycle:
-            prev_map: dict[str, str] = {
-                e["ticker"]: e["direction"]
-                for e in prev_cycle.get("gate_evaluations", [])
+        # ── Compute signal state transitions via persistence engine ──
+        # Replaces the old instant flip (any direction change = flip) with a
+        # state machine that requires 2+ consecutive cycles in the same direction
+        # before triggering a flip, and scores flip significance.
+        for e in gate_evaluations:
+            cm = e.get("consensus_meta", {})
+            # Use net_score from consensus_meta, fallback to 0
+            ns = float(cm.get("consensus_net_score", 0) or 0)
+            # Extract strategy votes from the gate evaluation or build from strategy_votes
+            strats = e.get("strategy_votes", [])
+            update_signal_state(
+                ticker=e["ticker"],
+                direction=e["direction"],
+                confidence=e.get("consensus_confidence", 0),
+                net_score=ns,
+                consensus_meta=cm,
+                strategy_votes=strats,
+                cycle_id=cycle_id,
+            )
+
+        # Get significant flips from persistence engine
+        flip_data = get_significant_flips(min_score=0.0)
+        real_flips = flip_data.get("real", [])
+        potential_flips = flip_data.get("potential", [])
+        all_states = get_all_states()
+
+        result["flip_count"] = len(real_flips)
+        result["flip_count_potential"] = len(potential_flips)
+        result["flips"] = {}
+        for f in real_flips:
+            t = f["ticker"]
+            result["flips"][t] = {
+                "from": f["from"],
+                "to": f["to"],
+                "score": f["score"],
+                "strength": f.get("streak", 1) * f["score"],
+                "is_real": True,
             }
-            for e in gate_evaluations:
-                prev_dir = prev_map.get(e["ticker"])
-                if prev_dir and prev_dir != e["direction"]:
-                    flips[e["ticker"]] = {
-                        "from": prev_dir,
-                        "to": e["direction"],
-                        "instrument_type": e["instrument_type"],
-                        "consensus_confidence": e["consensus_confidence"],
-                        "gate_passed": e["gate_passed"],
-                    }
-        result["flip_count"] = len(flips)
-        result["flips"] = flips
+        result["flips_potential"] = {}
+        for f in potential_flips:
+            t = f["ticker"]
+            result["flips_potential"][t] = {
+                "from": f["from"],
+                "to": f["to"],
+                "score": f["score"],
+                "needs_cycles": max(0, 3 - f.get("streak", 1)),
+            }
+        result["signal_states"] = all_states
 
         _last_cycle_result = result
         _cycle_history.insert(0, result)

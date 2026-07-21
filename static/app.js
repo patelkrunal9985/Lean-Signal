@@ -1199,7 +1199,24 @@ function renderCheatSheet() {
         { term: 'Entry / SL / TP', badge: 'R:R 2.5', badgeClass: 'watching', desc: 'Entry price, Stop Loss, Take Profit, and Risk:Reward ratio.', interpret: 'R:R > 2.0 is good. R:R < 1.0 is risky.' },
         { term: 'State xN', badge: 'CONFIRMED x8', badgeClass: 'confirmed', desc: 'Current signal state + number of consecutive same-direction cycles.', interpret: 'Streak length shows persistence. Long streaks are reliable.' },
         { term: 'Age Decay', badge: 'decaying (0.72)', badgeClass: 'watching', desc: 'Confidence multiplier from signal age. Starts decaying after 15 min.', interpret: 'Old signals (decay < 0.70) are less actionable.' },
-        { term: 'Gate', badge: '✅ Passed', badgeClass: 'confirmed', desc: 'Pre-filter check. ✅ = passed all checks. ❌ = blocked (see reason).', interpret: 'Gate-rejected signals are unreliable. Only trade gate-passed signals.' }
+        { term: 'Gate', badge: '✅ Passed', badgeClass: 'confirmed', desc: 'Pre-filter check. ✅ = passed all checks. ❌ = blocked (see reason).', interpret: 'Gate-rejected signals are unreliable. Only trade gate-passed signals.' },
+        { term: 'Verdict', badge: 'STRONG LONG', badgeClass: 'confirmed', desc: 'Final synthesis of ALL indicators into one trade decision using a Base+Modifier scoring matrix.', interpret: 'The single most important field on the card. Overrides all other signals.' }
+      ]
+    },
+    {
+      id: 'verdict-system', title: 'Final Verdict System', icon: '⚖️',
+      desc: 'Synthesizes Signal State + Conviction Tier + Health Score + Regime + Counter-Trend + Age Decay + Gate into one actionable trade decision. Uses a Base+Modifier scoring matrix with hard safety caps.',
+      items: [
+        { term: 'STRONG LONG / SHORT', badge: 'STRONG LONG', badgeClass: 'confirmed', desc: 'Score ≥ 3. CONFIRMED + Platinum/Gold + Robust + regime-aligned. Maximum conviction.', interpret: '✅✅ Highest quality signal. Full position size. Safe to enter aggressively.' },
+        { term: 'LONG / SHORT', badge: 'LONG', badgeClass: 'active', desc: 'Score = 2. ACTIVE/CONFIRMED with decent tier, health, and alignment.', interpret: '✅ Standard entry. Normal position size.' },
+        { term: 'HOLD', badge: 'HOLD', badgeClass: 'pending', desc: 'Score = 1. Signal valid but showing some weakness (caution health, silver tier, or gate failure).', interpret: '⚠️ Hold existing position. Do NOT add. Monitor for upgrade or degradation.' },
+        { term: 'REDUCE', badge: 'REDUCE', badgeClass: 'weakening', desc: 'Score = 0. Signal deteriorating. Fragile health OR multiple risk penalties.', interpret: '🔴 Reduce position size significantly. Tighten stops. Prepare to exit.' },
+        { term: 'EXIT', badge: 'EXIT', badgeClass: 'weakening', desc: 'Score ≤ -1. Signal collapsing. Terminal health, counter-trend, or multiple failures.', interpret: '❌ Close position immediately. Signal has reversed or died.' },
+        { term: 'WAIT', badge: 'WAIT', badgeClass: 'pending', desc: 'PENDING state with decent health. Building conviction but not ready.', interpret: '⏳ Do not enter yet. Monitor for upgrade to ACTIVE.' },
+        { term: 'AVOID', badge: 'AVOID', badgeClass: 'watching', desc: 'Score ≤ -2 OR PENDING + fragile health. Signal is too risky.', interpret: '🚫 Stay away. Do not trade this ticker in this direction.' },
+        { term: 'NO ACTION', badge: 'NO ACTION', badgeClass: 'watching', desc: 'NONE/WATCHING state or neutral direction. No directional signal exists.', interpret: 'Nothing actionable. Wait for a signal to form.' },
+        { term: 'Scoring Matrix', badge: 'CONFIRMED=+2...', badgeClass: 'watching', desc: 'Base: CONFIRMED=+2, ACTIVE=+1. Tier: Plat=+1, Gold=0, Silver=-1, Bronze=-2. Health: Robust=0, Caution=-1, Fragile=-2. Regime Aligned=+1. Counter-Trend=-1. Gate Failed=-2. Age Decay<0.7=-1.', interpret: 'Use this to understand why a verdict was assigned. Higher total = higher conviction required for STRONG.' },
+        { term: 'Safety Caps', badge: 'CAPS', badgeClass: 'watching', desc: 'Fragile health caps max verdict at REDUCE. Gate-failed caps at HOLD. Terminal health forces EXIT/AVOID regardless of score.', interpret: 'Safety caps prevent overconfident trades on weak signals.' }
       ]
     },
     {

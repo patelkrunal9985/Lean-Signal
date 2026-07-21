@@ -159,9 +159,10 @@ def compute_option_metrics(ticker: str, underlying_price: float, ticker_data_map
         return None
 
     # ── Diagnostic: count contracts with non-zero data fields ──
-    # IBKR requires a paid OPRA (US Options) subscription to deliver
-    # volume (tick 100), OI (tick 101), and greeks (tick 106). Without
-    # OPRA, you only get bid/ask/last — volume/OI/IV/greeks are all zero.
+    # IBKR delivers volume (generic tick 100), OI (generic tick 101),
+    # and greeks/IV (generic tick 106) via the 'US Equity and Options
+    # Add-On Streaming Bundle' (which includes OPRA). Without this bundle
+    # or with API access disabled, you only get bid/ask/last.
     all_entries = option_chain["calls"] + option_chain["puts"]
     total_contracts = len(all_entries)
     with_volume = sum(1 for e in all_entries if e.get("volume", 0) > 0)
@@ -187,8 +188,10 @@ def compute_option_metrics(ticker: str, underlying_price: float, ticker_data_map
                 details=(
                     f"{total_contracts} contracts with bid/ask only. "
                     f"No IV, volume, or OI received. "
-                    f"Likely requires OPRA (US Options) market data subscription from IBKR. "
-                    f"Without OPRA: IV-based + volume/OI strategies cannot fire. "
+                    f"Check: (1) 'US Equity and Options Add-On Streaming Bundle' is active in IBKR Client Portal → Market Data Subscriptions, "
+                    f"(2) 'Enable Market Data API' is checked (NOT just TWS data), "
+                    f"(3) generic tick types 100/101/106 are being delivered by TWS/Gateway. "
+                    f"Without these: IV-based + volume/OI strategies cannot fire. "
                     f"Bid/ask data is available — strategies using only price levels may still work."
                 ),
             )
@@ -199,7 +202,9 @@ def compute_option_metrics(ticker: str, underlying_price: float, ticker_data_map
                 details=(
                     f"{total_contracts} contracts: IV=0 on all. "
                     f"IV strategies (iv_skew, iv_rv_spread, etc.) will be neutral. "
-                    f"May need OPRA subscription or Greek-enabled market data."
+                    f"Bid/ask + volume/oi may be arriving but modelGreeks/impliedVol is not. "
+                    f"Check: generic tick 106 (implied volatility) delivery in TWS/Gateway settings. "
+                    f"Also confirm 'mktDataOptions' API delivery is enabled."
                 ),
             )
         elif not has_full_data:
@@ -395,7 +400,7 @@ def compute_option_metrics(ticker: str, underlying_price: float, ticker_data_map
     logger.info(
         "compute_option_metrics(%s): done — pc_ratio=%.3f, atm_iv=%.1f%%, gamma_flip=%.2f, charm=%s "
         "[data: %d contracts, vol=%d, oi=%d, iv=%d, greeks=%d, bidask=%d]",
-        ticker, pc_ratio, atm_iv * 100, gamma_flip, charm_direction,
+        ticker, pc_ratio, atm_iv, gamma_flip, charm_direction,
         total_contracts, with_volume, with_oi, with_iv, with_greeks, with_bidask,
     )
     return {

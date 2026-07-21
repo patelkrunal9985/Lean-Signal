@@ -417,9 +417,15 @@ class IBKRStreamer:
                         # Generic tick merge: same pattern as fetch_live_option_prices.
                         # Init once, then merge individual fields on subsequent ticks
                         # so generic ticks 100/101/106 don't wipe out earlier data.
+                        # IMPORTANT: option contract volume comes as standard tickType 8
+                        # (td.volume), NOT callVolume/putVolume which are for the
+                        # underlying stock's aggregate option chain volume.
+                        _opt_vol = int(t.volume or 0)
+                        _opt_oi = int(getattr(t, 'callOpenInterest', 0) or getattr(t, 'putOpenInterest', 0) or 0)
                         if key not in _live_option_prices:
                             # Extract Greeks from modelGreeks (OptionComputation object)
                             greeks = getattr(t, 'modelGreeks', None) or getattr(t, 'bidGreeks', None) or getattr(t, 'askGreeks', None) or getattr(t, 'lastGreeks', None)
+                            _opt_iv = float((greeks.impliedVol if greeks else 0) or getattr(t, 'impliedVolatility', 0) or 0) * 100
                             _live_option_prices[key] = {
                                 "ticker": t.contract.symbol,
                                 "strike": float(t.contract.strike),
@@ -428,11 +434,11 @@ class IBKRStreamer:
                                 "bid": float(t.bid or 0),
                                 "ask": float(t.ask or 0),
                                 "last": float(t.last or 0),
-                                "volume": int(t.volume or 0),
-                                "openInterest": int(getattr(t, 'openInterest', 0) or 0),
+                                "volume": _opt_vol,
+                                "openInterest": _opt_oi,
                                 "histVolatility": round(float(getattr(t, 'histVolatility', 0) or 0) * 100, 2) if getattr(t, 'histVolatility', 0) and float(getattr(t, 'histVolatility', 0)) < 1.0 else float(getattr(t, 'histVolatility', 0) or 0),
                                 "avgVolume": int(getattr(t, 'averageOptionVolumeAbove', 0) or 0),
-                                "impliedVolatility": float((greeks.impliedVol if greeks else 0) or getattr(t, 'impliedVol', 0) or 0) * 100,
+                                "impliedVolatility": _opt_iv,
                                 "delta": float((greeks.delta if greeks else 0) or getattr(t, 'delta', 0) or 0),
                                 "gamma": float((greeks.gamma if greeks else 0) or getattr(t, 'gamma', 0) or 0),
                                 "theta": float((greeks.theta if greeks else 0) or getattr(t, 'theta', 0) or 0),
@@ -445,12 +451,10 @@ class IBKRStreamer:
                             cur["bid"] = float(t.bid or 0)
                             cur["ask"] = float(t.ask or 0)
                             cur["last"] = float(t.last or 0)
-                            _nv = int(t.volume or 0)
-                            if _nv > 0:
-                                cur["volume"] = _nv
-                            _noi = int(getattr(t, 'openInterest', 0) or 0)
-                            if _noi > 0:
-                                cur["openInterest"] = _noi
+                            if _opt_vol > 0:
+                                cur["volume"] = _opt_vol
+                            if _opt_oi > 0:
+                                cur["openInterest"] = _opt_oi
                             # Update Greeks from modelGreeks if available
                             greeks = getattr(t, 'modelGreeks', None) or getattr(t, 'bidGreeks', None) or getattr(t, 'askGreeks', None) or getattr(t, 'lastGreeks', None)
                             if greeks:
@@ -464,22 +468,18 @@ class IBKRStreamer:
                                     cur["theta"] = float(greeks.theta)
                                 if greeks.vega:
                                     cur["vega"] = float(greeks.vega)
-                            elif greeks.impliedVol:
-                                cur["impliedVolatility"] = float(greeks.impliedVol) * 100
+                            else:
+                                # Fallback: impliedVolatility attribute on Ticker
+                                # (populated from tickOptionComputation when modelGreeks is None)
+                                _opt_iv_attr = getattr(t, 'impliedVolatility', 0)
+                                if _opt_iv_attr:
+                                    cur["impliedVolatility"] = float(_opt_iv_attr) * 100
                             _hv = getattr(t, 'histVolatility', 0)
                             if _hv:
                                 cur["histVolatility"] = round(float(_hv) * 100, 2) if float(_hv) < 1.0 else float(_hv)
                             _av = getattr(t, 'averageOptionVolumeAbove', 0)
                             if _av:
                                 cur["avgVolume"] = int(_av)
-                            if greeks.delta:
-                                cur["delta"] = float(greeks.delta)
-                            if greeks.gamma:
-                                cur["gamma"] = float(greeks.gamma)
-                            if greeks.theta:
-                                cur["theta"] = float(greeks.theta)
-                            if greeks.vega:
-                                cur["vega"] = float(greeks.vega)
                             cur["timestamp"] = now.isoformat()
                     continue
 
@@ -900,7 +900,7 @@ def fetch_option_chain_ibkr(ticker: str) -> Optional[dict]:
         return None
 
     event = threading.Event()
-    result_container: list = [None]
+    result_container: Optional[dict] = None
 
     async def _do_fetch():
         """Async coroutine to fetch option chain inside streamer's event loop."""
@@ -993,6 +993,10 @@ def fetch_option_chain_ibkr(ticker: str) -> Optional[dict]:
 
     asyncio.run_coroutine_threadsafe(_do_fetch(), streamer._loop)
     event.wait(timeout=60)
+    # Safety: if coroutine didn't complete (timeout/error), result_container
+    # is still None. Ensure we don't pass a list/None to callers expecting a dict.
+    if result_container is None or isinstance(result_container, list):
+        return None
     return result_container
 
 
@@ -1045,6 +1049,7 @@ def fetch_live_option_prices(ticker: str, expiration: str, strikes: list[float],
         except (ValueError, TypeError, AttributeError):
             return default
 
+
     async def _do_fetch_async():
         nonlocal result
         try:
@@ -1083,8 +1088,12 @@ def fetch_live_option_prices(ticker: str, expiration: str, strikes: list[float],
                             currency="USD",
                         )
                     contracts.append(contract)
-                    # Request market data (streaming mode — TWS 10+ rejects bL in snapshot)
-                    streamer._ib.reqMktData(contract, '100,101,104,105,106', False, False)
+                    # Request market data (streaming mode — TWS 10+ rejects bL in snapshot).
+                    # Option volume comes as standard tickType 8 (td.volume), no generic tick needed.
+                    # Generic ticks: 101=OI, 104=hist vol, 105=avg vol, 106=implied vol.
+                    # Note: generic tick 100 (callVolume/putVolume) is for the UNDERLYING stock
+                    # aggregate, NOT for individual option contracts.
+                    streamer._ib.reqMktData(contract, '101,104,105,106', False, False)
 
             # Poll for data up to 25 seconds.
             # Generic ticks 100/101/106 (volume, OI, IV) arrive 5-15s after
@@ -1094,7 +1103,7 @@ def fetch_live_option_prices(ticker: str, expiration: str, strikes: list[float],
             while _time.time() < deadline:
                 for c in contracts:
                     td = streamer._ib.ticker(c)
-                    if td and (td.bid or td.ask or td.last or td.callVolume or td.putVolume or getattr(td, 'impliedVolatility', 0) or getattr(td, 'callOpenInterest', 0) or getattr(td, 'putOpenInterest', 0)):
+                    if td and (td.bid or td.ask or td.last or td.volume or getattr(td, 'impliedVolatility', 0) or getattr(td, 'callOpenInterest', 0) or getattr(td, 'putOpenInterest', 0)):
                         key = f"{c.strike}_{c.right}"
                         # Generic tick merge: IBKR delivers bid/ask/last in one tick,
                         # then generic ticks 100/101/104/105/106 (volume, OI, IV,
@@ -1103,13 +1112,15 @@ def fetch_live_option_prices(ticker: str, expiration: str, strikes: list[float],
                         # Instead: init once, then merge individual fields on update.
                         if key not in prices:
                             greeks_init = getattr(td, 'modelGreeks', None) or getattr(td, 'bidGreeks', None) or getattr(td, 'askGreeks', None) or getattr(td, 'lastGreeks', None)
+                            # Volume: standard tickType 8 for individual option contracts
+                            # (callVolume/putVolume is for underlying aggregate, not per-contract)
                             prices[key] = {
                                 "strike": float(c.strike),
                                 "right": c.right.lower(),
                                 "bid": float(td.bid or 0),
                                 "ask": float(td.ask or 0),
                                 "last": float(td.last or 0),
-                                "volume": _safe_int(td.callVolume or td.putVolume),
+                                "volume": _safe_int(td.volume),
                                 "openInterest": _safe_int(getattr(td, 'callOpenInterest', 0) or getattr(td, 'putOpenInterest', 0)),
                                 "histVolatility": round(float(getattr(td, 'histVolatility', 0) or 0) * 100, 2) if getattr(td, 'histVolatility', 0) and float(getattr(td, 'histVolatility', 0)) < 1.0 else float(getattr(td, 'histVolatility', 0) or 0),
                                 "avgVolume": _safe_int(getattr(td, 'averageOptionVolumeAbove', 0)),
@@ -1127,7 +1138,7 @@ def fetch_live_option_prices(ticker: str, expiration: str, strikes: list[float],
                             cur["bid"] = float(td.bid or 0)
                             cur["ask"] = float(td.ask or 0)
                             cur["last"] = float(td.last or 0)
-                            _nv = _safe_int(td.callVolume or td.putVolume)
+                            _nv = _safe_int(td.volume)
                             if _nv > 0:
                                 cur["volume"] = _nv
                             _noi = _safe_int(getattr(td, 'callOpenInterest', 0) or getattr(td, 'putOpenInterest', 0))
@@ -1143,6 +1154,8 @@ def fetch_live_option_prices(ticker: str, expiration: str, strikes: list[float],
                                 cur["avgVolume"] = _safe_int(_av)
                             greeks = td.modelGreeks or td.bidGreeks or td.askGreeks or td.lastGreeks
                             if greeks:
+                                if getattr(greeks, 'impliedVol', 0):
+                                    cur["impliedVolatility"] = float(greeks.impliedVol) * 100
                                 if greeks.delta:
                                     cur["delta"] = float(greeks.delta)
                                 if greeks.gamma:
@@ -1170,6 +1183,44 @@ def fetch_live_option_prices(ticker: str, expiration: str, strikes: list[float],
                 if len(prices) >= len(contracts) * 0.8 and _has_generic >= len(contracts) * 0.5:
                     break
                 await asyncio.sleep(0.15)
+
+            # ── DIAGNOSTIC: audit which generic tick fields arrived ──
+            _elapsed = _time.time() - (deadline - 25.0)
+            _total = len(prices)
+            _with_bid = sum(1 for p in prices.values() if p.get("bid", 0) > 0)
+            _with_ask = sum(1 for p in prices.values() if p.get("ask", 0) > 0)
+            _with_last = sum(1 for p in prices.values() if p.get("last", 0) > 0)
+            _with_vol = sum(1 for p in prices.values() if p.get("volume", 0) > 0)
+            _with_oi = sum(1 for p in prices.values() if p.get("openInterest", 0) > 0)
+            _with_iv = sum(1 for p in prices.values() if p.get("impliedVolatility", 0) > 0)
+            _with_delta = sum(1 for p in prices.values() if p.get("delta", 0) != 0)
+            _with_gamma = sum(1 for p in prices.values() if p.get("gamma", 0) != 0)
+            _with_theta = sum(1 for p in prices.values() if p.get("theta", 0) != 0)
+            _with_vega = sum(1 for p in prices.values() if p.get("vega", 0) != 0)
+            _timeout = _elapsed >= 24.5
+            # Sample first 3 contracts with all field values
+            _sample = []
+            for i, (k, p) in enumerate(prices.items()):
+                if i >= 3:
+                    break
+                _iv_val = p.get('impliedVolatility', 0) or 0
+                if isinstance(_iv_val, float) and (math.isnan(_iv_val) or math.isinf(_iv_val)):
+                    _iv_val = 0.0
+                _sample.append(
+                    f"{k}: bid={p.get('bid',0):.2f} ask={p.get('ask',0):.2f} last={p.get('last',0):.2f} "
+                    f"vol={p.get('volume',0)} oi={p.get('openInterest',0)} iv={_iv_val:.1f}% "
+                    f"d={p.get('delta',0):.3f} g={p.get('gamma',0):.5f} th={p.get('theta',0):.5f} v={p.get('vega',0):.5f}"
+                )
+            logger.info(
+                "OPT DIAG [%s]: %d/%d contracts in %.1fs (timeout=%s) | "
+                "bid=%d ask=%d last=%d | vol=%d oi=%d iv=%d | "
+                "delta=%d gamma=%d theta=%d vega=%d | samples: [%s]",
+                ticker, _total, len(contracts), _elapsed, _timeout,
+                _with_bid, _with_ask, _with_last,
+                _with_vol, _with_oi, _with_iv,
+                _with_delta, _with_gamma, _with_theta, _with_vega,
+                " | ".join(_sample) if _sample else "none",
+            )
 
             if prices:
                 # Group by strike

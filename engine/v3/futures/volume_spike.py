@@ -4,7 +4,7 @@ from engine.v3.base import BaseV3Strategy
 class VolumeSpike(BaseV3Strategy):
     name = "volume_spike"
     description = "Volume >1.8× avg + price in upper 40% of daily range"
-    applies_to = ("future",)
+    applies_to = ("future", "stock")
     default_weight = 0.08
 
     def compute(self, context: dict) -> dict:
@@ -21,8 +21,8 @@ class VolumeSpike(BaseV3Strategy):
         if avg_vol <= 0:
             avg_vol = 1.0
             last_vol = 1.0
-            return {"direction": "neutral", "confidence": 0.0, "strategy": self.name}
         vol_ratio = last_vol / avg_vol
+        no_volume_data = all(c.get("volume", 0) == 0 for c in ohlcv)
         current = ohlcv[-1]["close"]
         daily_high = max(c["high"] for c in ohlcv)
         daily_low = min(c["low"] for c in ohlcv)
@@ -38,6 +38,9 @@ class VolumeSpike(BaseV3Strategy):
         elif vol_ratio > 1.8 and position < 0.40:
             strength = min((vol_ratio - 1.8) / 3.0, 1.0)
             short_conf = strength * 0.65
+        if no_volume_data:
+            long_conf = max(long_conf, 0.20) if position > 0.60 else long_conf
+            short_conf = max(short_conf, 0.20) if position < 0.40 else short_conf
         conviction = (vol_ratio - 1.0) / max(vol_ratio, 1.0)
         if long_conf >= short_conf and long_conf > 0.10:
             return {"direction": "long", "confidence": round(long_conf, 4),

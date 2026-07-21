@@ -4,7 +4,7 @@ from engine.v3.base import BaseV3Strategy
 class HighLowBreakout(BaseV3Strategy):
     name = "high_low_breakout"
     description = "20-day high/low breaks with volume confirmation on ES/NQ"
-    applies_to = ("future",)
+    applies_to = ("future", "stock")
     default_weight = 0.07
 
     def compute(self, context: dict) -> dict:

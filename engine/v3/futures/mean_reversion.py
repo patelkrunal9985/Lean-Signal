@@ -4,7 +4,7 @@ from engine.v3.base import BaseV3Strategy
 class MeanReversion(BaseV3Strategy):
     name = "mean_reversion"
     description = "RSI <30/>70 with BB touch — fade extremes on ES/NQ/YM/RTY"
-    applies_to = ("future",)
+    applies_to = ("future", "stock")
     default_weight = 0.06
 
     def compute(self, context: dict) -> dict:

@@ -63,6 +63,8 @@ STRATEGY_TAXONOMY: dict[str, str] = {
     "time_of_day_momentum": "flow",
     "gamma_flip": "volatility",
     "volume_profile_decay": "volatility",
+    "fvg_liquidity_sweep": "flow",
+    "mean_reversion": "reversion",
     # V3 options strategies  regime-aware taxonomy
     "gamma_exposure": "volatility",
     "put_call_divergence": "flow",
@@ -394,8 +396,14 @@ def compute_consensus(
 
     # ── Net score: -1 (strong short) to +1 (strong long) ──
     participation = max(total_weight, MIN_PARTICIPATION_WEIGHT)
+    # Only V3 neutral votes count against participation. V2 strategies were designed
+    # for a different system and most return "neutral" because they can't load
+    # (missing engine.core/engine.indicators modules). Including them inflates
+    # the denominator and kills stock/option consensus.
     if neutral_count > 0:
-        participation = max(participation, neutral_count * 0.25)
+        v2_neutral = sum(1 for r in v2_results if r.get("confidence", 0) <= 0 or r.get("direction", "neutral") == "neutral")
+        v3_neutral = neutral_count - v2_neutral
+        participation = max(participation, max(v3_neutral, 0) * 0.25)
     net = (weighted_long - weighted_short) / max(participation, 0.01) if total_weight > 0 else 0.0
 
     net = max(-1.0, min(1.0, net))

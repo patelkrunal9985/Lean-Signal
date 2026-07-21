@@ -216,7 +216,7 @@ def run_cycle() -> dict:
             ohlcv = []
             ohlcv_1m = []
             try:
-                bars = fetch_historical_bars(ticker, "2 W", "1 day")
+                bars = fetch_historical_bars(ticker, "1 M", "1 day")
                 if bars:
                     ohlcv = bars
             except Exception:
@@ -259,6 +259,11 @@ def run_cycle() -> dict:
                     price_age = q.get("age_seconds", 999.0)
             except Exception:
                 pass
+            # Fallback to last OHLCV close if live price not available yet
+            if live_price <= 0 and ohlcv:
+                last_bar = ohlcv[-1] if isinstance(ohlcv[-1], dict) else None
+                if last_bar:
+                    live_price = float(last_bar.get("close", last_bar.get(4, 0)) or 0)
 
             # ── Indicators ──
             indicators = {}
@@ -327,6 +332,7 @@ def run_cycle() -> dict:
                 "instrument_type": instr_type,
                 "ohlcv": ohlcv,
                 "ohlcv_1m": ohlcv_1m,
+                "candles_1m": ohlcv_1m,
                 "current_price": live_price,
                 "price_age_seconds": price_age,
                 "depth": depth_data,
@@ -591,6 +597,8 @@ def run_cycle() -> dict:
                 "ticker": ticker,
                 "instrument_type": instr_type,
                 "direction": direction,
+                "current_price": data.get("current_price", 0),
+                "ohlcv_len": len(data.get("ohlcv", [])),
                 "consensus_confidence": round(conf, 4),
                 "regime": regime.get("primary_regime", "unknown"),
                 "gate_passed": gate_result.get("passed", False),
@@ -608,16 +616,16 @@ def run_cycle() -> dict:
                     if float(s.get("confidence", 0)) > 0
                 ],
                 "consensus_meta": {
-                    "consensus_net_score": consensus_meta.get("net_score", 0),
-                    "consensus_active_votes": consensus_meta.get("active_votes", 0),
-                    "consensus_neutral_votes": consensus_meta.get("neutral_votes", 0),
-                    "consensus_weighted_long": consensus_meta.get("weighted_long", 0),
-                    "consensus_weighted_short": consensus_meta.get("weighted_short", 0),
-                    "consensus_total_weight": consensus_meta.get("total_weight", 0),
-                    "consensus_counter_trend": consensus_meta.get("counter_trend", "no"),
-                    "consensus_regime_boost": consensus_meta.get("regime_boost", 0),
-                    "consensus_tod_window": consensus_meta.get("tod_window", "—"),
-                    "consensus_action": consensus_meta.get("action", "—"),
+                    "consensus_net_score": consensus_meta.get("consensus_net_score", 0),
+                    "consensus_active_votes": consensus_meta.get("consensus_active_votes", 0),
+                    "consensus_neutral_votes": consensus_meta.get("consensus_neutral_votes", 0),
+                    "consensus_weighted_long": consensus_meta.get("consensus_weighted_long", 0),
+                    "consensus_weighted_short": consensus_meta.get("consensus_weighted_short", 0),
+                    "consensus_total_weight": consensus_meta.get("consensus_total_weight", 0),
+                    "consensus_counter_trend": consensus_meta.get("consensus_counter_trend", "no"),
+                    "consensus_regime_boost": consensus_meta.get("consensus_regime_boost", 0),
+                    "consensus_tod_window": consensus_meta.get("consensus_tod_window", "—"),
+                    "consensus_action": consensus_meta.get("consensus_action", "—"),
                 },
             }
             gate_evaluations.append(gate_eval_entry)

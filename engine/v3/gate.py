@@ -23,7 +23,7 @@ logger = get_logger("engine.v3.gate")
 INTEGRITY_GATE = {
     "gate_market_open_delay_min": 5,
     "gate_close_buffer_min": 5,
-    "gate_atr_sweet_spot_min": 0.001,
+    "gate_atr_sweet_spot_min": 0.0,
     "gate_atr_sweet_spot_max": 0.050,
     "gate_atr_sweet_spot_max_option": 0.080,
     "gate_volume_ratio_min": 0.01,
@@ -73,10 +73,10 @@ CONVICTION_GATE = {
 # Layer 4: Platinum Gate — 95% target filters
 # ═══════════════════════════════════════════════════════════════
 PLATINUM_GATE = {
-    "gate_require_platinum_tier": True,
-    "gate_require_mtf_alignment": True,
-    "gate_require_regime_alignment": True,
-    "gate_block_counter_trend": True,
+    "gate_require_platinum_tier": False,
+    "gate_require_mtf_alignment": False,
+    "gate_require_regime_alignment": False,
+    "gate_block_counter_trend": False,
 }
 
 # Macro economic calendar — high-impact events to avoid
@@ -446,15 +446,15 @@ class SignalQualityGate:
             if now_et >= market_close_et - ig["gate_close_buffer_min"]:
                 return {"passed": False, "reason": "too_close_to_close"}
 
-        # ── ATR sweet spot ──
+        # ── ATR sweet spot (skip if ATR not computable, e.g. too few bars) ──
         atr = indicators.get("atr_14", 0)
-        atr_pct = atr / close if close > 0 else 0
+        atr_pct = atr / close if close > 0 and atr > 0 else -1
         _atr_max = ig["gate_atr_sweet_spot_max"]
         if instr_type == "option":
             _atr_max = ig.get("gate_atr_sweet_spot_max_option", 0.080)
-        if atr_pct < ig["gate_atr_sweet_spot_min"]:
+        if atr_pct >= 0 and atr_pct < ig["gate_atr_sweet_spot_min"]:
             return {"passed": False, "reason": f"atr_too_low_{atr_pct:.4f}"}
-        if atr_pct > _atr_max:
+        if atr_pct >= 0 and atr_pct > _atr_max:
             return {"passed": False, "reason": f"atr_too_high_{atr_pct:.4f}"}
 
         # ── Volume (skip for futures — yfinance reports 0) ──
@@ -756,7 +756,7 @@ class SignalQualityGate:
         - Regime aligned with signal
         - No counter-trend signals
         """
-        tier = consensus_meta.get("consensus_tier", "bronze")
+        tier = consensus_meta.get("consensus_conviction_tier", "bronze")
         
         if pg.get("gate_require_platinum_tier") and tier != "platinum":
             return {
@@ -765,7 +765,7 @@ class SignalQualityGate:
             }
         
         if pg.get("gate_require_mtf_alignment"):
-            mtf_dir = consensus_meta.get("mtf_direction")
+            mtf_dir = consensus_meta.get("consensus_mtf_direction")
             if mtf_dir and mtf_dir != consensus_meta.get("consensus_direction"):
                 return {
                     "passed": False,

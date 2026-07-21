@@ -1,0 +1,66 @@
+2026-07-21 11:00:45 [INFO] server: Initializing engine...
+2026-07-21 11:00:45 [INFO] engine.skills.ibkr_data_feed: IBKR streamer started (host=127.0.0.1, port=4001, client_id=1)
+2026-07-21 11:00:45 [INFO] engine.runner: IBKR streamer started
+2026-07-21 11:00:45 [WARNING] engine.ibkr_connector: IBKR not connected
+2026-07-21 11:00:45 [INFO] engine.ibkr_connector: IBKR monitoring started (interval=10s)
+2026-07-21 11:00:46 [INFO] engine.skills.ibkr_data_feed: IBKR connected to 127.0.0.1:4001
+2026-07-21 11:00:46 [INFO] engine.daytype_model: DayType model loaded from disk
+2026-07-21 11:00:46 [INFO] engine.daytype_model: DayType model initialized: samples=10, trained=True
+2026-07-21 11:00:46 [INFO] engine.runner: === Cycle #1 started ===
+2026-07-21 11:00:46 [INFO] engine.runner: Auto-run started
+2026-07-21 11:00:46 [INFO] server: Lean Signals dashboard at http://0.0.0.0:8088
+2026-07-21 11:00:48 [WARNING] engine.skills.ibkr_data_feed: fetch_option_chain_ibkr(NDX) | underlying=NDX | reason=QUALIFY_EMPTY
+2026-07-21 11:01:48 [INFO] engine.real_time_data_feeds: Finnhub client initialized
+2026-07-21 11:01:48 [INFO] engine.skills.ibkr_data_feed: subscribe_ticker: subscribing SPY
+2026-07-21 11:01:49 [INFO] engine.skills.ibkr_data_feed: subscribe_ticker: subscribing QQQ
+2026-07-21 11:01:49 [INFO] engine.skills.ibkr_data_feed: subscribe_ticker: subscribing SPX
+2026-07-21 11:01:50 [INFO] engine.skills.ibkr_data_feed: subscribe_ticker: subscribing NDX
+2026-07-21 11:01:50 [INFO] engine.skills.ibkr_data_feed: subscribe_ticker: subscribing ES=F
+2026-07-21 11:01:51 [INFO] engine.skills.ibkr_data_feed: subscribe_ticker: subscribing NQ=F
+2026-07-21 11:01:52 [INFO] engine.skills.ibkr_data_feed: subscribe_ticker: subscribing YM=F
+2026-07-21 11:01:53 [INFO] engine.skills.ibkr_data_feed: subscribe_ticker: subscribing RTY=F
+2026-07-21 11:01:53 [INFO] engine.skills.ibkr_data_feed: subscribe_ticker: subscribing MES=F
+2026-07-21 11:01:54 [INFO] engine.skills.ibkr_data_feed: subscribe_ticker: subscribing MNQ=F
+2026-07-21 11:01:54 [INFO] engine.skills.ibkr_data_feed: subscribe_ticker: subscribing MYM=F
+2026-07-21 11:01:56 [INFO] engine.skills.ibkr_data_feed: subscribe_ticker: subscribing M2K=F
+2026-07-21 11:01:57 [INFO] engine.skills.ibkr_data_feed: subscribe_ticker: subscribing MGC=F
+2026-07-21 11:01:57 [INFO] engine.skills.ibkr_data_feed: subscribe_ticker: subscribing MCL=F
+2026-07-21 11:01:58 [INFO] engine.skills.ibkr_data_feed: subscribe_ticker: subscribing GC=F
+2026-07-21 11:01:59 [INFO] engine.skills.ibkr_data_feed: subscribe_ticker: subscribing CL=F
+2026-07-21 11:01:59 [INFO] engine.skills.ibkr_data_feed: subscribe_ticker: subscribing VX=F
+2026-07-21 11:02:01 [INFO] engine.skills.ibkr_data_feed: IBKR live option prices: 82 contracts for SPY
+2026-07-21 11:02:01 [INFO] engine.option_metrics: compute_option_metrics(SPY): done — pc_ratio=0.000, atm_iv=0.0%, gamma_flip=766.00, charm=neutral
+2026-07-21 11:02:06 [INFO] engine.skills.ibkr_data_feed: IBKR live option prices: 82 contracts for QQQ
+2026-07-21 11:02:06 [INFO] engine.option_metrics: compute_option_metrics(QQQ): done — pc_ratio=0.000, atm_iv=0.0%, gamma_flip=724.00, charm=neutral
+2026-07-21 11:02:07 [INFO] engine.market_breadth: Market breadth: composite=0.60 state=bullish alignment=100% vix=mixed thrust=no
+2026-07-21 11:02:08 [WARNING] engine.v2.registry: V2 strategy load failed: vw_momentum from engine.v2.vw_momentum: No module named 'engine.core'
+2026-07-21 11:02:08 [WARNING] engine.v2.registry: V2 strategy load failed: order_flow_delta from engine.v2.order_flow_delta: No module named 'engine.core'
+2026-07-21 11:02:08 [WARNING] engine.v2.registry: V2 strategy load failed: sector_relative_zscore from engine.v2.sector_relative_zscore: No module named 'engine.core'
+2026-07-21 11:02:08 [WARNING] engine.v2.registry: V2 strategy load failed: rvol_absorption from engine.v2.rvol_absorption: No module named 'engine.core'
+2026-07-21 11:02:08 [WARNING] engine.v2.registry: V2 strategy load failed: mtf_confluence from engine.v2.mtf_confluence: No module named 'engine.core'
+2026-07-21 11:02:08 [WARNING] engine.v2.registry: V2 strategy load failed: advanced_momentum from engine.v2.advanced_momentum: No module named 'engine.indicators'
+2026-07-21 11:02:08 [WARNING] engine.v2.registry: V2 strategy load failed: market_structure from engine.v2.market_structure_strategy: No module named 'engine.indicators'
+2026-07-21 11:02:08 [WARNING] engine.v2.registry: V2 strategy load failed: volatility_regime from engine.v2.volatility_regime_strategy: No module named 'engine.indicators'
+2026-07-21 11:02:09 [INFO] engine.skills.subscription_manager: SubscriptionManager: 19 slots used, +19 new
+2026-07-21 11:02:09 [INFO] engine.runner: Cycle #1 done: 8 signals in 82.3s
+2026-07-21 11:03:09 [INFO] engine.runner: === Cycle #2 started ===
+2026-07-21 11:03:10 [WARNING] engine.skills.ibkr_data_feed: fetch_option_chain_ibkr(NDX) | underlying=NDX | reason=QUALIFY_EMPTY
+2026-07-21 11:04:10 [INFO] engine.real_time_data_feeds: Finnhub client initialized
+2026-07-21 11:04:16 [INFO] engine.skills.ibkr_data_feed: IBKR live option prices: 82 contracts for SPY
+2026-07-21 11:04:16 [INFO] engine.option_metrics: compute_option_metrics(SPY): done — pc_ratio=0.000, atm_iv=0.0%, gamma_flip=766.00, charm=neutral
+2026-07-21 11:04:22 [INFO] engine.skills.ibkr_data_feed: IBKR live option prices: 82 contracts for QQQ
+2026-07-21 11:04:22 [INFO] engine.option_metrics: compute_option_metrics(QQQ): done — pc_ratio=0.000, atm_iv=0.0%, gamma_flip=723.00, charm=neutral
+2026-07-21 11:04:24 [INFO] engine.market_breadth: Market breadth: composite=0.60 state=bullish alignment=100% vix=mixed thrust=no
+2026-07-21 11:04:25 [WARNING] engine.v2.registry: V2 strategy load failed: vw_momentum from engine.v2.vw_momentum: No module named 'engine.core'
+2026-07-21 11:04:25 [WARNING] engine.v2.registry: V2 strategy load failed: order_flow_delta from engine.v2.order_flow_delta: No module named 'engine.core'
+2026-07-21 11:04:25 [WARNING] engine.v2.registry: V2 strategy load failed: sector_relative_zscore from engine.v2.sector_relative_zscore: No module named 'engine.core'
+2026-07-21 11:04:25 [WARNING] engine.v2.registry: V2 strategy load failed: rvol_absorption from engine.v2.rvol_absorption: No module named 'engine.core'
+2026-07-21 11:04:25 [WARNING] engine.v2.registry: V2 strategy load failed: mtf_confluence from engine.v2.mtf_confluence: No module named 'engine.core'
+2026-07-21 11:04:25 [WARNING] engine.v2.registry: V2 strategy load failed: advanced_momentum from engine.v2.advanced_momentum: No module named 'engine.indicators'
+2026-07-21 11:04:25 [WARNING] engine.v2.registry: V2 strategy load failed: market_structure from engine.v2.market_structure_strategy: No module named 'engine.indicators'
+2026-07-21 11:04:25 [WARNING] engine.v2.registry: V2 strategy load failed: volatility_regime from engine.v2.volatility_regime_strategy: No module named 'engine.indicators'
+2026-07-21 11:04:25 [INFO] engine.skills.subscription_manager: SubscriptionManager: 19 slots used
+2026-07-21 11:04:25 [INFO] engine.runner: Cycle #2 done: 6 signals in 76.4s
+2026-07-21 11:05:19 [INFO] server: 127.0.0.1 - "GET /static/favicon.ico HTTP/1.1" 404 -
+2026-07-21 11:05:25 [INFO] engine.runner: === Cycle #3 started ===
+2026-07-21 11:05:27 [WARNING] engine.skills.ibkr_data_feed: fetch_option_chain_ibkr(NDX) | underlying=NDX | reason=QUALIFY_EMPTY

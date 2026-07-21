@@ -165,7 +165,7 @@ def run_cycle() -> dict:
 
         from engine.ibkr_data_feed import (
             fetch_historical_bars, get_live_price, get_market_depth,
-            fetch_option_chain_ibkr, subscribe_ticker,
+            get_order_book_imbalance, fetch_option_chain_ibkr, subscribe_ticker,
         )
         from engine.v2.registry import V2StrategyRegistry
         from engine.v3.registry import get_strategies
@@ -176,6 +176,16 @@ def run_cycle() -> dict:
         from indicators.advanced_indicators import compute_all_advanced
         from engine.cot_fetcher import get_cot_for_ticker, _TICKER_TO_CFTC
         from engine.entry_exit import compute_entry_exit_levels
+        from engine.tpo_engine import compute_tpo_profile, compute_volume_profile
+        from engine.order_book import compute_order_book_summary, reset as reset_order_book
+        from engine.session_classifier import compute_session_context
+        from engine.account_monitor import (
+            fetch_account_summary, fetch_positions, get_position_summary,
+            check_signal_blockers, reset_daily_pnl,
+        )
+        from engine.daytype_model import predict_day_type, train as train_daytype
+        reset_order_book()
+        reset_daily_pnl()
 
         reset_non_pinned()
         seed_fixed_options()
@@ -192,6 +202,7 @@ def run_cycle() -> dict:
             all_tickers.append((t, "future"))
 
         ticker_data_map = {}
+        _session_bars: dict[str, list] = {}
         for ticker, instr_type in all_tickers:
             incomplete = False
             missing = []
@@ -219,6 +230,25 @@ def run_cycle() -> dict:
             except Exception:
                 pass
 
+            # ── TPO/Market Profile from 1m bars (futures only) ──
+            tpo_profile = {}
+            if instr_type == "future" and ohlcv_1m:
+                try:
+                    tpo_profile = compute_tpo_profile(ohlcv_1m)
+                except Exception:
+                    pass
+
+            # ── Volume profile from 1m bars ──
+            vol_profile = {}
+            if instr_type == "future" and ohlcv_1m:
+                try:
+                    vol_profile = compute_volume_profile(ohlcv_1m)
+                except Exception:
+                    pass
+
+            # ── Store 1m bars for later session classifier (after cum delta computed) ──
+            _session_bars[ticker] = ohlcv_1m if instr_type == "future" else []
+
             # ── Live price with freshness tracking ──
             live_price = 0
             price_age = 999.0
@@ -244,6 +274,20 @@ def run_cycle() -> dict:
                 depth_data = get_market_depth(ticker)
             except Exception:
                 pass
+
+            # ── Enriched order book analysis ──
+            ob_analysis = {}
+            ob_imbalance = {}
+            if instr_type == "future" and depth_data:
+                try:
+                    ob_analysis = compute_order_book_summary(
+                        depth_data.get("bids", []),
+                        depth_data.get("asks", []),
+                        ticker,
+                    )
+                    ob_imbalance = get_order_book_imbalance(ticker)
+                except Exception:
+                    pass
 
             # ── COT data (futures only, from CFTC.gov, zero IBKR calls) ──
             cot_data = {}
@@ -286,6 +330,13 @@ def run_cycle() -> dict:
                 "current_price": live_price,
                 "price_age_seconds": price_age,
                 "depth": depth_data,
+                "order_book_depth": depth_data,
+                "order_book_imbalance": ob_imbalance if ob_imbalance else {},
+                "order_book_summary": ob_analysis if ob_analysis and ob_analysis.get("available") else {},
+                "tpo_profile": tpo_profile if instr_type == "future" else {},
+                "volume_profile_intraday": vol_profile if instr_type == "future" else {},
+                "intraday_vwap": vol_profile,
+                "ob_analysis": ob_analysis,
                 "indicators": indicators,
                 "cot": cot_data,
                 "fundamentals": fundamentals,
@@ -323,6 +374,36 @@ def run_cycle() -> dict:
                         td["cumulative_delta"] = cd
             except Exception:
                 pass
+
+        # ── Globex range + session classifier (futures only, needs cum delta) ──
+        from engine.futures_data import get_globex_range
+        globex_ranges: dict[str, dict] = {}
+        for t, instr in all_tickers:
+            if instr != "future":
+                continue
+            try:
+                gr = get_globex_range(t)
+                if gr:
+                    globex_ranges[t] = gr
+                    td = ticker_data_map.get(t, {})
+                    if td:
+                        td["globex_range"] = gr
+            except Exception:
+                pass
+            # Compute enriched session context
+            td = ticker_data_map.get(t, {})
+            if td and td.get("ohlcv_1m"):
+                try:
+                    enriched = compute_session_context(
+                        ohlcv_1m=td["ohlcv_1m"],
+                        cumulative_delta=td.get("cumulative_delta", {}),
+                        globex_range=globex_ranges.get(t, {}),
+                        current_price=td.get("current_price", 0),
+                    )
+                    if enriched:
+                        td["session_context"] = enriched
+                except Exception:
+                    pass
 
         # ── Options processing (sequential full-chain mode) ──
         # Each underlying gets the full 83-line IBKR budget since only one
@@ -365,6 +446,60 @@ def run_cycle() -> dict:
                     data["market_breadth"] = breadth_ctx
         except Exception as exc:
             logger.warning("Market breadth computation failed: %s", exc)
+
+        # ── Inject time_of_day_profile into all ticker contexts ──
+        try:
+            from engine.time_of_day import (
+                get_time_window, get_strategy_time_weight,
+                get_stop_tightness, get_min_confidence,
+            )
+            current_window = get_time_window()
+            tod_profile = {
+                "window": current_window,
+                "session": current_window,
+                "minutes_from_open": (
+                    (now_et.hour * 60 + now_et.minute) - 570
+                ) if current_window not in ("pre_market", "after_hours", "closed") else 0,
+                "stop_tightness": get_stop_tightness(),
+                "min_confidence": get_min_confidence(),
+            }
+            for key in ticker_data_map:
+                ticker_data_map[key]["time_of_day_profile"] = tod_profile
+        except Exception:
+            pass
+
+        # ── Account monitoring (position-aware gating) ──
+        account_data = {}
+        positions_data = {}
+        try:
+            account_data = fetch_account_summary()
+            pos_list = fetch_positions()
+            positions_data = get_position_summary(pos_list)
+        except Exception:
+            pass
+
+        # ── Day-type prediction ──
+        daytype_prediction = {"prediction": "unknown", "confidence": 0, "trained": False}
+        try:
+            es_data = ticker_data_map.get("ES=F", {})
+            vx_data = ticker_data_map.get("VX=F", {})
+            es_ohlcv_1m = es_data.get("ohlcv_1m", [])
+            es_cd = es_data.get("cumulative_delta", {})
+            es_tpo = es_data.get("tpo_profile", {})
+            es_globex = globex_ranges.get("ES=F", {})
+            vix_spot = vx_data.get("current_price", 0)
+            daytype_prediction = predict_day_type(
+                ohlcv_1m=es_ohlcv_1m,
+                cumulative_delta=es_cd,
+                tpo_profile=es_tpo,
+                globex_range=es_globex,
+                vix_spot=float(vix_spot),
+                vix_1m=float(vix_spot),
+                vix_2m=float(vix_spot) * 1.05,
+                current_price=es_data.get("current_price", 0),
+            )
+        except Exception:
+            pass
 
         signals = []
         gate_evaluations: list[dict] = []  # per-ticker audit trail of gate decisions
@@ -441,6 +576,15 @@ def run_cycle() -> dict:
                 regime=regime,
                 consensus_meta=consensus_meta,
             )
+
+            # ── Account-based circuit breaker ──
+            if gate_result.get("passed", False) and account_data:
+                blocked, block_reason = check_signal_blockers(
+                    ticker, direction, instr_type, account_data, positions_data,
+                )
+                if blocked:
+                    gate_result["passed"] = False
+                    gate_result["reason"] = f"account_blocked_{block_reason}"
 
             # ── Capture per-ticker gate decision for /api/run-cycle + cycle_history ──
             gate_eval_entry = {
@@ -590,6 +734,15 @@ def run_cycle() -> dict:
                 "news": data.get("news", []),
                 "sentiment": data.get("sentiment", {}),
                 "consensus_meta": consensus_meta,
+                "tpo_profile": data.get("tpo_profile", {}),
+                "daytype_prediction": daytype_prediction,
+                "account": {
+                    "daily_pnl": account_data.get("daily_pnl", 0),
+                    "buying_power": account_data.get("buying_power", 0),
+                    "daily_loss_limit_hit": account_data.get("daily_loss_limit_hit", False),
+                    "position_count": positions_data.get("position_count", 0),
+                    "direction_skew": positions_data.get("direction_skew", 0),
+                } if account_data else {},
             }
 
             if direction != "neutral" and gate_result.get("passed", False):
@@ -618,6 +771,12 @@ def run_cycle() -> dict:
             "gate_evaluations": gate_evaluations,
             "gate_rejections": gate_rejections,
             "gate_rejection_breakdown": _summarize_gate_rejections(gate_rejections),
+            "daytype_prediction": daytype_prediction,
+            "account_summary": {
+                "daily_pnl": account_data.get("daily_pnl", 0) if account_data else 0,
+                "buying_power": account_data.get("buying_power", 0) if account_data else 0,
+                "position_count": positions_data.get("position_count", 0) if positions_data else 0,
+            },
         }
 
         # ── Compute direction flips vs previous cycle ──
@@ -664,6 +823,8 @@ def run_cycle() -> dict:
             "gate_evaluations": [],
             "gate_rejections": [],
             "gate_rejection_breakdown": {},
+            "daytype_prediction": {"prediction": "unknown", "confidence": 0, "trained": False},
+            "account_summary": {},
         }
         _last_cycle_result = result
         _cycle_history.insert(0, result)
@@ -717,4 +878,6 @@ def init():
         logger.info("IBKR streamer started")
     from engine.ibkr_connector import start_monitoring
     start_monitoring(interval=10)
+    from engine.daytype_model import init as init_daytype
+    init_daytype()
     start_auto_run()

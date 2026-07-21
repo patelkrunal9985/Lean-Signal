@@ -427,7 +427,7 @@ def run_cycle() -> dict:
         # force-cancel between underlyings for defense-in-depth.
         from engine.option_metrics import compute_option_metrics
         from engine.ibkr_data_feed import cancel_all_option_subscriptions
-        for opt_underlying in ["SPY", "QQQ", "SPX", "NDX"]:
+        for opt_underlying in ["SPY", "QQQ"]:  # SPX/NDX removed: index options need different IBKR permissions
             try:
                 underlying_data = ticker_data_map.get(opt_underlying, {})
                 underlying_price = underlying_data.get("current_price", 0)

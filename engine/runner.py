@@ -892,6 +892,13 @@ def run_cycle() -> dict:
             }
         result["signal_states"] = all_states
 
+        # ── Persist signal state to disk (survives crashes/restarts) ──
+        try:
+            from engine.signal_persistence import _autosave
+            _autosave()
+        except Exception:
+            pass
+
         # ── Take-profit events (from sticky signal persistence) ──
         try:
             from engine.signal_persistence import get_take_profit_events

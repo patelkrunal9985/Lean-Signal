@@ -149,7 +149,34 @@ document.addEventListener('DOMContentLoaded', function() {
   _flowTimer = setInterval(loadFlowData, 5000);
   // Check notification permission
   checkNotifyPermission();
+  // Data quality indicator
+  loadDataQuality();
+  setInterval(loadDataQuality, 30000);
 });
+
+async function loadDataQuality() {
+  try {
+    var resp = await fetch('/api/data-quality');
+    if (!resp.ok) return;
+    var dq = await resp.json();
+    var el = document.getElementById('data-quality-indicator');
+    if (!el) return;
+    var issues = 0;
+    if (!dq.ibkr_connected) issues++;
+    if (dq.live_tickers < 3) issues++;
+    if (dq.v2_strategies_loaded < 10) issues++;
+    if (dq.last_cycle_errors > 0) issues++;
+    var label = issues === 0 ? 'DQ: OK' : 'DQ: ' + issues + ' issue' + (issues > 1 ? 's' : '');
+    var cls = issues === 0 ? 'dq-ok' : issues <= 2 ? 'dq-warn' : 'dq-err';
+    el.textContent = label;
+    el.className = 'dq-indicator ' + cls;
+    el.title = 'IBKR: ' + (dq.ibkr_connected ? 'connected' : 'OFF') +
+      ' | Live: ' + dq.live_tickers + ' tickers' +
+      ' | V2: ' + dq.v2_strategies_loaded + ' V3: ' + dq.v3_strategies_loaded +
+      ' | Signals: ' + dq.signal_states_tracked +
+      ' | Health warnings: ' + dq.health_warnings;
+  } catch(e) { /* silent */ }
+}
 
 function switchTab(name) {
   _currentTab = name;

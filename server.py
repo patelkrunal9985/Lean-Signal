@@ -284,11 +284,66 @@ class LeanSignalsHandler(BaseHTTPRequestHandler):
                     self._send_json({"events": events})
                 except Exception:
                     self._send_json({"events": []})
+            elif path == "/api/data-quality":
+                self._send_json(self._get_data_quality())
             else:
                 self._send_json({"error": "not_found"}, 404)
         except Exception as e:
             logger.error(f"GET {path}: {e}")
             self._send_json({"error": str(e)}, 500)
+
+    def _get_data_quality(self) -> dict:
+        """Aggregate data quality metrics across all subsystems."""
+        result = {
+            "ibkr_connected": False,
+            "live_tickers": 0,
+            "option_chains_active": 0,
+            "v2_strategies_loaded": 0,
+            "v3_strategies_loaded": 0,
+            "last_cycle_errors": 0,
+            "signal_states_tracked": 0,
+            "health_warnings": 0,
+        }
+        try:
+            from engine.ibkr_connector import is_connected
+            result["ibkr_connected"] = is_connected()
+        except Exception:
+            pass
+        try:
+            from engine.ibkr_data_feed import get_all_live_prices
+            prices = get_all_live_prices()
+            result["live_tickers"] = len(prices)
+        except Exception:
+            pass
+        try:
+            from engine.v2.registry import V2StrategyRegistry
+            r = V2StrategyRegistry()
+            result["v2_strategies_loaded"] = len(r._strategies)
+        except Exception:
+            pass
+        try:
+            from engine.v3.registry import get_strategies
+            v3s = get_strategies("future") + get_strategies("stock") + get_strategies("option")
+            result["v3_strategies_loaded"] = len(v3s)
+        except Exception:
+            pass
+        try:
+            from engine.signal_persistence import get_all_states, get_all_health_scores
+            states = get_all_states()
+            result["signal_states_tracked"] = states.get("summary", {}).get("total_tracked", 0)
+            health = get_all_health_scores()
+            result["health_warnings"] = sum(
+                len(h.get("warnings", [])) for h in health.values()
+            )
+        except Exception:
+            pass
+        try:
+            from engine.runner import _last_cycle_result as lcr
+            last = lcr or {}
+            result["last_cycle_errors"] = 1 if last.get("status") == "error" else 0
+        except Exception:
+            pass
+        return result
 
     def do_POST(self):
         ip = self.client_address[0]

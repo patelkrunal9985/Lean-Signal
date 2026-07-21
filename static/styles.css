@@ -289,6 +289,11 @@ header {
   font-weight: 500;
   margin-left: 4px;
 }
+.dq-indicator { display: inline-block; padding: 2px 8px; border-radius: 8px; font-size: 10px; font-weight: 600; }
+.dq-indicator.dq-ok { background: var(--accent-dim); color: var(--accent); }
+.dq-indicator.dq-warn { background: var(--warning-dim); color: var(--warning); }
+.dq-indicator.dq-err { background: var(--danger-dim); color: var(--danger); }
+
 .freshness-badge.fresh { background: var(--accent-dim); color: var(--accent); }
 .freshness-badge.recent { background: var(--warning-dim); color: var(--warning); }
 .freshness-badge.stale { background: var(--danger-dim); color: var(--danger); }

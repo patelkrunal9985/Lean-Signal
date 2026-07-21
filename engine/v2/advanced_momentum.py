@@ -1,5 +1,5 @@
 import numpy as np
-from engine.indicators.advanced_indicators import compute_all_advanced
+from indicators.advanced_indicators import compute_all_advanced
 
 
 class AdvancedMomentumStrategy:

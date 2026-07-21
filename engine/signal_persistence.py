@@ -24,10 +24,82 @@ import threading
 from typing import Any
 
 from utils.logger import get_logger
+from pathlib import Path
+import json
 
 logger = get_logger("engine.signal_persistence")
 
 _lock = threading.RLock()  # RLock: get_all_states() calls get_ticker_state() which needs re-entrant lock
+
+# ── Disk persistence ──
+_STATE_FILE = Path(__file__).parent.parent / "data" / "signal_state.json"
+_AUTOSAVE_ENABLED = True
+
+
+def _autosave():
+    """Save current signal state to disk for crash recovery.
+
+    Called once per CYCLE (not per ticker) by the runner after all tickers
+    have been updated. This prevents N× file writes per cycle.
+    """
+    if not _AUTOSAVE_ENABLED:
+        return
+    try:
+        _STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with _lock:
+            data = {
+                "signal_state": dict(_signal_state),
+                "state_since": dict(_state_since),
+                "active_direction": dict(_active_direction),
+                "consecutive_same": dict(_consecutive_same),
+                "consecutive_neutral": dict(_consecutive_neutral),
+                "consecutive_counter": dict(_consecutive_counter),
+                "last_flip_cycle": dict(_last_flip_cycle),
+                "pre_weakening_state": dict(_pre_weakening_state),
+                # Save last 2 snapshots per ticker (enough for health score after restart)
+                "signal_memory": {
+                    t: mem[-2:] if len(mem) >= 2 else mem
+                    for t, mem in _signal_memory.items()
+                },
+                "saved_at": time.time(),
+            }
+        with open(_STATE_FILE, "w") as f:
+            json.dump(data, f, indent=2, default=str)
+    except Exception as e:
+        logger.debug("Signal state autosave failed (non-critical): %s", e)
+
+
+def _autoload():
+    """Restore signal state from disk after a restart."""
+    if not _STATE_FILE.exists():
+        return
+    try:
+        with open(_STATE_FILE) as f:
+            data = json.load(f)
+        with _lock:
+            for d, target in [
+                ("signal_state", _signal_state),
+                ("state_since", _state_since),
+                ("active_direction", _active_direction),
+                ("consecutive_same", _consecutive_same),
+                ("consecutive_neutral", _consecutive_neutral),
+                ("consecutive_counter", _consecutive_counter),
+                ("last_flip_cycle", _last_flip_cycle),
+                ("pre_weakening_state", _pre_weakening_state),
+            ]:
+                if d in data and isinstance(data[d], dict):
+                    target.update(data[d])
+            # Restore signal memory snapshots (for health score continuity)
+            if "signal_memory" in data and isinstance(data["signal_memory"], dict):
+                for t, mem_snapshots in data["signal_memory"].items():
+                    if isinstance(mem_snapshots, list):
+                        _signal_memory[t] = mem_snapshots
+        logger.info(
+            "Signal state restored from disk: %d tickers, %d with memory",
+            len(_signal_state), len(_signal_memory),
+        )
+    except Exception as e:
+        logger.warning("Failed to restore signal state from disk: %s", e)
 
 # Track pre-weakening state for proper recovery
 _pre_weakening_state: dict[str, str] = {}  # ticker → state before weakening
@@ -979,3 +1051,7 @@ def reset():
         _last_top_contributors.clear()
         _prev_strategy_count.clear()
         _pre_weakening_state.clear()
+
+
+# ── Restore state from disk on import ──
+_autoload()

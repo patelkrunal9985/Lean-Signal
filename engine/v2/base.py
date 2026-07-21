@@ -2,7 +2,7 @@
 Base class for all advanced strategies.
 Extends BaseSubagent with regime compatibility metadata.
 """
-from engine.core.agent import BaseSubagent
+from kronos.core.agent import BaseSubagent
 
 
 class BaseAdvancedStrategy(BaseSubagent):

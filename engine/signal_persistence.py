@@ -18,7 +18,7 @@ import time
 import threading
 from typing import Any
 
-_lock = threading.Lock()
+_lock = threading.RLock()  # RLock: get_all_states() calls get_ticker_state() which needs re-entrant lock
 
 # ── All possible signal states in conviction order ──
 SIGNAL_STATES = {

@@ -463,6 +463,7 @@ def run_cycle() -> dict:
             logger.warning("Market breadth computation failed: %s", exc)
 
         # ── Inject time_of_day_profile into all ticker contexts ──
+        logger.info("Cycle #%d: injecting time_of_day_profile (phase 4/7)", cycle_id)
         try:
             from engine.time_of_day import (
                 get_time_window, get_strategy_time_weight,
@@ -484,16 +485,20 @@ def run_cycle() -> dict:
             pass
 
         # ── Account monitoring (position-aware gating) ──
+        logger.info("Cycle #%d: fetching account summary (phase 5/7)", cycle_id)
         account_data = {}
         positions_data = {}
         try:
             account_data = fetch_account_summary()
+            logger.info("Cycle #%d: account summary done, fetching positions", cycle_id)
             pos_list = fetch_positions()
             positions_data = get_position_summary(pos_list)
         except Exception:
+            logger.debug("Cycle #%d: account monitoring failed", cycle_id)
             pass
 
         # ── Day-type prediction ──
+        logger.info("Cycle #%d: day-type prediction (phase 6/7)", cycle_id)
         daytype_prediction = {"prediction": "unknown", "confidence": 0, "trained": False}
         try:
             es_data = ticker_data_map.get("ES=F", {})
@@ -516,6 +521,8 @@ def run_cycle() -> dict:
         except Exception:
             pass
 
+        # ── Strategy evaluation (V2 + V3 → Consensus → Gate) ──
+        logger.info("Cycle #%d: running strategies on %d tickers (phase 7/7)", cycle_id, len(ticker_data_map))
         signals = []
         gate_evaluations: list[dict] = []  # per-ticker audit trail of gate decisions
         v2_registry = V2StrategyRegistry()
@@ -534,6 +541,7 @@ def run_cycle() -> dict:
             v3_strategies = []
             if instr_type in ("stock", "future", "option"):
                 v3_strategies = get_strategies(instr_type)
+            logger.debug("Cycle #%d: processing %s (%s) with %d V3 strategies", cycle_id, ticker, instr_type, len(v3_strategies))
 
             v3_results_raw = []
             for strategy in v3_strategies:
@@ -791,6 +799,7 @@ def run_cycle() -> dict:
 
         elapsed = time.time() - start_time
         gate_rejections = [e for e in gate_evaluations if not e["gate_passed"]]
+        logger.info("Cycle #%d: building result dict (elapsed=%.1fs)", cycle_id, elapsed)
         result = {
             "cycle_id": cycle_id,
             "status": "completed",
@@ -819,21 +828,27 @@ def run_cycle() -> dict:
         # Replaces the old instant flip (any direction change = flip) with a
         # state machine that requires 2+ consecutive cycles in the same direction
         # before triggering a flip, and scores flip significance.
+        logger.info("Cycle #%d: signal persistence (%d evaluations)", cycle_id, len(gate_evaluations))
         for e in gate_evaluations:
-            cm = e.get("consensus_meta", {})
-            # Use net_score from consensus_meta, fallback to 0
-            ns = float(cm.get("consensus_net_score", 0) or 0)
-            # Extract strategy votes from the gate evaluation or build from strategy_votes
-            strats = e.get("strategy_votes", [])
-            update_signal_state(
-                ticker=e["ticker"],
-                direction=e["direction"],
-                confidence=e.get("consensus_confidence", 0),
-                net_score=ns,
-                consensus_meta=cm,
-                strategy_votes=strats,
-                cycle_id=cycle_id,
-            )
+            try:
+                cm = e.get("consensus_meta", {})
+                # Use net_score from consensus_meta, fallback to 0
+                ns = float(cm.get("consensus_net_score", 0) or 0)
+                # Extract strategy votes from the gate evaluation or build from strategy_votes
+                strats = e.get("strategy_votes", [])
+                ticker_name = e.get("ticker", "?")
+                logger.debug("Cycle #%d: persisting state for %s (dir=%s, ns=%.3f)", cycle_id, ticker_name, e.get("direction","?"), ns)
+                update_signal_state(
+                    ticker=e["ticker"],
+                    direction=e["direction"],
+                    confidence=e.get("consensus_confidence", 0),
+                    net_score=ns,
+                    consensus_meta=cm,
+                    strategy_votes=strats,
+                    cycle_id=cycle_id,
+                )
+            except Exception as exc:
+                logger.warning("Cycle #%d: signal persistence failed for %s: %s", cycle_id, e.get("ticker","?"), exc)
 
         # Get significant flips from persistence engine
         flip_data = get_significant_flips(min_score=0.0)
@@ -866,6 +881,7 @@ def run_cycle() -> dict:
 
         _last_cycle_result = result
         _cycle_history.insert(0, result)
+        logger.info("Cycle #%d: saving history", cycle_id)
         _save_history()
 
         logger.info(

@@ -45,6 +45,10 @@ def seed_fixed_options():
         from datetime import datetime
         now = datetime.now()
         for ticker in FIXED_STOCKS:
+            # NDX/SPX index options need different IBKR permissions and
+            # block for 60s on fetch_option_chain_ibkr timeout. Skip them.
+            if ticker in ("NDX", "SPX"):
+                continue
             try:
                 chain = fetch_option_chain_ibkr(ticker)
                 if not chain or not chain.get("calls"):

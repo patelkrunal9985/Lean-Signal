@@ -509,36 +509,39 @@ try:
         "consensus_counter_trend": "no",
         "consensus_conviction_tier": "silver",
     }
-    # Escalate: none → watching (cycle 1)
+    # Cycle 1: conviction builds from net_score → watching
     flip = persist_update("TEST", "long", 0.6, 0.35, cm, cycle_id=1, current_price=5500, instrument_type="future")
     ts = get_ticker_state("TEST")
     assert ts["state"] == "watching", f"cycle 1: expected watching, got {ts['state']}"
+    assert ts["conviction"] < 0.25
     results['passed'] += 1
-    print(f'   [OK] Persistence escalation: cycle 1 → watching ({ts["state"]})')
+    print(f'   [OK] Persistence escalation: cycle 1 → watching (conv={ts["conviction"]})')
 except Exception as e:
     results['failed'] += 1
     results['errors'].append({'strategy': 'Persistence.escalation', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
     print(f' [FAIL] Persistence escalation FAILED: {str(e)[:80]}')
 
 try:
-    # Cycle 2: 2nd 'long' → still watching (active_direction set this cycle, streak resets)
+    # Cycle 2: conviction builds, still watching
     persist_update("TEST", "long", 0.62, 0.38, cm, cycle_id=2, current_price=5502, instrument_type="future")
     ts = get_ticker_state("TEST")
     assert ts["state"] == "watching", f"cycle 2: expected watching, got {ts['state']}"
+    assert ts["active_direction"] == "long"
     results['passed'] += 1
-    print(f'   [OK] Persistence escalation: cycle 2 → watching (active_direction now set)')
+    print(f'   [OK] Persistence escalation: cycle 2 → watching (conv={ts["conviction"]})')
 except Exception as e:
     results['failed'] += 1
     results['errors'].append({'strategy': 'Persistence.watching2', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
     print(f' [FAIL] Persistence cycle 2 FAILED: {str(e)[:80]}')
 
 try:
-    # Cycle 3: 3rd 'long' → pending (streak=2 >= MIN_PENDING_CYCLES=2)
+    # Cycle 3: conviction reaches pending → thesis entry
     persist_update("TEST", "long", 0.65, 0.40, cm, cycle_id=3, current_price=5505, instrument_type="future")
     ts = get_ticker_state("TEST")
     assert ts["state"] == "pending", f"cycle 3: expected pending, got {ts['state']}"
     assert ts["active_direction"] == "long"
     assert ts["state_entry_price"] == 5505
+    assert ts["has_thesis"] is True
     results['passed'] += 1
     print(f'   [OK] Persistence escalation: cycle 3 → pending, entry_price=5505')
 except Exception as e:
@@ -547,58 +550,61 @@ except Exception as e:
     print(f' [FAIL] Persistence pending FAILED: {str(e)[:80]}')
 
 try:
-    # Cycle 4: same direction → active (streak=3 >= MIN_ACTIVE_CYCLES=3)
+    # Cycle 4: conviction crosses 0.45 → active
     persist_update("TEST", "long", 0.70, 0.50, cm, cycle_id=4, current_price=5510, instrument_type="future")
     ts = get_ticker_state("TEST")
     assert ts["state"] == "active", f"cycle 4: expected active, got {ts['state']}"
+    assert ts["conviction"] >= 0.45
     results['passed'] += 1
-    print(f'   [OK] Persistence escalation: cycle 4 → active')
+    print(f'   [OK] Persistence escalation: cycle 4 → active (conv={ts["conviction"]})')
 except Exception as e:
     results['failed'] += 1
     results['errors'].append({'strategy': 'Persistence.active', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
     print(f' [FAIL] Persistence active FAILED: {str(e)[:80]}')
 
 try:
-    # Cycles 5-6: same direction → confirmed (streak=5 >= MIN_CONFIRMED_CYCLES=5)
+    # Cycles 5-6: conviction crosses 0.70 → confirmed
     persist_update("TEST", "long", 0.75, 0.55, cm, cycle_id=5, current_price=5515, instrument_type="future")
     persist_update("TEST", "long", 0.80, 0.60, cm, cycle_id=6, current_price=5520, instrument_type="future")
     ts = get_ticker_state("TEST")
     assert ts["state"] == "confirmed", f"cycle 6: expected confirmed, got {ts['state']}"
-    assert ts["consecutive_same"] == 5
+    assert ts["conviction"] >= 0.70
     results['passed'] += 1
-    print(f'   [OK] Persistence escalation: cycle 6 → confirmed (streak={ts["consecutive_same"]})')
+    print(f'   [OK] Persistence escalation: cycle 6 → confirmed (conv={ts["conviction"]})')
 except Exception as e:
     results['failed'] += 1
     results['errors'].append({'strategy': 'Persistence.confirmed', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
     print(f' [FAIL] Persistence confirmed FAILED: {str(e)[:80]}')
 
 try:
-    # Cycle 7: neutral → stays confirmed (sticky, 1st neutral)
+    # Cycle 7: 1st neutral → conviction drops → weakening (take-profit fires)
     flip = persist_update("TEST", "neutral", 0.0, 0.0, cm, cycle_id=7, current_price=5518, instrument_type="future")
     ts = get_ticker_state("TEST")
-    assert ts["state"] == "confirmed", f"sticky 1st neutral: expected confirmed, got {ts['state']}"
-    assert ts["consecutive_neutral"] == 1
+    assert ts["state"] == "weakening", f"1st neutral: expected weakening, got {ts['state']}"
+    assert ts["conviction"] < 0.70
+    assert ts["conviction_peak"] > ts["conviction"]
     results['passed'] += 1
-    print(f'   [OK] Sticky: 1st neutral → stays confirmed (sticks!)')
+    print(f'   [OK] Neutral: 1st neutral → weakening (conv={ts["conviction"]})')
 except Exception as e:
     results['failed'] += 1
     results['errors'].append({'strategy': 'Persistence.sticky_stick', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
     print(f' [FAIL] Sticky stick FAILED: {str(e)[:80]}')
 
 try:
-    # Cycle 8: 2nd neutral → weakening
+    # Cycle 8: 2nd neutral → conviction drops further → still weakening
     flip = persist_update("TEST", "neutral", 0.0, 0.0, cm, cycle_id=8, current_price=5516, instrument_type="future")
     ts = get_ticker_state("TEST")
     assert ts["state"] == "weakening", f"sticky 2nd neutral: expected weakening, got {ts['state']}"
+    assert ts["conviction"] < 0.45
     results['passed'] += 1
-    print(f'   [OK] Sticky: 2nd neutral → weakening')
+    print(f'   [OK] Neutral: 2nd neutral → weakening (conv={ts["conviction"]})')
 except Exception as e:
     results['failed'] += 1
     results['errors'].append({'strategy': 'Persistence.sticky_weakening', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
     print(f' [FAIL] Sticky weakening FAILED: {str(e)[:80]}')
 
 try:
-    # Verify take-profit event was generated
+    # Verify take-profit event was generated (from confirmed→weakening)
     tp_events = get_take_profit_events("TEST")
     assert len(tp_events) >= 1, f"expected take-profit event, got {len(tp_events)}"
     assert tp_events[0]["from_state"] == "confirmed"
@@ -611,10 +617,11 @@ except Exception as e:
     print(f' [FAIL] Take-profit event FAILED: {str(e)[:80]}')
 
 try:
-    # Recovery from weakening: same direction → active (confirmed→weakening→active)
+    # Recovery from weakening: same direction → conviction recovers → active
     persist_update("TEST", "long", 0.60, 0.40, cm, cycle_id=9, current_price=5522, instrument_type="future")
     ts = get_ticker_state("TEST")
     assert ts["state"] == "active", f"recovery: expected active, got {ts['state']}"
+    assert ts["conviction"] >= 0.45
     results['passed'] += 1
     print(f'   [OK] Recovery: weakening→{ts["state"]} on same direction')
 except Exception as e:
@@ -623,32 +630,32 @@ except Exception as e:
     print(f' [FAIL] Recovery FAILED: {str(e)[:80]}')
 
 try:
-    # Test counter-direction: long→short on active signal
+    # Counter-direction: long→short on active signal
     persist_reset()
-    # Build active long signal (need 4 cycles: 2 watching + 2 for pending→active)
     for i in range(4):
         persist_update("COUNT", "long", 0.7, 0.5, cm, cycle_id=i+1, current_price=5500+i*5, instrument_type="future")
     ts = get_ticker_state("COUNT")
     assert ts["state"] == "active", f"expected active, got {ts['state']}"
-    # Counter direction (1st cycle) → weakening
+    # 1st counter direction → conviction penalized → weakening
     flip = persist_update("COUNT", "short", 0.6, -0.4, cm, cycle_id=5, current_price=5490, instrument_type="future")
     ts = get_ticker_state("COUNT")
     assert ts["state"] == "weakening", f"counter: expected weakening, got {ts['state']}"
-    assert ts["consecutive_counter"] == 1
+    assert ts["conviction"] < 0.45
     results['passed'] += 1
-    print(f'   [OK] Counter-direction: 1st counter → weakening')
+    print(f'   [OK] Counter-direction: 1st counter → weakening (conv={ts["conviction"]})')
 except Exception as e:
     results['failed'] += 1
     results['errors'].append({'strategy': 'Persistence.counter_weakening', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
     print(f' [FAIL] Counter-weakening FAILED: {str(e)[:80]}')
 
 try:
-    # 2nd counter → watching (downgrade)
+    # 2nd counter → conviction continues dropping → watching/none
     flip = persist_update("COUNT", "short", 0.65, -0.45, cm, cycle_id=6, current_price=5485, instrument_type="future")
     ts = get_ticker_state("COUNT")
-    assert ts["state"] == "watching", f"2nd counter: expected watching, got {ts['state']}"
+    assert ts["state"] in ("watching", "weakening"), f"2nd counter: expected watching or weakening, got {ts['state']}"
+    assert ts["conviction"] < 0.45
     results['passed'] += 1
-    print(f'   [OK] Counter-direction: 2nd counter → watching (downgrade complete)')
+    print(f'   [OK] Counter-direction: 2nd counter → {ts["state"]} (conv={ts["conviction"]})')
 except Exception as e:
     results['failed'] += 1
     results['errors'].append({'strategy': 'Persistence.counter_downgrade', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
@@ -722,6 +729,18 @@ except Exception as e:
     results['errors'].append({'strategy': 'Persistence.divergence', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
     print(f' [FAIL] Divergence FAILED: {str(e)[:80]}')
 
+    # Restore per-instrument defaults (tests above used old test-friendly values)
+    settings_set({
+        "future_min_pending": 8, "future_min_active": 15, "future_min_confirmed": 25,
+        "future_cooldown_active": 20, "future_cooldown_confirmed": 35,
+        "future_cooldown_max": 10, "future_sticky_counter": 6,
+        "stock_min_pending": 5, "stock_min_active": 10, "stock_min_confirmed": 20,
+        "stock_cooldown_active": 15, "stock_cooldown_confirmed": 25,
+        "stock_cooldown_max": 8, "stock_sticky_counter": 4,
+        "option_min_pending": 4, "option_min_active": 8, "option_min_confirmed": 14,
+        "option_cooldown_active": 12, "option_cooldown_confirmed": 20,
+        "option_cooldown_max": 6, "option_sticky_counter": 3,
+    })
     persist_reset()  # Clean up before health score tests
 
 # -- 14. Test Signal Health Score --
@@ -1065,6 +1084,249 @@ except Exception as e:
     results['errors'].append({'strategy': 'GateRejection.unknown', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
     print(f' [FAIL] Gate unknown FAILED: {str(e)[:80]}')
 
+# -- 19. Test Tick Persistence (save_checkpoint / load_checkpoint) and compute_tick_clusters --
+print('\n--- TICK PERSISTENCE & TICK CLUSTERS ---')
+import tempfile, shutil
+from datetime import date
+from pathlib import Path
+
+# ── Save + load checkpoint ──
+try:
+    from engine.tick_engine import on_tick, get_tick_stats
+    from engine.tick_engine import save_checkpoint, load_checkpoint, reset as tick_reset
+    import engine.tick_engine as te
+
+    _orig_ckpt_dir = te._CHECKPOINT_DIR
+    _ckpt_tmpdir = tempfile.mkdtemp()
+    te._CHECKPOINT_DIR = Path(_ckpt_tmpdir)
+
+    tick_reset()
+    now = time.time()
+    for i in range(50):
+        is_buy = random.random() > 0.5
+        sz = random.randint(1, 20)
+        lp = base_price + (random.random()-0.5)*2
+        sp = random.uniform(0.1, 0.5)
+        b, a = lp - sp, lp + sp
+        on_tick('ES=F', 'FUT', a+0.05 if is_buy else b-0.05, b, a, 0, sz, now + i * 0.05)
+    stats_before = get_tick_stats('ES=F')
+    assert stats_before['cumulative_delta'] != 0, "need non-zero delta"
+    assert stats_before.get('tick_buffer'), "tick_buffer should be populated"
+
+    save_checkpoint()
+    ckpt_files = list(Path(_ckpt_tmpdir).glob('*.json'))
+    assert len(ckpt_files) >= 1, f"checkpoint file not created in {_ckpt_tmpdir}"
+
+    # Reset state and reload
+    tick_reset()
+    stats_empty = get_tick_stats('ES=F')
+    assert stats_empty == {}, "reset should clear ticker state"
+
+    loaded = load_checkpoint()
+    assert loaded == True, "load_checkpoint should return True"
+
+    stats_after = get_tick_stats('ES=F')
+    assert stats_after.get('cumulative_delta') == stats_before['cumulative_delta'], \
+        f"delta mismatch: before={stats_before['cumulative_delta']}, after={stats_after.get('cumulative_delta')}"
+    assert stats_after.get('total_buy_vol') == stats_before['total_buy_vol']
+    assert stats_after.get('total_sell_vol') == stats_before['total_sell_vol']
+    assert stats_after.get('vpin') == stats_before['vpin']
+    assert len(stats_after.get('tick_buffer', [])) > 0, "tick_buffer should restore"
+
+    # Clean up
+    shutil.rmtree(_ckpt_tmpdir, ignore_errors=True)
+    te._CHECKPOINT_DIR = _orig_ckpt_dir
+
+    results['passed'] += 1
+    print(f'   [OK] Persistence: delta={stats_after["cumulative_delta"]} '
+          f'buy={stats_after["total_buy_vol"]} sell={stats_after["total_sell_vol"]} '
+          f'vpin={stats_after["vpin"]:.3f} buffer={len(stats_after["tick_buffer"])}')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'TickPersistence.save_load', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Persistence save/load FAILED: {str(e)[:80]}')
+    try:
+        shutil.rmtree(_ckpt_tmpdir, ignore_errors=True)
+        te._CHECKPOINT_DIR = _orig_ckpt_dir
+    except: pass
+
+# ── Load non-existent checkpoint ──
+try:
+    import engine.tick_engine as te
+    _orig_dir2 = te._CHECKPOINT_DIR
+    _ckpt_tmpdir = tempfile.mkdtemp()
+    te._CHECKPOINT_DIR = Path(_ckpt_tmpdir)
+
+    result_no_file = load_checkpoint()
+    assert result_no_file == False, f"no file should return False, got {result_no_file}"
+
+    shutil.rmtree(_ckpt_tmpdir, ignore_errors=True)
+    te._CHECKPOINT_DIR = _orig_dir2
+    results['passed'] += 1
+    print(f'   [OK] Persistence: no checkpoint file → returns False')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'TickPersistence.no_file', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Persistence no_file FAILED: {str(e)[:80]}')
+    try:
+        shutil.rmtree(_ckpt_tmpdir, ignore_errors=True)
+        te._CHECKPOINT_DIR = _orig_dir2
+    except: pass
+
+# ── Load corrupted checkpoint ──
+try:
+    import engine.tick_engine as te
+    _orig_dir3 = te._CHECKPOINT_DIR
+    _ckpt_tmpdir = tempfile.mkdtemp()
+    te._CHECKPOINT_DIR = Path(_ckpt_tmpdir)
+
+    # Write invalid JSON
+    bad_path = Path(_ckpt_tmpdir) / (date.today().isoformat() + '.json')
+    bad_path.write_text('not valid json {{{')
+
+    result_corrupt = load_checkpoint()
+    assert result_corrupt == False, f"corrupt file should return False, got {result_corrupt}"
+
+    shutil.rmtree(_ckpt_tmpdir, ignore_errors=True)
+    te._CHECKPOINT_DIR = _orig_dir3
+    results['passed'] += 1
+    print(f'   [OK] Persistence: corrupt checkpoint → returns False')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'TickPersistence.corrupt', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Persistence corrupt FAILED: {str(e)[:80]}')
+    try:
+        shutil.rmtree(_ckpt_tmpdir, ignore_errors=True)
+        te._CHECKPOINT_DIR = _orig_dir3
+    except: pass
+
+# ── compute_tick_clusters: empty buffer ──
+try:
+    from engine.futures_data import compute_tick_clusters
+
+    result_empty = compute_tick_clusters([])
+    assert result_empty == {}, f"empty buffer should return {{}}, got {result_empty}"
+    results['passed'] += 1
+    print(f'   [OK] TickClusters: empty buffer → empty dict')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'TickClusters.empty', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] TickClusters empty FAILED: {str(e)[:80]}')
+
+# ── compute_tick_clusters: fewer than 5 ticks ──
+try:
+    result_few = compute_tick_clusters([{'price': 5500.0, 'size': 10, 'time': 1000.0, 'sign': 'buy'}] * 3)
+    assert result_few == {}, f"< 5 ticks should return {{}}, got {result_few}"
+    results['passed'] += 1
+    print(f'   [OK] TickClusters: < 5 ticks → empty dict')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'TickClusters.few_ticks', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] TickClusters few ticks FAILED: {str(e)[:80]}')
+
+# ── compute_tick_clusters: normal buffer with acceleration detection ──
+try:
+    now_ts = time.time()
+    tick_buf = []
+    # First half: 10 ticks at 5500.5, spaced 0.1s apart (slow)
+    for i in range(10):
+        tick_buf.append({'price': 5500.5, 'size': 5, 'time': now_ts + i * 0.1,
+                         'sign': 'buy', 'confidence': 0.7})
+    # Second half: 20 ticks at 5501.0, spaced 0.05s apart (faster = acceleration)
+    for i in range(20):
+        tick_buf.append({'price': 5501.0, 'size': 8, 'time': now_ts + 1.0 + i * 0.05,
+                         'sign': 'buy', 'confidence': 0.8})
+
+    result = compute_tick_clusters(tick_buf)
+    assert result, f"expected non-empty result, got {result}"
+    assert result['tick_count'] == 30
+    assert 'acceleration' in result
+    assert 'price_clusters' in result
+    assert len(result['price_clusters']) >= 2, f"expected >=2 price clusters, got {result['price_clusters']}"
+    # Second half is faster (0.05s vs 0.1s) → should detect acceleration up
+    assert result['acceleration'].get('accelerating_up'), \
+        f"expected acceleration up, got {result['acceleration']}"
+    results['passed'] += 1
+    print(f'   [OK] TickClusters: {result["tick_count"]} ticks, '
+          f'accel_up={result["acceleration"]["accelerating_up"]}, '
+          f'clusters={len(result["price_clusters"])}')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'TickClusters.normal', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] TickClusters normal FAILED: {str(e)[:80]}')
+
+# ── compute_tick_clusters: large prints detection ──
+try:
+    now_ts = time.time()
+    tick_buf = []
+    # 15 normal ticks (size 5 each)
+    for i in range(15):
+        tick_buf.append({'price': 5500.0, 'size': 5, 'time': now_ts + i * 0.1,
+                         'sign': 'buy' if i % 2 == 0 else 'sell', 'confidence': 0.7})
+    # 1 large buy print (size 50 >> 2x avg of 5)
+    tick_buf.append({'price': 5501.5, 'size': 50, 'time': now_ts + 2.0,
+                     'sign': 'buy', 'confidence': 0.9})
+
+    result = compute_tick_clusters(tick_buf)
+    assert result, f"expected non-empty result"
+    assert len(result.get('large_prints', [])) > 0, f"expected large prints, got {result.get('large_prints')}"
+    results['passed'] += 1
+    print(f'   [OK] TickClusters: large prints detected ({len(result["large_prints"])} groups)')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'TickClusters.large_prints', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] TickClusters large_prints FAILED: {str(e)[:80]}')
+
+# ── compute_tick_clusters: iceberg pattern detection ──
+try:
+    now_ts = time.time()
+    iceberg_ticks = []
+    # 4 buy ticks at same price with same size → iceberg
+    for i in range(4):
+        iceberg_ticks.append({'price': 5503.0, 'size': 15, 'time': now_ts + i * 0.1,
+                              'sign': 'buy', 'confidence': 0.7})
+    # 3 sell ticks at different price with same size → another iceberg
+    for i in range(3):
+        iceberg_ticks.append({'price': 5504.0, 'size': 15, 'time': now_ts + 0.5 + i * 0.1,
+                              'sign': 'sell', 'confidence': 0.8})
+    # 3 filler ticks to pass minimum
+    for i in range(3):
+        iceberg_ticks.append({'price': 5505.0, 'size': 3, 'time': now_ts + 1.0 + i * 0.1,
+                              'sign': 'buy', 'confidence': 0.6})
+
+    result_ice = compute_tick_clusters(iceberg_ticks)
+    assert result_ice, f"expected non-empty result"
+    assert 'icebergs' in result_ice, f"expected icebergs key, got {result_ice.keys()}"
+    assert len(result_ice['icebergs']) >= 1, f"expected >=1 iceberg, got {result_ice['icebergs']}"
+    results['passed'] += 1
+    print(f'   [OK] TickClusters: {len(result_ice["icebergs"])} iceberg(s) detected')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'TickClusters.iceberg', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] TickClusters iceberg FAILED: {str(e)[:80]}')
+
+# ── Load checkpoint with explicit date string ──
+try:
+    import engine.tick_engine as te
+    _orig_dir4 = te._CHECKPOINT_DIR
+    _ckpt_tmpdir = tempfile.mkdtemp()
+    te._CHECKPOINT_DIR = Path(_ckpt_tmpdir)
+
+    result_nonexistent = load_checkpoint(trading_date='2020-01-01')
+    assert result_nonexistent == False, f"non-existent date should return False, got {result_nonexistent}"
+
+    shutil.rmtree(_ckpt_tmpdir, ignore_errors=True)
+    te._CHECKPOINT_DIR = _orig_dir4
+    results['passed'] += 1
+    print(f'   [OK] Persistence: explicit non-existent date → False')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'TickPersistence.explicit_date', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Persistence explicit_date FAILED: {str(e)[:80]}')
+    try:
+        shutil.rmtree(_ckpt_tmpdir, ignore_errors=True)
+        te._CHECKPOINT_DIR = _orig_dir4
+    except: pass
 
 # -- SUMMARY --
 if '--json' in sys.argv:

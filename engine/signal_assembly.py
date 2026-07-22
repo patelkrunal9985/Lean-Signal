@@ -249,6 +249,7 @@ def assemble_cycle_result(
                 cycle_id=cycle_id,
                 current_price=e.get("current_price", 0),
                 instrument_type=e.get("instrument_type", ""),
+                regime=e.get("regime", "unknown"),
             )
         except Exception as exc:
             logger.warning(

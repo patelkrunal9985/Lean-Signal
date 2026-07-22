@@ -28,15 +28,48 @@ _DEFAULTS: dict[str, Any] = {
     "signal_age_decay_half_min": 60,
     "signal_age_decay_floor": 0.50,
     # 0DTE Mode — filters strategies to gamma/flow/dealer only for option signals
-    "odte_mode": False,
+    "odte_mode": True,
     # Closing pin — block new entries in last 30 minutes before close
     # 0DTE traders may want this ON (quality) or OFF (last-minute scalps)
     "block_entries_in_closing_pin": True,
+    # ── Per-instrument cooldowns (override global above) ──
+    # Stock defaults — quality over quantity: slow escalation, slow decay
+    "stock_cooldown_active": 15,
+    "stock_cooldown_confirmed": 25,
+    "stock_cooldown_max": 8,
+    "stock_sticky_counter": 4,
+    "stock_min_pending": 5,
+    "stock_min_active": 10,
+    "stock_min_confirmed": 20,
+    # Future defaults — even slower (more volatile, higher bar to commit)
+    "future_cooldown_active": 20,
+    "future_cooldown_confirmed": 35,
+    "future_cooldown_max": 10,
+    "future_sticky_counter": 6,
+    "future_min_pending": 8,
+    "future_min_active": 15,
+    "future_min_confirmed": 25,
+    # Option defaults — faster cycle (options expire same day)
+    "option_cooldown_active": 12,
+    "option_cooldown_confirmed": 20,
+    "option_cooldown_max": 6,
+    "option_sticky_counter": 3,
+    "option_min_pending": 4,
+    "option_min_active": 8,
+    "option_min_confirmed": 14,
     # State escalation thresholds (cycles needed to upgrade state)
     "min_pending_cycles": 2,        # watching → pending
     "min_active_cycles": 3,         # pending → active
     "min_confirmed_cycles": 5,      # active → confirmed
     "flip_score_threshold": 0.60,   # flip significance cutoff
+    # ── Conviction-based signal persistence (Thesis Validation) ──
+    "conviction_decay": 0.97,       # Leak per cycle (lower = faster decay)
+    "min_conviction": 0.25,         # Min conviction to enter a thesis
+    "thesis_horizon": 30,           # Cycles before thesis is "stale"
+    "pnl_profit_floor_atr": 2.0,    # ATR profit → conviction floor 0.20
+    "pnl_profit_confirm_atr": 3.0,  # ATR profit → force confirmed (0.80)
+    "pnl_force_exit_atr": 2.5,      # ATR drawdown → force exit
+    "regime_invalidation_factor": 0.60,  # Regime change conviction penalty
     # Verdict scoring thresholds (level at which each verdict fires)
     "verdict_exit_threshold": -1,   # level ≤ this → EXIT
     "verdict_reduce_threshold": 0,  # level ≤ this → REDUCE

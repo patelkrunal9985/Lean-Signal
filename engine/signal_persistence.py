@@ -1,22 +1,20 @@
 """
-Signal Persistence Engine — State Machine + Hysteresis + Flip Scoring.
+Signal Persistence Engine — Thesis Validation + Conviction Scoring.
 
-Every ticker has a persistent signal state that builds conviction over time
-instead of flipping on every single cycle change.
+Every ticker has a persistent signal state driven by continuous conviction
+(0.0-1.0) rather than discrete cycle counters. Conviction is computed from:
 
-States: NONE → WATCHING → PENDING → ACTIVE → CONFIRMED
-         ↑                  ↓
-         └── WEAKENING ←────┘  (sticky: ACTIVE/CONFIRMED don't vanish silently)
+  1. Edge Remaining — fraction of entry-thesis authority that still agrees
+  2. PnL Efficiency — are we making or losing money since entry?
+  3. Regime Compatibility — does current regime validate the entry thesis?
+  4. Time Decay — conviction drifts down naturally over time
 
-Key design decisions:
-- A direction change requires 2+ consecutive cycles before triggering a flip
-- Neutral is treated as a cooldown state, not a direction
-- Flip significance is scored (0-1) based on magnitude, agreement, regime alignment
-- Only flips with score >= 0.6 are surfaced as "real flips" to the dashboard
-- Lower-scoring flips are shown as "potential flips" in a separate list
-- ACTIVE/CONFIRMED signals are "sticky" — they don't disappear on one neutral cycle.
-  Instead they enter WEAKENING state, firing a "take profit" notification.
-- Signal age decay: older signals lose confidence over time.
+States: NONE (0.00) → WATCHING (0.10) → PENDING (0.25) → ACTIVE (0.45) → CONFIRMED (0.70)
+
+PnL Guardian overrides:
+  - Profit > +2.0 ATR → conviction floor at 0.20 (can't drop below watching)
+  - Profit > +3.0 ATR → force conviction >= 0.80 (market proved the thesis)
+  - Drawdown > -2.5 ATR → force NONE (capital preservation)
 """
 from __future__ import annotations
 import time
@@ -52,17 +50,19 @@ def _autosave():
                 "signal_state": dict(_signal_state),
                 "state_since": dict(_state_since),
                 "active_direction": dict(_active_direction),
-                "consecutive_same": dict(_consecutive_same),
-                "consecutive_neutral": dict(_consecutive_neutral),
-                "consecutive_counter": dict(_consecutive_counter),
                 "last_flip_cycle": dict(_last_flip_cycle),
-                "pre_weakening_state": dict(_pre_weakening_state),
                 "state_entry_price": dict(_state_entry_price),
+                "conviction_score": dict(_conviction_score),
+                "conviction_peak": dict(_conviction_peak),
+                "thesis_strategies": dict(_thesis_strategies),
+                "entry_cycle": dict(_entry_cycle),
+                "entry_regime": dict(_entry_regime),
                 # Save last 2 snapshots per ticker (enough for health score after restart)
                 "signal_memory": {
                     t: mem[-2:] if len(mem) >= 2 else mem
                     for t, mem in _signal_memory.items()
                 },
+                "version": 2,
                 "saved_at": time.time(),
             }
         with open(_STATE_FILE, "w") as f:
@@ -79,35 +79,41 @@ def _autoload():
         with open(_STATE_FILE) as f:
             data = json.load(f)
         with _lock:
+            version = data.get("version", 1)
             for d, target in [
                 ("signal_state", _signal_state),
                 ("state_since", _state_since),
                 ("active_direction", _active_direction),
-                ("consecutive_same", _consecutive_same),
-                ("consecutive_neutral", _consecutive_neutral),
-                ("consecutive_counter", _consecutive_counter),
                 ("last_flip_cycle", _last_flip_cycle),
-                ("pre_weakening_state", _pre_weakening_state),
                 ("state_entry_price", _state_entry_price),
             ]:
                 if d in data and isinstance(data[d], dict):
                     target.update(data[d])
-            # Restore signal memory snapshots (for health score continuity)
+            # New v2 format: restore conviction data
+            if version >= 2:
+                for d, target in [
+                    ("conviction_score", _conviction_score),
+                    ("conviction_peak", _conviction_peak),
+                    ("entry_cycle", _entry_cycle),
+                    ("entry_regime", _entry_regime),
+                ]:
+                    if d in data and isinstance(data[d], dict):
+                        target.update(data[d])
+                if "thesis_strategies" in data and isinstance(data["thesis_strategies"], dict):
+                    _thesis_strategies.update(data["thesis_strategies"])
+            # Restore signal memory snapshots
             if "signal_memory" in data and isinstance(data["signal_memory"], dict):
                 for t, mem_snapshots in data["signal_memory"].items():
                     if isinstance(mem_snapshots, list):
                         _signal_memory[t] = mem_snapshots
         logger.info(
-            "Signal state restored from disk: %d tickers, %d with memory",
-            len(_signal_state), len(_signal_memory),
+            "Signal state restored from disk (v%d): %d tickers, %d with memory",
+            version, len(_signal_state), len(_signal_memory),
         )
     except Exception as e:
         logger.warning("Failed to restore signal state from disk: %s", e)
 
-# Track pre-weakening state for proper recovery
-_pre_weakening_state: dict[str, str] = {}  # ticker → state before weakening
-
-# ── All possible signal states in conviction order ──
+# ── Conviction thresholds (mapped from state names ──
 SIGNAL_STATES = {
     "none": 0,
     "watching": 1,
@@ -116,23 +122,33 @@ SIGNAL_STATES = {
     "active": 4,
     "confirmed": 5,
 }
+CONVICTION_THRESHOLDS = {
+    "confirmed": 0.70,
+    "active": 0.45,
+    "pending": 0.25,
+    "watching": 0.10,
+    "none": 0.00,
+}
 
-# Display order for UI (highest conviction first)
 SIGNAL_STATE_DISPLAY_ORDER = ["confirmed", "active", "pending", "weakening", "watching", "none"]
 
 # ── Module-level persistence state ──
-# Thread-safe: all mutating operations acquire _lock
 _signal_memory: dict[str, list[dict]] = {}       # ticker → list of recent cycle snapshots
 _signal_state: dict[str, str] = {}                # ticker → current state
 _state_since: dict[str, float] = {}               # ticker → time when current state started
 _flip_history: dict[str, list[dict]] = {}         # ticker → list of significant flip events
-_consecutive_same: dict[str, int] = {}            # ticker → consecutive cycles in same direction
-_consecutive_neutral: dict[str, int] = {}         # ticker → consecutive neutral cycles
 _active_direction: dict[str, str] = {}            # ticker → the direction we're committed to
 _last_flip_cycle: dict[str, int] = {}             # ticker → cycle_id of last significant flip
 _take_profit_events: dict[str, list[dict]] = {}   # ticker → list of take-profit notifications
-_consecutive_counter: dict[str, int] = {}         # ticker → consecutive cycles in opposite direction (for sticky downgrade)
-_state_entry_price: dict[str, float] = {}      # ticker → price when current state was entered
+_state_entry_price: dict[str, float] = {}         # ticker → price when current state was entered
+
+# ── Thesis Validation ──
+_conviction_score: dict[str, float] = {}          # ticker → current conviction 0.0-1.0
+_conviction_peak: dict[str, float] = {}           # ticker → peak conviction since last reset
+_conviction_weakening_counter: dict[str, int] = {} # ticker → cycles conviction has been dropping
+_thesis_strategies: dict[str, list[dict]] = {}    # ticker → snapshot of strategy votes at entry
+_entry_cycle: dict[str, int] = {}                 # ticker → cycle_id when thesis was entered
+_entry_regime: dict[str, str] = {}                # ticker → primary regime at entry time
 
 # ── Signal Health & Warning tracking ──
 _last_strong_cycle: dict[str, int] = {}             # ticker → last cycle_id where net_score > 0.4
@@ -162,23 +178,42 @@ MAX_MEMORY = 10                    # Keep last 10 cycle snapshots per ticker
 MAX_FLIP_HISTORY = 20              # Max flip events to keep per ticker
 MAX_TAKE_PROFIT_EVENTS = 10        # Max take-profit events per ticker
 
-# ── Sticky signal thresholds (loaded from settings_manager) ──
-# These are helper functions, not constants, so they reflect live setting changes.
-def _get_cooldown_active() -> int:
-    """Get ACTIVE signal neutral cooldown from settings (default 6)."""
-    return int(get_setting("neutral_cooldown_active", 6))
+# ── Conviction settings (loaded from settings_manager) ──
+def _get_conviction_decay(instr_type: str = "") -> float:
+    """Conviction decay per cycle (leak rate). Higher = faster decay."""
+    if instr_type:
+        val = get_setting(f"{instr_type}_conviction_decay", None)
+        if val is not None:
+            return float(val)
+    return float(get_setting("conviction_decay", 0.97))
 
-def _get_cooldown_confirmed() -> int:
-    """Get CONFIRMED signal neutral cooldown from settings (default 8)."""
-    return int(get_setting("neutral_cooldown_confirmed", 8))
+def _get_min_conviction(instr_type: str = "") -> float:
+    """Minimum conviction to enter a thesis (0-1). Higher = harder to trigger."""
+    if instr_type:
+        val = get_setting(f"{instr_type}_min_conviction", None)
+        if val is not None:
+            return float(val)
+    return float(get_setting("min_conviction", 0.25))
 
-def _get_cooldown_max() -> int:
-    """Get standard neutral cooldown from settings (default 3)."""
-    return int(get_setting("neutral_cooldown_max", 3))
+def _get_thesis_horizon(instr_type: str = "") -> int:
+    """Number of cycles before a thesis is considered stale."""
+    if instr_type:
+        val = get_setting(f"{instr_type}_thesis_horizon", None)
+        if val is not None:
+            return int(val)
+    return int(get_setting("thesis_horizon", 30))
 
-def _get_sticky_counter() -> int:
-    """Get counter-direction cycles before sticky downgrade from settings (default 2)."""
-    return int(get_setting("sticky_counter_cycles", 2))
+def _get_pnl_profit_floor_atr() -> float:
+    return float(get_setting("pnl_profit_floor_atr", 2.0))
+
+def _get_pnl_profit_confirm_atr() -> float:
+    return float(get_setting("pnl_profit_confirm_atr", 3.0))
+
+def _get_pnl_force_exit_atr() -> float:
+    return float(get_setting("pnl_force_exit_atr", 2.5))
+
+def _get_regime_invalidation_factor() -> float:
+    return float(get_setting("regime_invalidation_factor", 0.60))
 
 def _get_age_decay_start() -> float:
     return float(get_setting("signal_age_decay_start_min", 15))
@@ -188,15 +223,6 @@ def _get_age_decay_half() -> float:
 
 def _get_age_decay_floor() -> float:
     return float(get_setting("signal_age_decay_floor", 0.50))
-
-def _get_min_pending_cycles() -> int:
-    return int(get_setting("min_pending_cycles", 2))
-
-def _get_min_active_cycles() -> int:
-    return int(get_setting("min_active_cycles", 3))
-
-def _get_min_confirmed_cycles() -> int:
-    return int(get_setting("min_confirmed_cycles", 5))
 
 def _get_flip_score_threshold() -> float:
     return float(get_setting("flip_score_threshold", 0.60))
@@ -268,9 +294,9 @@ def _score_flip_significance(
     # ── Factor 2: Confidence in new direction (weight: 0.25) ──
     score += min(confidence * 0.4, 0.25)
 
-    # ── Factor 3: Consecutive cycles supporting new direction (weight: 0.20) ──
-    streak = _consecutive_same.get(ticker, 0)
-    score += min(streak * 0.07, 0.20)
+    # ── Factor 3: Conviction level (weight: 0.20) ──
+    conviction = _conviction_score.get(ticker, 0.0)
+    score += min(conviction * 0.3, 0.20)
 
     # ── Factor 4: Regime alignment (weight: 0.10) ──
     counter_trend = consensus_meta.get("consensus_counter_trend", "no")
@@ -287,76 +313,180 @@ def _score_flip_significance(
     return min(score, 1.0)
 
 
-def _compute_state(direction: str, ticker: str) -> tuple[str, bool]:
-    """Determine the next state for a ticker given its direction and history.
+def _compute_conviction(
+    ticker: str,
+    direction: str,
+    net_score: float,
+    strategy_votes: list | None,
+    prev_direction: str | None,
+    current_price: float,
+    cycle_id: int,
+    regime: str = "",
+) -> float:
+    """Compute conviction 0.0-1.0 from edge remaining + building + PnL."""
+    prev_state = _signal_state.get(ticker, "none")
+    has_thesis = prev_state in ("pending", "active", "confirmed", "weakening")
+    prev_conviction = _conviction_score.get(ticker, 0.0)
+    entry_price = _state_entry_price.get(ticker, 0)
+
+    if has_thesis and _entry_cycle.get(ticker) is not None:
+        # ── Active thesis: validate using edge, time, regime, PnL ──
+        entry_strategies = _thesis_strategies.get(ticker, [])
+        curr_votes = strategy_votes or []
+        entry_dir = _active_direction.get(ticker, "long")
+        elapsed = max(cycle_id - _entry_cycle.get(ticker, cycle_id), 0)
+
+        # Edge remaining
+        current = {}
+        for cv in curr_votes:
+            name = cv.get("name", cv.get("strategy", ""))
+            current[name] = cv.get("direction", "neutral")
+
+        if entry_strategies:
+            total_auth = 0.0
+            support_auth = 0.0
+            for ev in entry_strategies:
+                name = ev.get("name", ev.get("strategy", ""))
+                vote_dir = ev.get("direction", "neutral")
+                weight = float(ev.get("weight", ev.get("authority", 1.0)))
+                if vote_dir != entry_dir:
+                    continue
+                total_auth += weight
+                curr_dir = current.get(name, "neutral")
+                if curr_dir == entry_dir:
+                    support_auth += weight
+                elif curr_dir == "neutral":
+                    support_auth += weight * 0.3
+            edge = (support_auth / total_auth) if total_auth > 0 else 0.5
+        else:
+            # No strategy votes → use net_score as edge proxy
+            if direction == "neutral":
+                edge = 0.3
+            elif direction == entry_dir:
+                edge = 0.5 + min(net_score * 0.4, 0.5)
+            else:
+                edge = 0.3
+
+        # Thesis maturity: conviction ramps up over first N cycles
+        maturity = min((elapsed + 2) / 4.0, 1.0)
+
+        # Time decay
+        horizon = _get_thesis_horizon()
+        time_factor = max(0.3, 1.0 - (elapsed / horizon))
+
+        # Regime compatibility
+        entry_reg = _entry_regime.get(ticker, "")
+        regime_factor = _get_regime_invalidation_factor() if (entry_reg and regime and entry_reg != regime) else 1.0
+
+        # PnL efficiency
+        pnl_factor = 0.5
+        if entry_price > 0 and current_price > 0:
+            dir_sign = 1.0 if entry_dir == "long" else -1.0
+            pnl_pct = (current_price - entry_price) / entry_price * dir_sign
+            pnl_factor = max(0.0, min(1.0, 0.5 + pnl_pct * 5.0))
+
+        # Blend
+        conviction = edge * 0.50 + time_factor * 0.20 + regime_factor * 0.10 + pnl_factor * 0.20
+        conviction *= maturity
+
+        # Direction conflict: if current vote opposes thesis, penalize hard
+        if direction not in ("neutral", entry_dir):
+            if prev_state == "weakening":
+                conviction *= 0.4  # sustained opposition → dropping
+            else:
+                conviction *= 0.6  # first opposition → warning
+        elif direction == "neutral" and prev_state == "weakening":
+            conviction *= 0.5  # sustained neutral while weakening → accelerate decay
+
+        conviction *= _get_conviction_decay()
+
+        # PnL Guardian overrides
+        if entry_price > 0 and current_price > 0:
+            price_move = (current_price - entry_price) / entry_price
+            if direction == "short":
+                price_move = -price_move
+            if price_move > _get_pnl_profit_confirm_atr() / 100.0:
+                conviction = max(conviction, 0.80)
+            elif price_move > _get_pnl_profit_floor_atr() / 100.0:
+                conviction = max(conviction, 0.20)
+            if price_move < -_get_pnl_force_exit_atr() / 100.0:
+                conviction = min(conviction, 0.05)
+    else:
+        # ── No active thesis: build conviction with warmup ──
+        net_mag = abs(net_score)
+        diversity = 1.0
+        if strategy_votes:
+            families = set(s.get("family", "") for s in strategy_votes if s.get("family"))
+            diversity = min(len(families) / 3.0, 1.0)
+
+        # Building factor: conviction ramps over first few cycles
+        cycles_seen = len(_signal_memory.get(ticker, []))
+        building_factor = min((cycles_seen + 2) / 5.0, 1.0)
+
+        base = net_mag * 0.8 * building_factor
+        if direction == prev_direction and prev_direction not in (None, "neutral"):
+            base = max(base, prev_conviction * 0.95)
+        elif direction == "neutral":
+            base = prev_conviction * 0.92
+        elif prev_direction not in (None, "neutral"):
+            base = prev_conviction * 0.5
+        conviction = min(base * diversity, 0.40)
+
+    conviction = max(0.0, min(1.0, conviction))
+    old_peak = _conviction_peak.get(ticker, 0.0)
+    if conviction >= old_peak:
+        _conviction_peak[ticker] = conviction
+        _conviction_weakening_counter[ticker] = 0
+    _conviction_score[ticker] = conviction
+    return conviction
+
+
+def _compute_state(
+    ticker: str,
+    conviction: float,
+    direction: str,
+) -> tuple[str, bool]:
+    """Map conviction 0.0-1.0 to a signal state.
 
     Returns (new_state, significant_transition).
 
-    Sticky behavior for ACTIVE/CONFIRMED:
-    - One neutral cycle → WEAKENING (not WATCHING)
-    - One counter-direction cycle → WEAKENING
-    - 2+ consecutive counter-cycles → downgrade to WATCHING
-    - Extended neutrals → gradual downgrade (weakening → watching → none)
+    Strengthening → escalates through: watching → pending → active → confirmed
+    Weakening → catches via: drop from peak > 0.20 triggers weakening state
+    Death → conviction < 0.10 → none
     """
     prev_state = _signal_state.get(ticker, "none")
     prev_dir = _active_direction.get(ticker)
-    streak = _consecutive_same.get(ticker, 0)
-    neutral_streak = _consecutive_neutral.get(ticker, 0)
-    counter_streak = _consecutive_counter.get(ticker, 0)
-    is_sticky = prev_state in ("active", "confirmed")
 
-    # ── Neutral cooldown logic (extended for sticky states) ──
-    if direction == "neutral":
-        if is_sticky:
-            cooldown_max = _get_cooldown_confirmed() if prev_state == "confirmed" else _get_cooldown_active()
-            if neutral_streak >= cooldown_max:
-                return "none", True  # Significant: CONFIRMED → NONE after extended neutrals
-            # Don't weaken on the first neutral — sticky signals survive one neutral
-            if neutral_streak >= 3:
-                return "weakening", True  # 3rd neutral: fire take-profit
-            if neutral_streak >= 2:
-                return "weakening", False  # 2nd neutral: enter weakening silently
-            # 1st neutral: stay in current sticky state (stick!)
-            return prev_state, False
-        else:
-            if neutral_streak >= _get_cooldown_max():
-                return "none", False
-            if prev_state != "none":
-                return "watching", False
-            return "none", False
+    # ── Threshold-based state selection ──
+    if conviction >= 0.70:
+        new_state = "confirmed"
+    elif conviction >= 0.45:
+        new_state = "active"
+    elif conviction >= 0.25:
+        new_state = "pending"
+    elif conviction >= 0.10:
+        new_state = "watching"
+    else:
+        new_state = "none"
 
-    # ── Counter-direction detection ──
-    if prev_dir and direction != prev_dir:
-        if is_sticky:
-            # Sticky: need 2+ counter-cycles to fully downgrade
-            if counter_streak >= _get_sticky_counter():
-                return "watching", True  # Significant: downgrade from sticky → watching
-            # First counter-cycle → WEAKENING (fire take-profit)
-            return "weakening", True  # Significant! Take-profit notification
-        else:
-            # Non-sticky: immediate downgrade to watching
-            return "watching", False
+    # ── Weakening: conviction dropped significantly from peak ──
+    if prev_state in ("active", "confirmed", "weakening"):
+        peak = _conviction_peak.get(ticker, conviction)
+        if peak - conviction >= 0.15 and new_state != "confirmed":
+            if prev_state in ("active", "confirmed"):
+                new_state = "weakening"  # enter weakening
+            elif conviction >= 0.10:
+                new_state = "weakening"  # stay in weakening (not yet decayed)
+            # else conviction < 0.10 → let threshold give "none"
 
-    # ── Recovery from weakening (same direction again) ──
-    if prev_state == "weakening" and prev_dir and direction == prev_dir:
-        # Restore to one level below the pre-weakening state
-        # Track what state we weakened from via a module-level dict
-        pre_weaken = _pre_weakening_state.get(ticker, "pending")
-        if pre_weaken == "confirmed":
-            return "active", True  # CONFIRMED→WEAKENING→ACTIVE
-        elif pre_weaken == "active":
-            return "pending", True  # ACTIVE→WEAKENING→PENDING
-        else:
-            return "pending", True
+    # ── Significant transition detection ──
+    significant = new_state != prev_state
+    if significant and new_state in ("weakening", "none") and prev_state in ("active", "confirmed"):
+        significant = True
+    if new_state == "pending" and prev_state in ("watching", "none"):
+        significant = True
 
-    # ── Same direction, escalate based on streak ──
-    if streak >= _get_min_confirmed_cycles():
-        return "confirmed", prev_state not in ("confirmed",)
-    if streak >= _get_min_active_cycles():
-        return "active", prev_state not in ("active", "confirmed")
-    if streak >= _get_min_pending_cycles():
-        return "pending", True  # Transition from watching→pending is noteworthy
-    return "watching", False
+    return new_state, significant
 
 
 def update(
@@ -369,8 +499,13 @@ def update(
     cycle_id: int = 0,
     current_price: float = 0.0,
     instrument_type: str = "",
+    regime: str = "",
 ) -> dict | None:
     """Update signal state for a ticker with the latest cycle data.
+
+    Uses conviction scoring (0-1) instead of cycle counting to determine
+    signal states. Conviction is computed from thesis validation, edge
+    remaining, PnL efficiency, regime compatibility, and time decay.
 
     Args:
         ticker: Ticker symbol
@@ -382,18 +517,18 @@ def update(
         cycle_id: Current cycle number
         current_price: Current price at this cycle (0 if unavailable)
         instrument_type: 'stock', 'future', or 'option'
+        regime: Current primary market regime
 
     Returns:
         Dict describing a significant flip event, or None if nothing noteworthy.
     """
-    global _signal_memory, _signal_state, _state_since, _consecutive_same
-    global _consecutive_neutral, _active_direction, _flip_history, _last_flip_cycle
-    global _state_entry_price
+    global _signal_memory, _signal_state, _state_since
+    global _active_direction, _flip_history, _last_flip_cycle
+    global _state_entry_price, _conviction_score, _conviction_peak
+    global _conviction_weakening_counter
 
     with _lock:
-        # Read previous direction from active_direction. If current state is 'none'
-        # (e.g. after neutral cooldown), treat prev_direction as None to prevent
-        # stale direction from triggering false direction-change detection.
+        # ── Determine previous direction ──
         current_state = _signal_state.get(ticker, "none")
         if current_state == "none" or _active_direction.get(ticker) is None:
             prev_direction = None
@@ -401,6 +536,12 @@ def update(
             prev_direction = _active_direction.get(ticker, "neutral")
         prev_confidence = _get_prev_confidence(ticker)
         prev_net = _get_prev_net(ticker)
+
+        # ── Compute conviction ──
+        conviction = _compute_conviction(
+            ticker, direction, net_score, strategy_votes,
+            prev_direction, current_price, cycle_id, regime,
+        )
 
         # ── Update memory ──
         snapshot = {
@@ -410,7 +551,7 @@ def update(
             "cycle_id": cycle_id,
             "timestamp": time.time(),
             "price": current_price,
-            "state": None,  # filled below
+            "state": None,
             "families": consensus_meta.get("consensus_families", {}),
             "family_count": consensus_meta.get("consensus_family_count", 0),
             "agreement_cv": consensus_meta.get("consensus_agreement_cv", 0.5),
@@ -420,55 +561,59 @@ def update(
             "weighted_long": consensus_meta.get("consensus_weighted_long", 0),
             "weighted_short": consensus_meta.get("consensus_weighted_short", 0),
             "instrument_type": instrument_type,
+            "conviction": round(conviction, 4),
         }
         _signal_memory.setdefault(ticker, [])
         _signal_memory[ticker].append(snapshot)
         if len(_signal_memory[ticker]) > MAX_MEMORY:
             _signal_memory[ticker].pop(0)
 
-        # ── Update consecutive counters ──
-        if direction == "neutral":
-            _consecutive_neutral[ticker] = _consecutive_neutral.get(ticker, 0) + 1
-            _consecutive_same[ticker] = 0
-            _consecutive_counter[ticker] = 0
-        elif direction == prev_direction:
-            _consecutive_same[ticker] = _consecutive_same.get(ticker, 0) + 1
-            _consecutive_neutral[ticker] = 0
-            _consecutive_counter[ticker] = 0
-        elif prev_direction is not None and direction != prev_direction:
-            # Opposite direction from committed direction
-            _consecutive_counter[ticker] = _consecutive_counter.get(ticker, 0) + 1
-            _consecutive_same[ticker] = 1  # Starting new streak in current direction
-            _consecutive_neutral[ticker] = 0
-        else:
-            _consecutive_same[ticker] = 1  # Starting new streak
-            _consecutive_neutral[ticker] = 0
-            _consecutive_counter[ticker] = 0
-
-        # ── Compute new state ──
-        new_state, significant = _compute_state(direction, ticker)
+        # ── Compute new state from conviction ──
+        new_state, significant = _compute_state(ticker, conviction, direction)
         snapshot["state"] = new_state
 
         old_state = _signal_state.get(ticker, "none")
         if new_state != old_state:
-            # State changed
             _signal_state[ticker] = new_state
             _state_since[ticker] = time.time()
+            was_thesis = old_state in ("pending", "active", "confirmed")
+
             if new_state in ("pending", "active", "confirmed"):
                 _active_direction[ticker] = direction
                 _state_entry_price[ticker] = current_price
+                # Snapshot thesis on entry (first time entering thesis state)
+                if not was_thesis:
+                    _thesis_strategies[ticker] = list(strategy_votes or [])
+                    _entry_cycle[ticker] = cycle_id
+                    _entry_regime[ticker] = regime
+                    _conviction_peak[ticker] = conviction
+                    _conviction_weakening_counter[ticker] = 0
+                    logger.info(
+                        "%s: THESIS ENTRY — state=%s dir=%s conviction=%.3f",
+                        ticker, new_state, direction, conviction,
+                    )
             elif new_state == "weakening":
-                # Keep the active direction — it's weakening, not flipped
                 if prev_direction and prev_direction != "neutral":
                     _active_direction[ticker] = prev_direction
+            elif new_state == "watching":
+                if direction != "neutral":
+                    _active_direction[ticker] = direction
             elif new_state == "none":
-                # Clear active direction when state resets to none
                 _active_direction.pop(ticker, None)
-                _consecutive_counter.pop(ticker, None)
+                _thesis_strategies.pop(ticker, None)
+                _entry_cycle.pop(ticker, None)
+                _entry_regime.pop(ticker, None)
+                _conviction_peak.pop(ticker, None)
+                _conviction_weakening_counter.pop(ticker, None)
+                _conviction_score.pop(ticker, None)
 
-            # ── Generate take-profit event when sticky signal weakens ──
+                logger.info(
+                    "%s: THESIS EXIT — prev_state=%s prev_dir=%s",
+                    ticker, old_state, prev_direction,
+                )
+
+            # ── Take-profit event on weakening ──
             if old_state in ("active", "confirmed") and new_state == "weakening":
-                _pre_weakening_state[ticker] = old_state  # Remember for recovery
                 tp_event = {
                     "ticker": ticker,
                     "type": "take_profit",
@@ -479,25 +624,22 @@ def update(
                     "cycle_id": cycle_id,
                     "timestamp": time.time(),
                     "confidence": confidence,
+                    "conviction": round(conviction, 4),
                 }
                 _take_profit_events.setdefault(ticker, [])
                 _take_profit_events[ticker].append(tp_event)
                 if len(_take_profit_events[ticker]) > MAX_TAKE_PROFIT_EVENTS:
                     _take_profit_events[ticker].pop(0)
                 logger.info(
-                    "%s: TAKE PROFIT — %s → %s (%s)",
-                    ticker, old_state.upper(), new_state.upper(), tp_event["reason"],
+                    "%s: TAKE PROFIT — %s → %s (conviction=%.3f)",
+                    ticker, old_state.upper(), new_state.upper(), conviction,
                 )
         else:
-            # Same state, just update direction tracking
             if direction != "neutral":
                 _active_direction[ticker] = direction
 
         # ── Detect significant flips ──
         flip_event = None
-
-        # A "potential flip" is when direction changes from a non-neutral
-        # active state to a different non-neutral direction
         is_direction_change = (
             prev_direction not in ("neutral", None)
             and direction not in ("neutral", "")
@@ -505,16 +647,12 @@ def update(
         )
 
         if is_direction_change and significant:
-            # Score the flip
             flip_score = _score_flip_significance(
                 ticker, direction, confidence, net_score,
                 prev_direction, prev_confidence, prev_net,
                 consensus_meta,
             )
-
             is_real_flip = flip_score >= _get_flip_score_threshold()
-            streak = _consecutive_same.get(ticker, 1)
-
             flip_event = {
                 "ticker": ticker,
                 "from": prev_direction,
@@ -524,27 +662,23 @@ def update(
                 "score": round(flip_score, 4),
                 "is_real": is_real_flip,
                 "state": new_state,
-                "streak": streak,
+                "conviction": round(conviction, 4),
                 "cycle_id": cycle_id,
                 "timestamp": time.time(),
                 "reasons": _build_flip_reasons(
                     flip_score, net_score - prev_net,
-                    consensus_meta, streak, new_state,
+                    consensus_meta, new_state,
                 ),
             }
-
-            # Store in flip history
             _flip_history.setdefault(ticker, [])
             _flip_history[ticker].append(flip_event)
             if len(_flip_history[ticker]) > MAX_FLIP_HISTORY:
                 _flip_history[ticker].pop(0)
-
             if is_real_flip:
                 _last_flip_cycle[ticker] = cycle_id
 
-        # ── Track top contributors for key strategy exit detection ──
+        # ── Track top contributors ──
         if strategy_votes and len(strategy_votes) > 0:
-            # Sort by contribution (confidence × weight) and keep top 3
             sorted_votes = sorted(
                 strategy_votes,
                 key=lambda s: float(s.get("confidence", 0)) * float(s.get("weight", 0)),
@@ -552,11 +686,8 @@ def update(
             )
             top3 = [s.get("name", s.get("strategy", "?")) for s in sorted_votes[:3]]
             _last_top_contributors[ticker] = top3
-            # _prev_strategy_count is no longer needed — health score now reads
-            # prev cycle's active_votes directly from memory snapshots (Bug #2 fix).
-            # Kept as module-level dict for backward compat but no longer written.
 
-        # ── Track last strong confirmation cycle (for stale detection) ──
+        # ── Track last strong confirmation cycle ──
         if direction != "neutral" and abs(net_score) > 0.4:
             _last_strong_cycle[ticker] = cycle_id
             snapshot["strong_cycle"] = True
@@ -581,7 +712,6 @@ def _build_flip_reasons(
     score: float,
     net_score_change: float,
     meta: dict,
-    streak: int,
     state: str,
 ) -> str:
     """Build a readable reason string for the flip."""
@@ -595,7 +725,6 @@ def _build_flip_reasons(
     parts.append(f"score={score:.2f}")
     if abs(net_score_change) > 0.3:
         parts.append("large_magnitude")
-    parts.append(f"streak={streak}")
     parts.append(f"state={state}")
     return "|".join(parts)
 
@@ -610,9 +739,8 @@ def get_ticker_state(ticker: str) -> dict:
             "state": _signal_state.get(ticker, "none"),
             "state_since": _state_since.get(ticker, 0),
             "active_direction": _active_direction.get(ticker, "neutral"),
-            "consecutive_same": _consecutive_same.get(ticker, 0),
-            "consecutive_neutral": _consecutive_neutral.get(ticker, 0),
-            "consecutive_counter": _consecutive_counter.get(ticker, 0),
+            "conviction": round(_conviction_score.get(ticker, 0.0), 4),
+            "conviction_peak": round(_conviction_peak.get(ticker, 0.0), 4),
             "memory_depth": len(mem),
             "last_flip_cycle": _last_flip_cycle.get(ticker, 0),
             "current_signal": mem[-1] if mem else None,
@@ -621,6 +749,9 @@ def get_ticker_state(ticker: str) -> dict:
             "decayed_confidence": round(decayed_conf, 4),
             "state_entry_price": _state_entry_price.get(ticker, 0),
             "instrument_type": mem[-1].get("instrument_type", "") if mem else "",
+            "has_thesis": _entry_cycle.get(ticker) is not None,
+            "entry_cycle": _entry_cycle.get(ticker, 0),
+            "entry_regime": _entry_regime.get(ticker, ""),
         }
 
 
@@ -703,30 +834,18 @@ def get_significant_flips(min_score: float = 0.60) -> dict:
 def get_signal_strength(ticker: str) -> float:
     """Compute current signal strength for a ticker (0-1).
 
-    Combines:
-    - State conviction weight
-    - Consecutive same-direction bonus
-    - Confidence from last cycle
-    - Age decay factor
+    Uses conviction as the primary signal, blended with confidence and age.
     """
     with _lock:
-        state = _signal_state.get(ticker, "none")
-        state_weight = SIGNAL_STATES.get(state, 0) / 5.0  # 0-1 (now 5 states)
-        streak = _consecutive_same.get(ticker, 0)
-        streak_bonus = min(streak * 0.1, 0.3)
+        conviction = _conviction_score.get(ticker, 0.0)
         mem = _signal_memory.get(ticker, [])
-        if mem:
-            latest = mem[-1]
-            latest_conf = latest.get("confidence", 0)
-            # Apply age decay
-            age_sec = time.time() - latest.get("timestamp", time.time())
-            age_min = age_sec / 60.0
-            if age_min > _get_age_decay_start():
-                decay = max(_get_age_decay_floor(), 1.0 - (age_min / _get_age_decay_half()))
-                latest_conf *= decay
-        else:
-            latest_conf = 0
-        return min(state_weight * 0.5 + streak_bonus * 0.3 + latest_conf * 0.2, 1.0)
+        latest_conf = mem[-1].get("confidence", 0) if mem else 0
+        age_sec = time.time() - mem[-1].get("timestamp", time.time()) if mem else 0
+        age_min = age_sec / 60.0
+        if age_min > _get_age_decay_start():
+            decay = max(_get_age_decay_floor(), 1.0 - (age_min / _get_age_decay_half()))
+            latest_conf *= decay
+        return min(conviction * 0.7 + latest_conf * 0.3, 1.0)
 
 
 def get_age_decayed_confidence(ticker: str) -> tuple[float, float]:
@@ -1173,9 +1292,6 @@ def reset():
         _signal_state.clear()
         _state_since.clear()
         _flip_history.clear()
-        _consecutive_same.clear()
-        _consecutive_neutral.clear()
-        _consecutive_counter.clear()
         _active_direction.clear()
         _state_entry_price.clear()
         _last_flip_cycle.clear()
@@ -1186,7 +1302,12 @@ def reset():
         _last_strong_cycle.clear()
         _last_top_contributors.clear()
         _prev_strategy_count.clear()
-        _pre_weakening_state.clear()
+        _conviction_score.clear()
+        _conviction_peak.clear()
+        _conviction_weakening_counter.clear()
+        _thesis_strategies.clear()
+        _entry_cycle.clear()
+        _entry_regime.clear()
 
 
 # ── Restore state from disk on import ──

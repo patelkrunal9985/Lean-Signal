@@ -131,6 +131,50 @@
           <input type="number" id="settings-sticky-counter" value="2" min="1" max="10">
         </div>
         <hr style="margin:20px 0;border-color:var(--border)">
+        <h3>State Escalation Speed</h3>
+        <p style="font-size:12px;color:var(--text-muted);margin:4px 0 12px">
+          How many consecutive same-direction cycles needed to escalate signal state.
+          Lower = faster escalation (fewer confirmations needed).
+        </p>
+        <div class="setting-row">
+          <label>watching → pending (cycles)</label>
+          <input type="number" id="settings-min-pending" value="2" min="1" max="10">
+        </div>
+        <div class="setting-row">
+          <label>pending → active (cycles)</label>
+          <input type="number" id="settings-min-active" value="3" min="1" max="10">
+        </div>
+        <div class="setting-row">
+          <label>active → confirmed (cycles)</label>
+          <input type="number" id="settings-min-confirmed" value="5" min="1" max="20">
+        </div>
+        <hr style="margin:20px 0;border-color:var(--border)">
+        <h3>Verdict Thresholds</h3>
+        <p style="font-size:12px;color:var(--text-muted);margin:4px 0 12px">
+          Level thresholds for each verdict. Higher EXIT threshold means earlier exits.
+          Level = state_base + tier_mod + health_mod + regime_bonus − penalties.
+        </p>
+        <div class="setting-row">
+          <label>STRONG BUY/SELL at level ≥</label>
+          <input type="number" id="settings-verdict-strong" value="3" min="1" max="10">
+        </div>
+        <div class="setting-row">
+          <label>BUY/SELL at level ≥</label>
+          <input type="number" id="settings-verdict-buy" value="2" min="1" max="10">
+        </div>
+        <div class="setting-row">
+          <label>HOLD at level ≥</label>
+          <input type="number" id="settings-verdict-hold" value="1" min="0" max="10">
+        </div>
+        <div class="setting-row">
+          <label>REDUCE at level ≥</label>
+          <input type="number" id="settings-verdict-reduce" value="0" min="-5" max="10">
+        </div>
+        <div class="setting-row">
+          <label>EXIT at level ≥</label>
+          <input type="number" id="settings-verdict-exit" value="-1" min="-5" max="10">
+        </div>
+        <hr style="margin:20px 0;border-color:var(--border)">
         <h3>Strategy Validation</h3>
         <p style="font-size:12px;color:var(--text-muted);margin:4px 0 12px">
           Runs all V2/V3 strategies, consensus, gate, tick engine, and pipeline

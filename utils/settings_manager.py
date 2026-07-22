@@ -32,6 +32,17 @@ _DEFAULTS: dict[str, Any] = {
     # Closing pin — block new entries in last 30 minutes before close
     # 0DTE traders may want this ON (quality) or OFF (last-minute scalps)
     "block_entries_in_closing_pin": True,
+    # State escalation thresholds (cycles needed to upgrade state)
+    "min_pending_cycles": 2,        # watching → pending
+    "min_active_cycles": 3,         # pending → active
+    "min_confirmed_cycles": 5,      # active → confirmed
+    "flip_score_threshold": 0.60,   # flip significance cutoff
+    # Verdict scoring thresholds (level at which each verdict fires)
+    "verdict_exit_threshold": -1,   # level ≤ this → EXIT
+    "verdict_reduce_threshold": 0,  # level ≤ this → REDUCE
+    "verdict_hold_threshold": 1,    # level ≤ this → HOLD
+    "verdict_buy_threshold": 2,     # level ≤ this → BUY/SELL
+    "verdict_strong_threshold": 3,  # level ≥ this → STRONG
 }
 
 # ── ODTE Strategy Whitelist ─────────────────────────────────────

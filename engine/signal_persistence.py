@@ -159,10 +159,6 @@ _EWMA_MAX_PENDING_AGE = 5  # drop pending predictions older than N cycles
 # hasn't been initialized (fallback to hardcoded values).
 
 MAX_MEMORY = 10                    # Keep last 10 cycle snapshots per ticker
-MIN_PENDING_CYCLES = 2             # Need 2 consecutive same-direction to upgrade watching→pending
-MIN_ACTIVE_CYCLES = 3              # Need 3 consecutive same-direction for pending→active
-MIN_CONFIRMED_CYCLES = 5           # Need 5 consecutive same-direction for active→confirmed
-FLIP_SCORE_THRESHOLD = 0.60        # Only surface flips with score >= this
 MAX_FLIP_HISTORY = 20              # Max flip events to keep per ticker
 MAX_TAKE_PROFIT_EVENTS = 10        # Max take-profit events per ticker
 
@@ -192,6 +188,18 @@ def _get_age_decay_half() -> float:
 
 def _get_age_decay_floor() -> float:
     return float(get_setting("signal_age_decay_floor", 0.50))
+
+def _get_min_pending_cycles() -> int:
+    return int(get_setting("min_pending_cycles", 2))
+
+def _get_min_active_cycles() -> int:
+    return int(get_setting("min_active_cycles", 3))
+
+def _get_min_confirmed_cycles() -> int:
+    return int(get_setting("min_confirmed_cycles", 5))
+
+def _get_flip_score_threshold() -> float:
+    return float(get_setting("flip_score_threshold", 0.60))
 
 
 def _get_prev_direction(ticker: str) -> str | None:
@@ -342,11 +350,11 @@ def _compute_state(direction: str, ticker: str) -> tuple[str, bool]:
             return "pending", True
 
     # ── Same direction, escalate based on streak ──
-    if streak >= MIN_CONFIRMED_CYCLES:
+    if streak >= _get_min_confirmed_cycles():
         return "confirmed", prev_state not in ("confirmed",)
-    if streak >= MIN_ACTIVE_CYCLES:
+    if streak >= _get_min_active_cycles():
         return "active", prev_state not in ("active", "confirmed")
-    if streak >= MIN_PENDING_CYCLES:
+    if streak >= _get_min_pending_cycles():
         return "pending", True  # Transition from watching→pending is noteworthy
     return "watching", False
 
@@ -504,7 +512,7 @@ def update(
                 consensus_meta,
             )
 
-            is_real_flip = flip_score >= FLIP_SCORE_THRESHOLD
+            is_real_flip = flip_score >= _get_flip_score_threshold()
             streak = _consecutive_same.get(ticker, 1)
 
             flip_event = {

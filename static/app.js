@@ -1182,6 +1182,14 @@ async function saveSettings() {
   var cooldownConfirmed = document.getElementById('settings-cooldown-confirmed')?.value;
   var cooldownMax = document.getElementById('settings-cooldown-max')?.value;
   var stickyCounter = document.getElementById('settings-sticky-counter')?.value;
+  var minPending = document.getElementById('settings-min-pending')?.value;
+  var minActive = document.getElementById('settings-min-active')?.value;
+  var minConfirmed = document.getElementById('settings-min-confirmed')?.value;
+  var verdictExit = document.getElementById('settings-verdict-exit')?.value;
+  var verdictReduce = document.getElementById('settings-verdict-reduce')?.value;
+  var verdictHold = document.getElementById('settings-verdict-hold')?.value;
+  var verdictBuy = document.getElementById('settings-verdict-buy')?.value;
+  var verdictStrong = document.getElementById('settings-verdict-strong')?.value;
 
   try {
     await fetch('/api/settings', {
@@ -1193,10 +1201,18 @@ async function saveSettings() {
         neutral_cooldown_max: parseInt(cooldownMax) || 3,
         sticky_counter_cycles: parseInt(stickyCounter) || 2,
         odte_mode: document.getElementById('settings-odte-mode')?.checked || false,
+        min_pending_cycles: parseInt(minPending) || 2,
+        min_active_cycles: parseInt(minActive) || 3,
+        min_confirmed_cycles: parseInt(minConfirmed) || 5,
+        verdict_exit_threshold: parseInt(verdictExit) ?? -1,
+        verdict_reduce_threshold: parseInt(verdictReduce) ?? 0,
+        verdict_hold_threshold: parseInt(verdictHold) ?? 1,
+        verdict_buy_threshold: parseInt(verdictBuy) ?? 2,
+        verdict_strong_threshold: parseInt(verdictStrong) ?? 3,
       }),
     });
     _updateOdteBadge();
-    alert('Settings saved (slot lifetime applies immediately, no restart needed)');
+    alert('Settings saved (all thresholds apply immediately, no restart needed)');
   } catch(e) {
     alert('Settings saved locally, but server save failed: ' + e.message);
   }

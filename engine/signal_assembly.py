@@ -45,6 +45,16 @@ _VERDICT_STATE_BASE = {"confirmed": 2, "active": 1, "pending": 0}
 _VERDICT_TIER_MOD = {"platinum": 1, "gold": 0, "silver": -1, "bronze": -2}
 _VERDICT_HEALTH_MOD = {"robust": 0, "caution": -1, "fragile": -2, "terminal": -4}
 
+from utils.settings_manager import get as _get_setting
+
+def _get_verdict_threshold(level_name: str, default: int) -> int:
+    """Get a verdict level threshold from settings, with fallback to default."""
+    key = f"verdict_{level_name}_threshold"
+    try:
+        return int(_get_setting(key, default))
+    except (ValueError, TypeError):
+        return default
+
 # ── Regime-direction alignment sets (module-level to avoid recreation per call) ──
 _REGIME_BULLISH = {"strong_uptrend", "uptrend"}
 _REGIME_BEARISH = {"strong_downtrend", "downtrend"}
@@ -135,16 +145,22 @@ def compute_verdict(signal: dict, health: dict | None, signal_states: dict | Non
     if not gate_passed and level > 1:
         level = 1  # Max: HOLD
 
-    # ── Map level to verdict ──
-    if level >= 3:
+    # ── Map level to verdict (thresholds from settings) ──
+    strong_th = _get_verdict_threshold("strong", 3)
+    buy_th = _get_verdict_threshold("buy", 2)
+    hold_th = _get_verdict_threshold("hold", 1)
+    reduce_th = _get_verdict_threshold("reduce", 0)
+    exit_th = _get_verdict_threshold("exit", -1)
+
+    if level >= strong_th:
         verdict = f"STRONG {direction.upper()}"
-    elif level == 2:
+    elif level >= buy_th:
         verdict = direction.upper()
-    elif level == 1:
+    elif level >= hold_th:
         verdict = "HOLD"
-    elif level == 0:
+    elif level >= reduce_th:
         verdict = "REDUCE"
-    elif level == -1:
+    elif level >= exit_th:
         verdict = "EXIT"
     else:
         verdict = "AVOID"

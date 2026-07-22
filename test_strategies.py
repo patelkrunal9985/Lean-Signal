@@ -6,6 +6,12 @@ No IBKR connection needed.
 import sys, os, json, traceback, math, random, time
 sys.path.insert(0, r'C:\Users\patel\OneDrive\Desktop\Projects\Lean Signals')
 
+# Force UTF-8 for stdout/stderr to handle Unicode characters in log messages
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+if sys.stderr.encoding != 'utf-8':
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
 print('='*70)
 print('COMPREHENSIVE STRATEGY VALIDATION TEST')
 print('='*70)
@@ -373,6 +379,687 @@ for instr_type, ctx in [('stock', mock_stock_ctx), ('future', mock_context), ('o
         results['errors'].append({'strategy': f'Pipeline({instr_type})', 'type': instr_type,
                                    'error': str(e)[:200], 'traceback': traceback.format_exc()})
         print(f' [FAIL] Pipeline({instr_type}) FAILED: {str(e)[:80]}')
+
+# -- 12. Test Settings Manager --
+print('\n--- SETTINGS MANAGER ---')
+from utils.settings_manager import get, get_all, set_many, reset as settings_reset, init as settings_init
+from utils.settings_manager import ODTE_STRATEGY_WHITELIST, ODTE_STRATEGY_BLACKLIST
+
+try:
+    # Default values
+    assert get("neutral_cooldown_active") == 6, f"default cooldown_active={get('neutral_cooldown_active')}"
+    assert get("neutral_cooldown_confirmed") == 8
+    assert get("neutral_cooldown_max") == 3
+    assert get("sticky_counter_cycles") == 2
+    assert get("odte_mode") == False
+    assert get("signal_age_decay_start_min") == 15
+    assert get("signal_age_decay_half_min") == 60
+    assert get("signal_age_decay_floor") == 0.50
+    results['passed'] += 1
+    print(f'   [OK] Settings defaults: all defaults match expected values')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'SettingsManager.defaults', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Settings defaults FAILED: {str(e)[:80]}')
+
+try:
+    # get_all returns all settings
+    all_settings = get_all()
+    assert isinstance(all_settings, dict)
+    assert "neutral_cooldown_active" in all_settings
+    assert "odte_mode" in all_settings
+    results['passed'] += 1
+    print(f'   [OK] Settings get_all: {len(all_settings)} keys returned')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'SettingsManager.get_all', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Settings get_all FAILED: {str(e)[:80]}')
+
+try:
+    # set_many with valid and invalid keys
+    original = get("neutral_cooldown_active")
+    result = set_many({"neutral_cooldown_active": 12, "nonexistent_key": 999})
+    assert get("neutral_cooldown_active") == 12, f"expected 12, got {get('neutral_cooldown_active')}"
+    assert "nonexistent_key" not in result, "unknown key should not be stored"
+    results['passed'] += 1
+    print(f'   [OK] Settings set_many: cooldown_active updated, unknown key rejected')
+    # Restore
+    set_many({"neutral_cooldown_active": original})
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'SettingsManager.set_many', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Settings set_many FAILED: {str(e)[:80]}')
+    # Best-effort restore
+    try: set_many({"neutral_cooldown_active": 6})
+    except: pass
+
+try:
+    # Type coercion: strings coerced to int/float
+    set_many({"neutral_cooldown_active": "10", "signal_age_decay_floor": "0.75"})
+    assert isinstance(get("neutral_cooldown_active"), int), f"expected int, got {type(get('neutral_cooldown_active'))}"
+    assert get("neutral_cooldown_active") == 10
+    assert isinstance(get("signal_age_decay_floor"), float), f"expected float, got {type(get('signal_age_decay_floor'))}"
+    assert get("signal_age_decay_floor") == 0.75
+    results['passed'] += 1
+    print(f'   [OK] Settings type coercion: str→int and str→float work')
+    # Restore
+    set_many({"neutral_cooldown_active": 6, "signal_age_decay_floor": 0.50})
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'SettingsManager.type_coercion', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Settings type coercion FAILED: {str(e)[:80]}')
+    try: set_many({"neutral_cooldown_active": 6, "signal_age_decay_floor": 0.50})
+    except: pass
+
+try:
+    # reset to defaults
+    set_many({"neutral_cooldown_active": 99})
+    settings_reset()
+    assert get("neutral_cooldown_active") == 6, f"after reset expected 6, got {get('neutral_cooldown_active')}"
+    results['passed'] += 1
+    print(f'   [OK] Settings reset: restored to defaults')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'SettingsManager.reset', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Settings reset FAILED: {str(e)[:80]}')
+    try: settings_reset()
+    except: pass
+
+try:
+    # odte_mode toggle
+    set_many({"odte_mode": True})
+    assert get("odte_mode") == True
+    set_many({"odte_mode": False})
+    assert get("odte_mode") == False
+    results['passed'] += 1
+    print(f'   [OK] Settings odte_mode toggle: True→False works')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'SettingsManager.odte_mode', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Settings odte_mode FAILED: {str(e)[:80]}')
+    try: set_many({"odte_mode": False})
+    except: pass
+
+# -- 13. Test Signal Persistence State Machine --
+print('\n--- SIGNAL PERSISTENCE STATE MACHINE ---')
+from engine.signal_persistence import (
+    update as persist_update, reset as persist_reset,
+    get_ticker_state, get_all_states, get_signal_health_score,
+    get_signal_strength, get_signal_timeline, get_take_profit_events,
+    get_age_decayed_confidence, update_strategy_performance,
+    get_strategy_authority, get_strategy_performance_summary,
+    get_price_signal_divergence,
+)
+
+persist_reset()
+
+try:
+    # Build consensus meta for persistence
+    cm = {
+        "consensus_families": {"momentum": 0.5, "flow": 0.3},
+        "consensus_family_count": 2,
+        "consensus_agreement_cv": 0.3,
+        "consensus_threshold": 0.2,
+        "consensus_dominant_share": 0.5,
+        "consensus_active_votes": 3,
+        "consensus_weighted_long": 0.6,
+        "consensus_weighted_short": 0.2,
+        "consensus_net_score": 0.4,
+        "consensus_counter_trend": "no",
+        "consensus_conviction_tier": "silver",
+    }
+    # Escalate: none → watching (cycle 1)
+    flip = persist_update("TEST", "long", 0.6, 0.35, cm, cycle_id=1, current_price=5500, instrument_type="future")
+    ts = get_ticker_state("TEST")
+    assert ts["state"] == "watching", f"cycle 1: expected watching, got {ts['state']}"
+    results['passed'] += 1
+    print(f'   [OK] Persistence escalation: cycle 1 → watching ({ts["state"]})')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'Persistence.escalation', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Persistence escalation FAILED: {str(e)[:80]}')
+
+try:
+    # Cycle 2: 2nd 'long' → still watching (active_direction set this cycle, streak resets)
+    persist_update("TEST", "long", 0.62, 0.38, cm, cycle_id=2, current_price=5502, instrument_type="future")
+    ts = get_ticker_state("TEST")
+    assert ts["state"] == "watching", f"cycle 2: expected watching, got {ts['state']}"
+    results['passed'] += 1
+    print(f'   [OK] Persistence escalation: cycle 2 → watching (active_direction now set)')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'Persistence.watching2', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Persistence cycle 2 FAILED: {str(e)[:80]}')
+
+try:
+    # Cycle 3: 3rd 'long' → pending (streak=2 >= MIN_PENDING_CYCLES=2)
+    persist_update("TEST", "long", 0.65, 0.40, cm, cycle_id=3, current_price=5505, instrument_type="future")
+    ts = get_ticker_state("TEST")
+    assert ts["state"] == "pending", f"cycle 3: expected pending, got {ts['state']}"
+    assert ts["active_direction"] == "long"
+    assert ts["state_entry_price"] == 5505
+    results['passed'] += 1
+    print(f'   [OK] Persistence escalation: cycle 3 → pending, entry_price=5505')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'Persistence.pending', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Persistence pending FAILED: {str(e)[:80]}')
+
+try:
+    # Cycle 4: same direction → active (streak=3 >= MIN_ACTIVE_CYCLES=3)
+    persist_update("TEST", "long", 0.70, 0.50, cm, cycle_id=4, current_price=5510, instrument_type="future")
+    ts = get_ticker_state("TEST")
+    assert ts["state"] == "active", f"cycle 4: expected active, got {ts['state']}"
+    results['passed'] += 1
+    print(f'   [OK] Persistence escalation: cycle 4 → active')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'Persistence.active', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Persistence active FAILED: {str(e)[:80]}')
+
+try:
+    # Cycles 5-6: same direction → confirmed (streak=5 >= MIN_CONFIRMED_CYCLES=5)
+    persist_update("TEST", "long", 0.75, 0.55, cm, cycle_id=5, current_price=5515, instrument_type="future")
+    persist_update("TEST", "long", 0.80, 0.60, cm, cycle_id=6, current_price=5520, instrument_type="future")
+    ts = get_ticker_state("TEST")
+    assert ts["state"] == "confirmed", f"cycle 6: expected confirmed, got {ts['state']}"
+    assert ts["consecutive_same"] == 5
+    results['passed'] += 1
+    print(f'   [OK] Persistence escalation: cycle 6 → confirmed (streak={ts["consecutive_same"]})')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'Persistence.confirmed', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Persistence confirmed FAILED: {str(e)[:80]}')
+
+try:
+    # Cycle 7: neutral → stays confirmed (sticky, 1st neutral)
+    flip = persist_update("TEST", "neutral", 0.0, 0.0, cm, cycle_id=7, current_price=5518, instrument_type="future")
+    ts = get_ticker_state("TEST")
+    assert ts["state"] == "confirmed", f"sticky 1st neutral: expected confirmed, got {ts['state']}"
+    assert ts["consecutive_neutral"] == 1
+    results['passed'] += 1
+    print(f'   [OK] Sticky: 1st neutral → stays confirmed (sticks!)')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'Persistence.sticky_stick', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Sticky stick FAILED: {str(e)[:80]}')
+
+try:
+    # Cycle 8: 2nd neutral → weakening
+    flip = persist_update("TEST", "neutral", 0.0, 0.0, cm, cycle_id=8, current_price=5516, instrument_type="future")
+    ts = get_ticker_state("TEST")
+    assert ts["state"] == "weakening", f"sticky 2nd neutral: expected weakening, got {ts['state']}"
+    results['passed'] += 1
+    print(f'   [OK] Sticky: 2nd neutral → weakening')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'Persistence.sticky_weakening', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Sticky weakening FAILED: {str(e)[:80]}')
+
+try:
+    # Verify take-profit event was generated
+    tp_events = get_take_profit_events("TEST")
+    assert len(tp_events) >= 1, f"expected take-profit event, got {len(tp_events)}"
+    assert tp_events[0]["from_state"] == "confirmed"
+    assert tp_events[0]["type"] == "take_profit"
+    results['passed'] += 1
+    print(f'   [OK] Take-profit event: confirmed→weakening generated TP event')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'Persistence.take_profit', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Take-profit event FAILED: {str(e)[:80]}')
+
+try:
+    # Recovery from weakening: same direction → active (confirmed→weakening→active)
+    persist_update("TEST", "long", 0.60, 0.40, cm, cycle_id=9, current_price=5522, instrument_type="future")
+    ts = get_ticker_state("TEST")
+    assert ts["state"] == "active", f"recovery: expected active, got {ts['state']}"
+    results['passed'] += 1
+    print(f'   [OK] Recovery: weakening→{ts["state"]} on same direction')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'Persistence.recovery', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Recovery FAILED: {str(e)[:80]}')
+
+try:
+    # Test counter-direction: long→short on active signal
+    persist_reset()
+    # Build active long signal (need 4 cycles: 2 watching + 2 for pending→active)
+    for i in range(4):
+        persist_update("COUNT", "long", 0.7, 0.5, cm, cycle_id=i+1, current_price=5500+i*5, instrument_type="future")
+    ts = get_ticker_state("COUNT")
+    assert ts["state"] == "active", f"expected active, got {ts['state']}"
+    # Counter direction (1st cycle) → weakening
+    flip = persist_update("COUNT", "short", 0.6, -0.4, cm, cycle_id=5, current_price=5490, instrument_type="future")
+    ts = get_ticker_state("COUNT")
+    assert ts["state"] == "weakening", f"counter: expected weakening, got {ts['state']}"
+    assert ts["consecutive_counter"] == 1
+    results['passed'] += 1
+    print(f'   [OK] Counter-direction: 1st counter → weakening')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'Persistence.counter_weakening', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Counter-weakening FAILED: {str(e)[:80]}')
+
+try:
+    # 2nd counter → watching (downgrade)
+    flip = persist_update("COUNT", "short", 0.65, -0.45, cm, cycle_id=6, current_price=5485, instrument_type="future")
+    ts = get_ticker_state("COUNT")
+    assert ts["state"] == "watching", f"2nd counter: expected watching, got {ts['state']}"
+    results['passed'] += 1
+    print(f'   [OK] Counter-direction: 2nd counter → watching (downgrade complete)')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'Persistence.counter_downgrade', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Counter-downgrade FAILED: {str(e)[:80]}')
+
+try:
+    # get_all_states returns proper structure
+    persist_reset()
+    for i in range(4):
+        persist_update("ALL", "long", 0.7, 0.5, cm, cycle_id=i+1, current_price=5500, instrument_type="future")
+    all_st = get_all_states()
+    assert "by_ticker" in all_st
+    assert "by_state" in all_st
+    assert "summary" in all_st
+    assert all_st["by_ticker"]["ALL"]["state"] == "active"
+    assert all_st["summary"]["active"] >= 1
+    results['passed'] += 1
+    print(f'   [OK] get_all_states: {all_st["summary"]}')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'Persistence.get_all_states', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] get_all_states FAILED: {str(e)[:80]}')
+
+try:
+    # get_signal_timeline
+    tl = get_signal_timeline("ALL", max_cycles=5)
+    assert isinstance(tl, list)
+    assert len(tl) == 4
+    assert tl[-1]["state"] == "active"
+    results['passed'] += 1
+    print(f'   [OK] Signal timeline: {len(tl)} cycles, last state={tl[-1]["state"]}')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'Persistence.timeline', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Timeline FAILED: {str(e)[:80]}')
+
+try:
+    # get_signal_strength
+    strength = get_signal_strength("ALL")
+    assert isinstance(strength, float) and 0 <= strength <= 1
+    results['passed'] += 1
+    print(f'   [OK] Signal strength: {strength:.3f}')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'Persistence.strength', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Strength FAILED: {str(e)[:80]}')
+
+try:
+    # get_age_decayed_confidence: fresh signal should have decay=1.0
+    conf, decay = get_age_decayed_confidence("ALL")
+    assert isinstance(conf, float)
+    assert decay == 1.0, f"fresh signal decay should be 1.0, got {decay}"
+    results['passed'] += 1
+    print(f'   [OK] Age decay: conf={conf:.3f}, decay={decay} (fresh)')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'Persistence.age_decay', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Age decay FAILED: {str(e)[:80]}')
+
+try:
+    # get_price_signal_divergence
+    div = get_price_signal_divergence("ALL", current_price=5400, entry_price=5500, atr=15.0)
+    assert isinstance(div, dict)
+    assert "diverged" in div
+    # Price dropped ~100 points (~6.7 ATR) against long signal → diverged
+    assert div["diverged"] == True, f"price divergence should be True for long signal with -100 point move"
+    results['passed'] += 1
+    print(f'   [OK] Price divergence: diverged={div["diverged"]}, distance={div.get("atr_distance","?")} ATR')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'Persistence.divergence', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Divergence FAILED: {str(e)[:80]}')
+
+    persist_reset()  # Clean up before health score tests
+
+# -- 14. Test Signal Health Score --
+print('\n--- SIGNAL HEALTH SCORE ---')
+try:
+    # Build a solid confirmed signal with tight agreement
+    cm_healthy = {
+        "consensus_families": {"momentum": 0.4, "flow": 0.3, "gamma": 0.3},
+        "consensus_family_count": 3,
+        "consensus_agreement_cv": 0.2,  # tight
+        "consensus_threshold": 0.2,
+        "consensus_dominant_share": 0.35,  # well diversified
+        "consensus_active_votes": 5,
+        "consensus_weighted_long": 0.7,
+        "consensus_weighted_short": 0.1,
+        "consensus_net_score": 0.6,
+        "consensus_counter_trend": "no",
+        "consensus_conviction_tier": "gold",
+    }
+    for i in range(6):
+        persist_update("HEALTH", "long", 0.8, 0.6 + i*0.05, cm_healthy, cycle_id=i+1, current_price=5500, instrument_type="future")
+
+    health = get_signal_health_score("HEALTH")
+    assert isinstance(health, dict)
+    assert "health" in health
+    assert "label" in health
+    assert "factors" in health
+    assert "warnings" in health
+    # Should be robust (high net_score, tight CV, diverse families)
+    assert health["health"] >= 50, f"expected robust health, got {health['health']} ({health['label']})"
+    results['passed'] += 1
+    print(f'   [OK] Health score: {health["health"]}/100 ({health["label"]}) factors={health["factors"]}')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'HealthScore.robust', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Health score FAILED: {str(e)[:80]}')
+
+try:
+    # Test fragile signal: scattered confidence, single family dominant
+    cm_fragile = {
+        "consensus_families": {"momentum": 0.95},
+        "consensus_family_count": 1,
+        "consensus_agreement_cv": 0.7,  # scattered
+        "consensus_threshold": 0.2,
+        "consensus_dominant_share": 0.90,  # highly concentrated
+        "consensus_active_votes": 1,
+        "consensus_weighted_long": 0.3,
+        "consensus_weighted_short": 0.1,
+        "consensus_net_score": 0.25,  # just above threshold
+        "consensus_counter_trend": "yes",  # counter-trend
+        "consensus_conviction_tier": "bronze",
+    }
+    for i in range(2):
+        persist_update("WEAK", "short", 0.3, -0.25, cm_fragile, cycle_id=i+1, current_price=5500, instrument_type="stock")
+    health_w = get_signal_health_score("WEAK")
+    assert health_w["health"] < 50, f"fragile signal should have health < 50, got {health_w['health']}"
+    assert len(health_w["warnings"]) > 0, "fragile signal should have warnings"
+    results['passed'] += 1
+    print(f'   [OK] Fragile health: {health_w["health"]}/100 ({health_w["label"]}) warnings={health_w["warnings"]}')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'HealthScore.fragile', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Fragile health FAILED: {str(e)[:80]}')
+
+try:
+    # Neutral signal → terminal health
+    for i in range(2):
+        persist_update("NEUT", "neutral", 0.0, 0.0, cm, cycle_id=i+1, current_price=5500, instrument_type="future")
+    health_n = get_signal_health_score("NEUT")
+    assert health_n["label"] == "terminal", f"neutral signal should be terminal, got {health_n['label']}"
+    assert health_n["health"] == 0
+    results['passed'] += 1
+    print(f'   [OK] Terminal health: neutral signal → {health_n["label"]}')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'HealthScore.terminal', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Terminal health FAILED: {str(e)[:80]}')
+
+persist_reset()  # Clean up after health tests
+
+# -- 15. Test ODTE Whitelist & Blacklist --
+print('\n--- ODTE MODE & STRATEGY WHITELIST ---')
+try:
+    # ODTE whitelist should not overlap with blacklist
+    overlap = ODTE_STRATEGY_WHITELIST & ODTE_STRATEGY_BLACKLIST
+    assert len(overlap) == 0, f"ODTE whitelist/blacklist overlap: {overlap}"
+    results['passed'] += 1
+    print(f'   [OK] ODTE: no overlap between whitelist ({len(ODTE_STRATEGY_WHITELIST)}) and blacklist ({len(ODTE_STRATEGY_BLACKLIST)})')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'ODTE.no_overlap', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] ODTE overlap FAILED: {str(e)[:80]}')
+
+try:
+    # Key gamma strategies must be in whitelist
+    required_odte = ["gamma_exposure", "zero_dte_gamma", "vanna_charm_flow", "expiry_day_gamma"]
+    for s in required_odte:
+        assert s in ODTE_STRATEGY_WHITELIST, f"{s} missing from ODTE whitelist"
+    results['passed'] += 1
+    print(f'   [OK] ODTE: core gamma strategies present in whitelist')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'ODTE.core_strategies', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] ODTE core strategies FAILED: {str(e)[:80]}')
+
+try:
+    # Blacklisted strategies must NOT be in whitelist
+    for s in ["theta_decay", "iv_rv_spread", "earnings_vol_arbitrage"]:
+        assert s not in ODTE_STRATEGY_WHITELIST, f"{s} should not be in ODTE whitelist"
+    results['passed'] += 1
+    print(f'   [OK] ODTE: theta/earnings strategies correctly excluded')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'ODTE.exclusions', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] ODTE exclusions FAILED: {str(e)[:80]}')
+
+try:
+    # odte_mode=False → no filtering in settings (use already-imported get)
+    assert get("odte_mode") == False
+    # Verify whitelist is a set of strings
+    assert all(isinstance(s, str) for s in ODTE_STRATEGY_WHITELIST)
+    assert len(ODTE_STRATEGY_WHITELIST) >= 20, f"ODTE whitelist should have 20+ strategies, got {len(ODTE_STRATEGY_WHITELIST)}"
+    results['passed'] += 1
+    print(f'   [OK] ODTE: whitelist has {len(ODTE_STRATEGY_WHITELIST)} strategies (validated)')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'ODTE.whitelist_size', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] ODTE whitelist size FAILED: {str(e)[:80]}')
+
+# -- 16. Test Verdict System (compute_verdict) --
+print('\n--- VERDICT SYSTEM ---')
+from engine.signal_assembly import compute_verdict, summarize_gate_rejections
+
+try:
+    # Build signal_states for a confirmed signal
+    signal_states_test = {
+        "by_ticker": {
+            "TEST_V": {
+                "state": "confirmed",
+                "age_decay": 1.0,
+            }
+        }
+    }
+    # Confirmed, gold tier, robust health, long, gate passed → should be STRONG BUY
+    sig = {"ticker": "TEST_V", "direction": "long", "regime": "uptrend",
+           "consensus_meta": {"consensus_conviction_tier": "gold", "consensus_counter_trend": "no"},
+           "gate_passed": True, "instrument_type": "future"}
+    health = {"label": "robust", "health": 85}
+    verdict = compute_verdict(sig, health, signal_states_test)
+    assert verdict == "STRONG LONG", f"expected STRONG LONG, got {verdict}"
+    results['passed'] += 1
+    print(f'   [OK] Verdict: confirmed+gold+robust+long → {verdict}')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'Verdict.strong', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Verdict strong FAILED: {str(e)[:80]}')
+
+try:
+    # HOLD verdict: confirmed state, neutral direction (sticky HOLD)
+    sig_hold = {"ticker": "TEST_V", "direction": "neutral", "regime": "ranging",
+                "consensus_meta": {"consensus_conviction_tier": "silver"},
+                "gate_passed": False, "instrument_type": "future"}
+    signal_states_hold = {"by_ticker": {"TEST_V": {"state": "active", "age_decay": 1.0}}}
+    verdict_h = compute_verdict(sig_hold, {"label": "caution", "health": 55}, signal_states_hold)
+    assert verdict_h == "HOLD", f"sticky active+neutral should be HOLD, got {verdict_h}"
+    results['passed'] += 1
+    print(f'   [OK] Verdict: sticky active+neutral → {verdict_h}')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'Verdict.hold', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Verdict HOLD FAILED: {str(e)[:80]}')
+
+try:
+    # NO ACTION: none/watching state
+    sig_none = {"ticker": "TEST_V", "direction": "long", "regime": "ranging",
+                "consensus_meta": {},"gate_passed": False, "instrument_type": "future"}
+    st_none = {"by_ticker": {"TEST_V": {"state": "none", "age_decay": 1.0}}}
+    verdict_n = compute_verdict(sig_none, None, st_none)
+    assert verdict_n == "NO ACTION"
+    results['passed'] += 1
+    print(f'   [OK] Verdict: none state → NO ACTION')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'Verdict.no_action', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Verdict NO_ACTION FAILED: {str(e)[:80]}')
+
+try:
+    # EXIT: terminal health on active signal
+    sig_exit = {"ticker": "TEST_V", "direction": "long", "regime": "downtrend",
+                "consensus_meta": {"consensus_conviction_tier": "bronze", "consensus_counter_trend": "yes"},
+                "gate_passed": False, "instrument_type": "future"}
+    st_exit = {"by_ticker": {"TEST_V": {"state": "active", "age_decay": 0.5}}}
+    verdict_ex = compute_verdict(sig_exit, {"label": "terminal", "health": 10}, st_exit)
+    assert verdict_ex in ("EXIT", "AVOID"), f"terminal health on active should be EXIT/AVOID, got {verdict_ex}"
+    results['passed'] += 1
+    print(f'   [OK] Verdict: terminal health → {verdict_ex}')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'Verdict.exit', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Verdict EXIT FAILED: {str(e)[:80]}')
+
+try:
+    # AVOID: fragile pending + gate failed
+    sig_avoid = {"ticker": "TEST_V", "direction": "long", "regime": "ranging",
+                 "consensus_meta": {},"gate_passed": False, "instrument_type": "future"}
+    st_avoid = {"by_ticker": {"TEST_V": {"state": "pending", "age_decay": 1.0}}}
+    verdict_av = compute_verdict(sig_avoid, {"label": "fragile", "health": 30}, st_avoid)
+    assert verdict_av == "AVOID", f"fragile pending should be AVOID, got {verdict_av}"
+    results['passed'] += 1
+    print(f'   [OK] Verdict: fragile pending → {verdict_av}')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'Verdict.avoid', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Verdict AVOID FAILED: {str(e)[:80]}')
+
+try:
+    # WAIT: pending state with robust health (no gate issue)
+    sig_wait = {"ticker": "TEST_V", "direction": "long", "regime": "uptrend",
+                "consensus_meta": {"consensus_conviction_tier": "silver"},
+                "gate_passed": True, "instrument_type": "future"}
+    st_wait = {"by_ticker": {"TEST_V": {"state": "pending", "age_decay": 1.0}}}
+    verdict_w = compute_verdict(sig_wait, {"label": "robust", "health": 80}, st_wait)
+    assert verdict_w == "WAIT", f"pending+robust should be WAIT, got {verdict_w}"
+    results['passed'] += 1
+    print(f'   [OK] Verdict: pending+robust → {verdict_w}')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'Verdict.wait', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Verdict WAIT FAILED: {str(e)[:80]}')
+
+try:
+    # REDUCE: weakening state
+    sig_red = {"ticker": "TEST_V", "direction": "long", "regime": "ranging",
+               "consensus_meta": {"consensus_conviction_tier": "silver"},
+               "gate_passed": True, "instrument_type": "future"}
+    st_red = {"by_ticker": {"TEST_V": {"state": "weakening", "age_decay": 1.0}}}
+    verdict_r = compute_verdict(sig_red, {"label": "caution", "health": 55}, st_red)
+    assert verdict_r in ("REDUCE", "EXIT"), f"weakening should be REDUCE/EXIT, got {verdict_r}"
+    results['passed'] += 1
+    print(f'   [OK] Verdict: weakening → {verdict_r}')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'Verdict.reduce', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Verdict REDUCE FAILED: {str(e)[:80]}')
+
+# -- 17. Test Strategy Performance Tracking --
+print('\n--- STRATEGY PERFORMANCE TRACKING ---')
+persist_reset()  # Clean slate for strategy perf tests
+try:
+    # Record correct predictions
+    update_strategy_performance("test_momentum", "long", "long")
+    update_strategy_performance("test_momentum", "long", "long")
+    update_strategy_performance("test_momentum", "long", "long")
+    update_strategy_performance("test_momentum", "short", "short")
+    # One wrong
+    update_strategy_performance("test_momentum", "long", "short")
+
+    auth = get_strategy_authority("test_momentum", 1.0)
+    assert isinstance(auth, float), f"authority should be float, got {type(auth)}"
+    assert 0.5 <= auth <= 1.0, f"authority should be in [0.5, 1.0], got {auth}"
+    results['passed'] += 1
+    print(f'   [OK] Strategy authority: {auth:.3f} (4/5 correct)')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'StrategyPerf.authority', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Strategy authority FAILED: {str(e)[:80]}')
+
+try:
+    # Performance summary
+    summary = get_strategy_performance_summary()
+    assert isinstance(summary, dict)
+    assert "test_momentum" in summary
+    assert summary["test_momentum"]["win_rate"] == 0.8
+    assert summary["test_momentum"]["total_predictions"] == 5
+    results['passed'] += 1
+    print(f'   [OK] Strategy performance: win_rate={summary["test_momentum"]["win_rate"]} total={summary["test_momentum"]["total_predictions"]}')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'StrategyPerf.summary', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Performance summary FAILED: {str(e)[:80]}')
+
+try:
+    # Neutral predictions not tracked
+    update_strategy_performance("test_neutral", "neutral", "long")
+    update_strategy_performance("test_neutral", "long", "neutral")
+    summary2 = get_strategy_performance_summary()
+    assert "test_neutral" not in summary2, "neutral predictions should not be tracked"
+    results['passed'] += 1
+    print(f'   [OK] Strategy neutral: not tracked (correct)')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'StrategyPerf.neutral', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Neutral tracking FAILED: {str(e)[:80]}')
+
+try:
+    # Unknown strategy returns static authority
+    auth_new = get_strategy_authority("nonexistent_strat", 1.5)
+    assert auth_new == 1.5, f"unknown strategy should return static authority, got {auth_new}"
+    results['passed'] += 1
+    print(f'   [OK] Unknown strategy authority: returns static ({auth_new})')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'StrategyPerf.unknown', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Unknown authority FAILED: {str(e)[:80]}')
+
+# -- 18. Test Gate Rejection Summary --
+print('\n--- GATE REJECTION SUMMARY ---')
+try:
+    rejections = [
+        {"gate_reason": "incomplete_data_cot_empty", "ticker": "A"},
+        {"gate_reason": "incomplete_data_cot_empty", "ticker": "B"},
+        {"gate_reason": "atr_too_high_0.0821", "ticker": "C"},
+        {"gate_reason": "within_15min_of_close", "ticker": "D"},
+        {"gate_reason": "stale_price_5s", "ticker": "E"},
+    ]
+    summary = summarize_gate_rejections(rejections)
+    assert isinstance(summary, dict)
+    assert summary.get("incomplete_data_cot_empty") == 2, f"expected 2 cot_empty, got {summary}"
+    assert summary.get("atr_too_high") == 1
+    assert summary.get("within") == 1, f"within_15min_of_close should bucket to 'within', got {summary}"
+    assert summary.get("stale_price") == 1, f"stale_price_5s should bucket to 'stale_price', got {summary}"
+    results['passed'] += 1
+    print(f'   [OK] Gate summary: {summary}')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'GateRejection.summary', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Gate summary FAILED: {str(e)[:80]}')
+
+try:
+    # Unknown reason defaults to "unknown"
+    summary_unknown = summarize_gate_rejections([{"gate_reason": None}])
+    assert "unknown" in summary_unknown
+    results['passed'] += 1
+    print(f'   [OK] Gate summary: None→unknown handled')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'GateRejection.unknown', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Gate unknown FAILED: {str(e)[:80]}')
+
 
 # -- SUMMARY --
 if '--json' in sys.argv:

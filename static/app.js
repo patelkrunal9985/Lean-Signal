@@ -172,14 +172,20 @@ async function loadSettings() {
     var resp = await fetch('/api/settings');
     if (!resp.ok) return;
     var s = await resp.json();
-    var el = document.getElementById('settings-cooldown-active');
-    if (el && s.neutral_cooldown_active !== undefined) el.value = s.neutral_cooldown_active;
-    el = document.getElementById('settings-cooldown-confirmed');
-    if (el && s.neutral_cooldown_confirmed !== undefined) el.value = s.neutral_cooldown_confirmed;
-    el = document.getElementById('settings-cooldown-max');
-    if (el && s.neutral_cooldown_max !== undefined) el.value = s.neutral_cooldown_max;
-    el = document.getElementById('settings-sticky-counter');
-    if (el && s.sticky_counter_cycles !== undefined) el.value = s.sticky_counter_cycles;
+    var     el = document.getElementById('settings-conviction-decay');
+    if (el && s.conviction_decay !== undefined) el.value = s.conviction_decay;
+    el = document.getElementById('settings-min-conviction');
+    if (el && s.min_conviction !== undefined) el.value = s.min_conviction;
+    el = document.getElementById('settings-thesis-horizon');
+    if (el && s.thesis_horizon !== undefined) el.value = s.thesis_horizon;
+    el = document.getElementById('settings-regime-invalidation-factor');
+    if (el && s.regime_invalidation_factor !== undefined) el.value = s.regime_invalidation_factor;
+    el = document.getElementById('settings-pnl-profit-floor-atr');
+    if (el && s.pnl_profit_floor_atr !== undefined) el.value = s.pnl_profit_floor_atr;
+    el = document.getElementById('settings-pnl-profit-confirm-atr');
+    if (el && s.pnl_profit_confirm_atr !== undefined) el.value = s.pnl_profit_confirm_atr;
+    el = document.getElementById('settings-pnl-force-exit-atr');
+    if (el && s.pnl_force_exit_atr !== undefined) el.value = s.pnl_force_exit_atr;
     el = document.getElementById('settings-odte-mode');
     if (el && s.odte_mode !== undefined) el.checked = !!s.odte_mode;
   } catch(e) { /* silent */ }
@@ -1177,14 +1183,15 @@ async function saveSettings() {
   localStorage.setItem('lean_signals_interval', interval);
   localStorage.setItem('lean_signals_desktop_notify', desktopNotify);
 
-  // Save signal slot lifetime settings to server (applies immediately, no restart)
-  var cooldownActive = document.getElementById('settings-cooldown-active')?.value;
-  var cooldownConfirmed = document.getElementById('settings-cooldown-confirmed')?.value;
-  var cooldownMax = document.getElementById('settings-cooldown-max')?.value;
-  var stickyCounter = document.getElementById('settings-sticky-counter')?.value;
-  var minPending = document.getElementById('settings-min-pending')?.value;
-  var minActive = document.getElementById('settings-min-active')?.value;
-  var minConfirmed = document.getElementById('settings-min-confirmed')?.value;
+  // Save thesis validation engine settings (applies immediately, no restart)
+  var convictionDecay = document.getElementById('settings-conviction-decay')?.value;
+  var minConviction = document.getElementById('settings-min-conviction')?.value;
+  var thesisHorizon = document.getElementById('settings-thesis-horizon')?.value;
+  var regimeInvalidationFactor = document.getElementById('settings-regime-invalidation-factor')?.value;
+  var pnlProfitFloorAtr = document.getElementById('settings-pnl-profit-floor-atr')?.value;
+  var pnlProfitConfirmAtr = document.getElementById('settings-pnl-profit-confirm-atr')?.value;
+  var pnlForceExitAtr = document.getElementById('settings-pnl-force-exit-atr')?.value;
+  // Verdict thresholds
   var verdictExit = document.getElementById('settings-verdict-exit')?.value;
   var verdictReduce = document.getElementById('settings-verdict-reduce')?.value;
   var verdictHold = document.getElementById('settings-verdict-hold')?.value;
@@ -1196,14 +1203,14 @@ async function saveSettings() {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
-        neutral_cooldown_active: parseInt(cooldownActive) || 6,
-        neutral_cooldown_confirmed: parseInt(cooldownConfirmed) || 8,
-        neutral_cooldown_max: parseInt(cooldownMax) || 3,
-        sticky_counter_cycles: parseInt(stickyCounter) || 2,
+        conviction_decay: parseFloat(convictionDecay) ?? 0.97,
+        min_conviction: parseFloat(minConviction) ?? 0.25,
+        thesis_horizon: parseInt(thesisHorizon) || 30,
+        regime_invalidation_factor: parseFloat(regimeInvalidationFactor) ?? 0.60,
+        pnl_profit_floor_atr: parseFloat(pnlProfitFloorAtr) ?? 2.0,
+        pnl_profit_confirm_atr: parseFloat(pnlProfitConfirmAtr) ?? 3.0,
+        pnl_force_exit_atr: parseFloat(pnlForceExitAtr) ?? 2.5,
         odte_mode: document.getElementById('settings-odte-mode')?.checked || false,
-        min_pending_cycles: parseInt(minPending) || 2,
-        min_active_cycles: parseInt(minActive) || 3,
-        min_confirmed_cycles: parseInt(minConfirmed) || 5,
         verdict_exit_threshold: parseInt(verdictExit) ?? -1,
         verdict_reduce_threshold: parseInt(verdictReduce) ?? 0,
         verdict_hold_threshold: parseInt(verdictHold) ?? 1,

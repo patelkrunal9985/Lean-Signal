@@ -259,6 +259,9 @@ class LeanSignalsHandler(BaseHTTPRequestHandler):
                         self._send_json({"error": "ticker parameter required"}, 400)
                 except Exception:
                     self._send_json({"error": "failed", "timeline": []})
+            elif path == "/api/settings":
+                from utils.settings_manager import get_all as get_all_settings
+                self._send_json(get_all_settings())
             elif path == "/api/order-flow-ticker":
                 try:
                     from engine.tick_engine import get_tick_stats
@@ -398,6 +401,10 @@ class LeanSignalsHandler(BaseHTTPRequestHandler):
                     self._send_json(_VALIDATION_RESULT)
                 else:
                     self._send_json({"status": "no_data", "message": "No validation results. POST /api/validate first."})
+            elif path == "/api/settings":
+                from utils.settings_manager import set_many, get_all as get_all_settings
+                set_many(data)
+                self._send_json(get_all_settings())
             elif path == "/api/restart":
                 # Spawn a detached process that kills ONLY the old server PID,
                 # clears caches, and starts a fresh instance.

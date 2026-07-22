@@ -70,6 +70,11 @@ def compute_verdict(signal: dict, health: dict | None, signal_states: dict | Non
         ticker_state = signal_states["by_ticker"].get(signal.get("ticker", ""), {})
         state = ticker_state.get("state", "none")
 
+    # ── Sticky signal: state is ACTIVE/CONFIRMED but current cycle is neutral → HOLD ──
+    # The signal is still valid per the persistence engine; we just aren't adding to it.
+    if direction == "neutral" and state in ("active", "confirmed"):
+        return "HOLD"
+
     if state in ("none", "watching") or direction == "neutral":
         return "NO ACTION"
 
@@ -226,6 +231,8 @@ def assemble_cycle_result(
                 consensus_meta=cm,
                 strategy_votes=strats,
                 cycle_id=cycle_id,
+                current_price=e.get("current_price", 0),
+                instrument_type=e.get("instrument_type", ""),
             )
         except Exception as exc:
             logger.warning(
@@ -295,5 +302,112 @@ def assemble_cycle_result(
         for s in signals:
             if "verdict" not in s:
                 s["verdict"] = "NO ACTION"
+
+    # ═══════════════════════════════════════════════════════════════════
+    # Persistent Signal Slots (Architecture: keep ticker visible, update data)
+    # ═══════════════════════════════════════════════════════════════════
+    # Once a ticker reaches ACTIVE/CONFIRMED state, it gets a permanent
+    # slot in the dashboard. Every cycle we update the slot with current
+    # data from the gate evaluation: gate result, price, regime, direction.
+    # The slot's DIRECTION comes from the state machine (persisted),
+    # not from the current cycle (which may be neutral). The gate rejection
+    # is shown as a BADGE with the real reason — the signal is never hidden.
+    #
+    # This replaces the old "sticky carryover" approach which created
+    # synthetic entries with incomplete metadata.
+    # ═══════════════════════════════════════════════════════════════════
+
+    # Build a lookup of current-cycle gate evaluations by ticker
+    gate_by_ticker: dict[str, dict] = {e["ticker"]: e for e in gate_evaluations}
+    existing_tickers: set = {s["ticker"] for s in signals}
+
+    if all_states and all_states.get("by_ticker"):
+        for ticker, ts in all_states["by_ticker"].items():
+            state = ts.get("state", "none")
+            if state not in ("active", "confirmed", "weakening"):
+                continue
+            if ticker in existing_tickers:
+                # Already has a fresh signal this cycle — no slot needed
+                continue
+
+            gate_eval = gate_by_ticker.get(ticker, {})
+            last_snap = ts.get("current_signal") or {}
+
+            # ── Instrument type (with fallback for old disk state) ──
+            instr_type = (
+                ts.get("instrument_type", "")
+                or last_snap.get("instrument_type", "")
+                or "stock"
+            )
+
+            # ── Direction: USE THE PERSISTED direction from state machine ──
+            # NOT the current cycle's direction (which might be "neutral" even
+            # though the signal is still ACTIVE/CONFIRMED).
+            direction = ts.get("active_direction", "neutral")
+            if direction == "neutral":
+                direction = last_snap.get("direction", "neutral")
+
+            # ── Conviction tier based on actual state ──
+            conv_tier = "gold" if state == "confirmed" else "silver" if state == "active" else "bronze"
+
+            # ── Current cycle data (from gate evaluation) ──
+            # These are the REAL data from this cycle, not generic defaults.
+            gate_passed = gate_eval.get("gate_passed", False)
+            gate_reason = gate_eval.get("gate_reason", "not_scanned")
+            current_price = gate_eval.get("current_price", 0)
+            regime = gate_eval.get("regime", "unknown")
+            current_direction = gate_eval.get("direction", "neutral")
+
+            # ── Build the persistent slot signal ──
+            slot_signal: dict[str, Any] = {
+                # Identity (from persistence)
+                "ticker": ticker,
+                "instrument_type": instr_type,
+                # Direction from state machine, not current cycle
+                "direction": direction,
+                "current_direction": current_direction,  # current cycle's direction (for display)
+                "confidence": round(ts.get("decayed_confidence", 0), 4),
+                "composite_score": round(abs(last_snap.get("net_score", 0)), 4),
+                "strategy_count": last_snap.get("active_votes", 0),
+                "agreeing_count": last_snap.get("active_votes", 0),
+                # Current cycle data
+                "regime": regime,
+                "current_price": current_price,
+                "gate_passed": gate_passed,
+                "gate_reason": gate_reason,
+                "entry_price": ts.get("state_entry_price", 0),
+                # State machine info
+                "state": state,
+                "persistent_slot": True,  # Flag for frontend
+                "consensus_meta": {"consensus_conviction_tier": conv_tier},
+                "strategies": [],
+                "market_dashboard": {},
+            }
+
+            # ── Compute verdict ──
+            # With gate_passed reflecting the real current-cycle result.
+            # If the gate rejected this cycle, the verdict gets penalized
+            # appropriately (e.g. HOLD instead of BUY).
+            try:
+                ticker_health = health_scores.get(ticker) if isinstance(health_scores, dict) else None
+                slot_signal["verdict"] = compute_verdict(slot_signal, ticker_health, all_states)
+            except Exception:
+                slot_signal["verdict"] = "HOLD"
+
+            signals.append(slot_signal)
+            logger.info(
+                "Cycle #%d: persistent slot for %s (state=%s, dir=%s, gate=%s, reason=%s, instr=%s)",
+                cycle_id, ticker, state, direction,
+                "PASSED" if gate_passed else "REJECTED", gate_reason, instr_type,
+            )
+
+        # ── Re-sort and regroup now that persistent slot signals are added ──
+        signals.sort(key=lambda s: s.get("composite_score", 0), reverse=True)
+        result["signals_count"] = len(signals)
+        result["signals"] = {
+            "stock": [s for s in signals if s.get("instrument_type", "") == "stock"],
+            "future": [s for s in signals if s.get("instrument_type", "") == "future"],
+            "option": [s for s in signals if s.get("instrument_type", "") == "option"],
+        }
 
     return result

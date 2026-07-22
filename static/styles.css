@@ -274,6 +274,26 @@ header {
   50% { opacity: 0.5; }
 }
 
+/* ── Signal Generation Badge (shows datetime + entry price) ── */
+.generated-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--info);
+  background: #1a3a5e;
+  margin-left: 4px;
+  white-space: nowrap;
+}
+
+/* ── Popup generated time ── */
+.generated-time {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--info);
+}
+
 /* ── Age Decay Display ── */
 .age-decay-badge {
   display: inline-block;
@@ -283,6 +303,53 @@ header {
   font-weight: 500;
   color: var(--warning);
   background: var(--warning-dim);
+}
+
+/* ── Persistent Slot Badge (ticker kept visible across cycles) ── */
+.persistent-slot-badge {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  margin: 3px 0;
+  background: #1a2a3a;
+  border: 1px dashed var(--info);
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+.persistent-slot-badge .current-dir-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 700;
+}
+.current-dir-badge.long { background: var(--accent-dim); color: var(--accent); }
+.current-dir-badge.short { background: var(--danger-dim); color: var(--danger); }
+.current-dir-badge.neutral { background: var(--bg-hover); color: var(--text-muted); }
+
+.gate-status-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 6px;
+  font-size: 9px;
+  font-weight: 700;
+}
+.gate-status-badge.gate-passed {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+.gate-status-badge.gate-rejected {
+  background: var(--danger-dim);
+  color: var(--danger);
+}
+.persistent-price {
+  font-size: 10px;
+  color: var(--text);
+  font-weight: 600;
 }
 
 /* ── Take-Profit Banner ── */
@@ -312,6 +379,8 @@ header {
   font-weight: 500;
   margin-left: 4px;
 }
+.odte-badge { display: inline-block; padding: 2px 8px; border-radius: 8px; font-size: 10px; font-weight: 700; background: rgba(139, 92, 246, 0.2); color: #a78bfa; border: 1px solid rgba(139, 92, 246, 0.3); }
+
 .dq-indicator { display: inline-block; padding: 2px 8px; border-radius: 8px; font-size: 10px; font-weight: 600; }
 .dq-indicator.dq-ok { background: var(--accent-dim); color: var(--accent); }
 .dq-indicator.dq-warn { background: var(--warning-dim); color: var(--warning); }

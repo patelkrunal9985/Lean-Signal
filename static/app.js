@@ -35,6 +35,12 @@ function stateAge(ts) {
   return formatAge(age);
 }
 
+function formatSignalTime(epochSec) {
+  if (!epochSec || epochSec <= 0) return '—';
+  var d = new Date(epochSec * 1000);
+  return d.toLocaleDateString() + ' ' + d.toLocaleTimeString();
+}
+
 function formatBigNum(n) {
   if (!n || n === 0) return '0';
   var abs = Math.abs(n);
@@ -157,7 +163,27 @@ document.addEventListener('DOMContentLoaded', function() {
   // Data quality indicator
   loadDataQuality();
   setInterval(loadDataQuality, 30000);
+  // Load slot lifetime settings from server
+  loadSettings();
 });
+
+async function loadSettings() {
+  try {
+    var resp = await fetch('/api/settings');
+    if (!resp.ok) return;
+    var s = await resp.json();
+    var el = document.getElementById('settings-cooldown-active');
+    if (el && s.neutral_cooldown_active !== undefined) el.value = s.neutral_cooldown_active;
+    el = document.getElementById('settings-cooldown-confirmed');
+    if (el && s.neutral_cooldown_confirmed !== undefined) el.value = s.neutral_cooldown_confirmed;
+    el = document.getElementById('settings-cooldown-max');
+    if (el && s.neutral_cooldown_max !== undefined) el.value = s.neutral_cooldown_max;
+    el = document.getElementById('settings-sticky-counter');
+    if (el && s.sticky_counter_cycles !== undefined) el.value = s.sticky_counter_cycles;
+    el = document.getElementById('settings-odte-mode');
+    if (el && s.odte_mode !== undefined) el.checked = !!s.odte_mode;
+  } catch(e) { /* silent */ }
+}
 
 async function loadDataQuality() {
   try {
@@ -226,6 +252,20 @@ async function loadStatus() {
       console.error('Status fetch failed:', e);
     }
   }
+}
+
+function _updateOdteBadge() {
+  var odteEl = document.getElementById('odte-mode-badge');
+  var odteActive = document.getElementById('settings-odte-mode')?.checked || false;
+  if (!odteEl) {
+    // Create badge element once
+    odteEl = document.createElement('span');
+    odteEl.id = 'odte-mode-badge';
+    odteEl.className = 'odte-badge';
+    document.getElementById('summary-bar-extra')?.appendChild(odteEl);
+  }
+  odteEl.textContent = odteActive ? '🧪 0DTE Mode' : '';
+  odteEl.style.display = odteActive ? 'inline' : 'none';
 }
 
 function updateUI() {
@@ -310,6 +350,9 @@ function updateUI() {
       freshEl.className = 'freshness-badge ' + fresh.cls;
     }
   }
+
+  // Update ODTE mode badge
+  _updateOdteBadge();
 
   // Render current tab
   if (_currentTab === 'signals' && last && last.status === 'completed') {
@@ -491,6 +534,13 @@ function createSignalCard(signal, cycle, flips, flipPotentials, signalStates) {
         if (thisState.age_decay && thisState.age_decay < 1.0) {
           signalStateHtml += ' <span class="age-decay-badge">decaying (' + thisState.age_decay.toFixed(2) + ')</span>';
         }
+        // ── Signal generation time & entry price (active/confirmed states) ──
+        if (thisState.state_since > 0) {
+          var genTime = formatSignalTime(thisState.state_since);
+          var entryPx = thisState.state_entry_price || signal.entry_price || 0;
+          var priceStr = entryPx > 0 ? ' @ $' + entryPx.toFixed(2) : '';
+          signalStateHtml += ' <span class="generated-badge" title="Signal generated: ' + genTime + priceStr + '">📅 ' + genTime + priceStr + '</span>';
+        }
       }
 
   // ── Entry/Exit levels ──
@@ -589,6 +639,26 @@ function createSignalCard(signal, cycle, flips, flipPotentials, signalStates) {
     tpBannerHtml = '<div class="take-profit-banner sticky">⚠️ TAKE PROFIT — Signal Weakened (' + stickyTp.cyclesLeft + ' cycles ago)</div>';
   }
 
+  // ── Persistent slot badge (ticker kept visible across cycles) ──
+  var slotBadgeHtml = '';
+  var gateStatusHtml = '';
+  if (signal.persistent_slot) {
+    // Show update info: gate result + current cycle direction
+    var currentDir = signal.current_direction || 'neutral';
+    var currentDirArrow = currentDir === 'long' ? '▲' : currentDir === 'short' ? '▼' : '–';
+    var currentDirLabel = currentDir === 'long' ? 'BULL' : currentDir === 'short' ? 'BEAR' : 'NEUTRAL';
+    var gateLabel = signal.gate_passed ? 'PASSED' : 'REJECTED';
+    var gateCls = signal.gate_passed ? 'gate-passed' : 'gate-rejected';
+    var gateReason = signal.gate_reason && signal.gate_reason !== 'not_scanned' ? ' — ' + signal.gate_reason.replace(/_/g, ' ') : '';
+    var priceStr = signal.current_price > 0 ? ' $' + signal.current_price.toFixed(2) : '';
+    slotBadgeHtml = '<div class="persistent-slot-badge">' +
+      '<span>♻ Cycle update:</span>' +
+      ' <span class="current-dir-badge ' + currentDir + '">' + currentDirArrow + ' ' + currentDirLabel + '</span>' +
+      ' <span class="gate-status-badge ' + gateCls + '">Gate: ' + gateLabel + gateReason + '</span>' +
+      (priceStr ? ' <span class="persistent-price">Price:' + priceStr + '</span>' : '') +
+    '</div>';
+  }
+
   // ── Build card ──
     // Conviction meter + tier badge
     var convTier = (signal.consensus_meta && signal.consensus_meta.consensus_conviction_tier) || 'bronze';
@@ -664,6 +734,7 @@ function createSignalCard(signal, cycle, flips, flipPotentials, signalStates) {
         signalStateHtml + '</div>' +
       '<span class="direction-badge ' + dirClass + '">' + dirArrow + ' ' + signal.direction.toUpperCase() + '</span>' +
     '</div>' +
+    slotBadgeHtml +
     convictionHtml +
     healthHtml +
     fragileHtml +
@@ -840,6 +911,8 @@ function showSignalPopup(signal, cycle) {
   // State duration — O(1) lookup via by_ticker
   var popupState = document.getElementById('popup-state-duration');
   if (popupState) { popupState.style.display = 'none'; popupState.textContent = ''; }
+  var popupGenTime = document.getElementById('popup-generated-time');
+  var popupEntryPrice = document.getElementById('popup-entry-price');
   var foundState = false;
   var signalStates = cycle.signal_states || {};
   if (popupState && signalStates && signalStates.by_ticker) {
@@ -850,6 +923,17 @@ function showSignalPopup(signal, cycle) {
       popupState.className = 'state-badge ' + ts.state;
       popupState.style.display = 'inline-block';
       foundState = true;
+
+      // Populate generation time & entry price
+      if (popupGenTime) {
+        popupGenTime.textContent = formatSignalTime(ts.state_since);
+        popupGenTime.style.display = 'inline';
+      }
+      if (popupEntryPrice) {
+        var ep = ts.state_entry_price || signal.entry_price || 0;
+        popupEntryPrice.textContent = ep > 0 ? '$' + ep.toFixed(2) : '--';
+        popupEntryPrice.style.display = 'inline';
+      }
     }
   }
 
@@ -1080,7 +1164,30 @@ async function saveSettings() {
   var desktopNotify = document.getElementById('settings-desktop-notify').checked;
   localStorage.setItem('lean_signals_interval', interval);
   localStorage.setItem('lean_signals_desktop_notify', desktopNotify);
-  alert('Settings saved (refresh may be required for interval change)');
+
+  // Save signal slot lifetime settings to server (applies immediately, no restart)
+  var cooldownActive = document.getElementById('settings-cooldown-active')?.value;
+  var cooldownConfirmed = document.getElementById('settings-cooldown-confirmed')?.value;
+  var cooldownMax = document.getElementById('settings-cooldown-max')?.value;
+  var stickyCounter = document.getElementById('settings-sticky-counter')?.value;
+
+  try {
+    await fetch('/api/settings', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        neutral_cooldown_active: parseInt(cooldownActive) || 6,
+        neutral_cooldown_confirmed: parseInt(cooldownConfirmed) || 8,
+        neutral_cooldown_max: parseInt(cooldownMax) || 3,
+        sticky_counter_cycles: parseInt(stickyCounter) || 2,
+        odte_mode: document.getElementById('settings-odte-mode')?.checked || false,
+      }),
+    });
+    _updateOdteBadge();
+    alert('Settings saved (slot lifetime applies immediately, no restart needed)');
+  } catch(e) {
+    alert('Settings saved locally, but server save failed: ' + e.message);
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════

@@ -90,6 +90,47 @@
         </div>
         <button class="btn btn-primary" onclick="saveSettings()">Save</button>
         <hr style="margin:20px 0;border-color:var(--border)">
+        <h3>0DTE Mode <span class="tier-badge gold" style="font-size:10px;vertical-align:middle">NEW</span></h3>
+        <p style="font-size:12px;color:var(--text-muted);margin:4px 0 12px">
+          Filters option strategies to gamma/flow/dealer positioning only (skips theta_decay,
+          iv_rv_spread, earnings_vol_arbitrage, and other long-dated strategies).
+          Requires <strong>GOLD+ conviction tier</strong> for signals to pass — ensures only the
+          highest-confluence, multi-family signals surface for multi-hour 0DTE trades.
+          <a href="#" onclick="event.preventDefault();switchTab('cheatsheet')" style="color:var(--accent)">See Cheat Sheet</a> for details.
+        </p>
+        <div class="setting-row">
+          <label>
+            <span>🧪 0DTE Mode</span>
+            <span style="font-size:11px;color:var(--text-muted);margin-left:8px">Gamma/Flow/Dealer only + GOLD+ entry gate</span>
+          </label>
+          <label class="toggle-switch">
+            <input type="checkbox" id="settings-odte-mode">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <hr style="margin:20px 0;border-color:var(--border)">
+        <h3>Signal Slot Lifetime</h3>
+        <p style="font-size:12px;color:var(--text-muted);margin:4px 0 12px">
+          How many neutral cycles an ACTIVE/CONFIRMED signal survives before being removed.
+          Changes take effect immediately — no restart needed.
+        </p>
+        <div class="setting-row">
+          <label>ACTIVE neutrals before reset</label>
+          <input type="number" id="settings-cooldown-active" value="6" min="1" max="50">
+        </div>
+        <div class="setting-row">
+          <label>CONFIRMED neutrals before reset</label>
+          <input type="number" id="settings-cooldown-confirmed" value="8" min="1" max="50">
+        </div>
+        <div class="setting-row">
+          <label>Standard neutrals before reset</label>
+          <input type="number" id="settings-cooldown-max" value="3" min="1" max="20">
+        </div>
+        <div class="setting-row">
+          <label>Counter-direction cycles before downgrade</label>
+          <input type="number" id="settings-sticky-counter" value="2" min="1" max="10">
+        </div>
+        <hr style="margin:20px 0;border-color:var(--border)">
         <h3>Strategy Validation</h3>
         <p style="font-size:12px;color:var(--text-muted);margin:4px 0 12px">
           Runs all V2/V3 strategies, consensus, gate, tick engine, and pipeline
@@ -118,6 +159,8 @@
         <div class="popup-metric"><label>Regime</label><span id="popup-regime"></span></div>
         <div class="popup-metric"><label>Price</label><span id="popup-price"></span></div>
         <div class="popup-metric"><label>State</label><span id="popup-state-duration" class="state-badge"></span></div>
+        <div class="popup-metric"><label>Generated</label><span id="popup-generated-time" class="generated-time"></span></div>
+        <div class="popup-metric"><label>Entry Price</label><span id="popup-entry-price" class="level-entry"></span></div>
       </div>
       <div id="popup-session-meta" class="popup-session-meta" style="display:none">
         <span><strong>Window:</strong> <span id="popup-time-window">--</span></span>

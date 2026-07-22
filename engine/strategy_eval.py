@@ -22,6 +22,7 @@ from engine.signal_persistence import update_strategy_performance
 from engine.account_monitor import check_signal_blockers
 from engine.entry_exit import compute_entry_exit_levels
 from engine.strike_selector import recommend_strike
+from utils.settings_manager import get as get_setting, ODTE_STRATEGY_WHITELIST
 
 
 def evaluate_tickers(
@@ -69,6 +70,19 @@ def evaluate_tickers(
         v3_strategies: list = []
         if instr_type in ("stock", "future", "option"):
             v3_strategies = get_strategies(instr_type)
+            # ── [0DTE Mode] Filter to ODTE-relevant strategies only ──
+            if instr_type == "option" and get_setting("odte_mode", False):
+                original_count = len(v3_strategies)
+                v3_strategies = [
+                    s for s in v3_strategies
+                    if s.name in ODTE_STRATEGY_WHITELIST
+                ]
+                filtered_count = original_count - len(v3_strategies)
+                if filtered_count > 0:
+                    logger.info(
+                        "[0DTE Mode] %s: filtered %d/%d strategies (keeping %d ODTE-relevant)",
+                        ticker, filtered_count, original_count, len(v3_strategies),
+                    )
         logger.debug(
             "Cycle #%d: processing %s (%s) with %d V3 strategies",
             cycle_id, ticker, instr_type, len(v3_strategies),
@@ -144,6 +158,23 @@ def evaluate_tickers(
             regime=regime,
             consensus_meta=consensus_meta,
         )
+
+        # ── [0DTE Mode] GOLD+ conviction gate ──
+        # Only allow GOLD or PLATINUM tier signals to pass for 0DTE options.
+        # This ensures maximum confluence before taking a multi-hour position.
+        if (
+            gate_result.get("passed", False)
+            and instr_type == "option"
+            and get_setting("odte_mode", False)
+        ):
+            tier = consensus_meta.get("consensus_conviction_tier", "bronze")
+            if tier not in ("gold", "platinum"):
+                gate_result["passed"] = False
+                gate_result["reason"] = f"odte_mode_gold_required (tier={tier})"
+                logger.info(
+                    "[0DTE Mode] %s %s: blocked by GOLD+ gate (tier=%s)",
+                    ticker, direction, tier,
+                )
 
         # ── Account-based circuit breaker ──
         if gate_result.get("passed", False) and account_data:

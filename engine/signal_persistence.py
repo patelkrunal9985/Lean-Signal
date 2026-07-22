@@ -24,6 +24,7 @@ import threading
 from typing import Any
 
 from utils.logger import get_logger
+from utils.settings_manager import get as get_setting
 from pathlib import Path
 import json
 
@@ -56,6 +57,7 @@ def _autosave():
                 "consecutive_counter": dict(_consecutive_counter),
                 "last_flip_cycle": dict(_last_flip_cycle),
                 "pre_weakening_state": dict(_pre_weakening_state),
+                "state_entry_price": dict(_state_entry_price),
                 # Save last 2 snapshots per ticker (enough for health score after restart)
                 "signal_memory": {
                     t: mem[-2:] if len(mem) >= 2 else mem
@@ -86,6 +88,7 @@ def _autoload():
                 ("consecutive_counter", _consecutive_counter),
                 ("last_flip_cycle", _last_flip_cycle),
                 ("pre_weakening_state", _pre_weakening_state),
+                ("state_entry_price", _state_entry_price),
             ]:
                 if d in data and isinstance(data[d], dict):
                     target.update(data[d])
@@ -129,6 +132,7 @@ _active_direction: dict[str, str] = {}            # ticker → the direction we'
 _last_flip_cycle: dict[str, int] = {}             # ticker → cycle_id of last significant flip
 _take_profit_events: dict[str, list[dict]] = {}   # ticker → list of take-profit notifications
 _consecutive_counter: dict[str, int] = {}         # ticker → consecutive cycles in opposite direction (for sticky downgrade)
+_state_entry_price: dict[str, float] = {}      # ticker → price when current state was entered
 
 # ── Signal Health & Warning tracking ──
 _last_strong_cycle: dict[str, int] = {}             # ticker → last cycle_id where net_score > 0.4
@@ -143,6 +147,12 @@ _strategy_performance: dict[str, list[bool]] = {}  # strategy_name → [correct,
 _STRATEGY_PERF_MAX = 20  # Rolling window: keep last 20 predictions per strategy
 
 # ── Configuration ──
+# NOTE: NEUTRAL_COOLDOWN_*, STICKY_COUNTER_CYCLES, and SIGNAL_AGE_DECAY_*
+# constants are now loaded dynamically from utils.settings_manager so users
+# can adjust them from the dashboard Settings tab without restarting.
+# The module-level constants below are only used when the settings manager
+# hasn't been initialized (fallback to hardcoded values).
+
 MAX_MEMORY = 10                    # Keep last 10 cycle snapshots per ticker
 MIN_PENDING_CYCLES = 2             # Need 2 consecutive same-direction to upgrade watching→pending
 MIN_ACTIVE_CYCLES = 3              # Need 3 consecutive same-direction for pending→active
@@ -151,20 +161,32 @@ FLIP_SCORE_THRESHOLD = 0.60        # Only surface flips with score >= this
 MAX_FLIP_HISTORY = 20              # Max flip events to keep per ticker
 MAX_TAKE_PROFIT_EVENTS = 10        # Max take-profit events per ticker
 
-# ── Sticky signal thresholds ──
-# ACTIVE/CONFIRMED signals don't reset on a few neutral cycles.
-# They enter WEAKENING first, then only reset after sustained counter-evidence.
-NEUTRAL_COOLDOWN_MAX = 3           # Standard: after this many neutrals, reset to NONE
-NEUTRAL_COOLDOWN_ACTIVE = 6        # For ACTIVE signals: 6 neutrals before full reset
-NEUTRAL_COOLDOWN_CONFIRMED = 8     # For CONFIRMED signals: 8 neutrals before full reset
-STICKY_COUNTER_CYCLES = 2          # Need 2 consecutive counter-direction cycles to downgrade from ACTIVE/CONFIRMED
+# ── Sticky signal thresholds (loaded from settings_manager) ──
+# These are helper functions, not constants, so they reflect live setting changes.
+def _get_cooldown_active() -> int:
+    """Get ACTIVE signal neutral cooldown from settings (default 6)."""
+    return int(get_setting("neutral_cooldown_active", 6))
 
-# ── Signal age decay ──
-# Older signals (last confirmed 30+ min ago) get their confidence decayed.
-# decayed_score = score × max(0.5, 1.0 - (age_minutes / 60))
-SIGNAL_AGE_DECAY_START_MIN = 15    # Start decaying after 15 minutes
-SIGNAL_AGE_DECAY_HALF_MIN = 60     # 50% decay after 60 minutes
-SIGNAL_AGE_DECAY_FLOOR = 0.50      # Never decay below 50%
+def _get_cooldown_confirmed() -> int:
+    """Get CONFIRMED signal neutral cooldown from settings (default 8)."""
+    return int(get_setting("neutral_cooldown_confirmed", 8))
+
+def _get_cooldown_max() -> int:
+    """Get standard neutral cooldown from settings (default 3)."""
+    return int(get_setting("neutral_cooldown_max", 3))
+
+def _get_sticky_counter() -> int:
+    """Get counter-direction cycles before sticky downgrade from settings (default 2)."""
+    return int(get_setting("sticky_counter_cycles", 2))
+
+def _get_age_decay_start() -> float:
+    return float(get_setting("signal_age_decay_start_min", 15))
+
+def _get_age_decay_half() -> float:
+    return float(get_setting("signal_age_decay_half_min", 60))
+
+def _get_age_decay_floor() -> float:
+    return float(get_setting("signal_age_decay_floor", 0.50))
 
 
 def _get_prev_direction(ticker: str) -> str | None:
@@ -273,7 +295,7 @@ def _compute_state(direction: str, ticker: str) -> tuple[str, bool]:
     # ── Neutral cooldown logic (extended for sticky states) ──
     if direction == "neutral":
         if is_sticky:
-            cooldown_max = NEUTRAL_COOLDOWN_CONFIRMED if prev_state == "confirmed" else NEUTRAL_COOLDOWN_ACTIVE
+            cooldown_max = _get_cooldown_confirmed() if prev_state == "confirmed" else _get_cooldown_active()
             if neutral_streak >= cooldown_max:
                 return "none", True  # Significant: CONFIRMED → NONE after extended neutrals
             # Don't weaken on the first neutral — sticky signals survive one neutral
@@ -284,7 +306,7 @@ def _compute_state(direction: str, ticker: str) -> tuple[str, bool]:
             # 1st neutral: stay in current sticky state (stick!)
             return prev_state, False
         else:
-            if neutral_streak >= NEUTRAL_COOLDOWN_MAX:
+            if neutral_streak >= _get_cooldown_max():
                 return "none", False
             if prev_state != "none":
                 return "watching", False
@@ -294,7 +316,7 @@ def _compute_state(direction: str, ticker: str) -> tuple[str, bool]:
     if prev_dir and direction != prev_dir:
         if is_sticky:
             # Sticky: need 2+ counter-cycles to fully downgrade
-            if counter_streak >= STICKY_COUNTER_CYCLES:
+            if counter_streak >= _get_sticky_counter():
                 return "watching", True  # Significant: downgrade from sticky → watching
             # First counter-cycle → WEAKENING (fire take-profit)
             return "weakening", True  # Significant! Take-profit notification
@@ -332,6 +354,8 @@ def update(
     consensus_meta: dict,
     strategy_votes: list | None = None,
     cycle_id: int = 0,
+    current_price: float = 0.0,
+    instrument_type: str = "",
 ) -> dict | None:
     """Update signal state for a ticker with the latest cycle data.
 
@@ -343,12 +367,15 @@ def update(
         consensus_meta: Full consensus metadata dict
         strategy_votes: List of strategy vote dicts
         cycle_id: Current cycle number
+        current_price: Current price at this cycle (0 if unavailable)
+        instrument_type: 'stock', 'future', or 'option'
 
     Returns:
         Dict describing a significant flip event, or None if nothing noteworthy.
     """
     global _signal_memory, _signal_state, _state_since, _consecutive_same
     global _consecutive_neutral, _active_direction, _flip_history, _last_flip_cycle
+    global _state_entry_price
 
     with _lock:
         # Read previous direction from active_direction. If current state is 'none'
@@ -369,6 +396,7 @@ def update(
             "net_score": net_score,
             "cycle_id": cycle_id,
             "timestamp": time.time(),
+            "price": current_price,
             "state": None,  # filled below
             "families": consensus_meta.get("consensus_families", {}),
             "family_count": consensus_meta.get("consensus_family_count", 0),
@@ -378,6 +406,7 @@ def update(
             "active_votes": consensus_meta.get("consensus_active_votes", 0),
             "weighted_long": consensus_meta.get("consensus_weighted_long", 0),
             "weighted_short": consensus_meta.get("consensus_weighted_short", 0),
+            "instrument_type": instrument_type,
         }
         _signal_memory.setdefault(ticker, [])
         _signal_memory[ticker].append(snapshot)
@@ -414,6 +443,7 @@ def update(
             _state_since[ticker] = time.time()
             if new_state in ("pending", "active", "confirmed"):
                 _active_direction[ticker] = direction
+                _state_entry_price[ticker] = current_price
             elif new_state == "weakening":
                 # Keep the active direction — it's weakening, not flipped
                 if prev_direction and prev_direction != "neutral":
@@ -576,6 +606,8 @@ def get_ticker_state(ticker: str) -> dict:
             "trend": _get_trend_direction(mem) if len(mem) >= 3 else "flat",
             "age_decay": decay,
             "decayed_confidence": round(decayed_conf, 4),
+            "state_entry_price": _state_entry_price.get(ticker, 0),
+            "instrument_type": mem[-1].get("instrument_type", "") if mem else "",
         }
 
 
@@ -676,8 +708,8 @@ def get_signal_strength(ticker: str) -> float:
             # Apply age decay
             age_sec = time.time() - latest.get("timestamp", time.time())
             age_min = age_sec / 60.0
-            if age_min > SIGNAL_AGE_DECAY_START_MIN:
-                decay = max(SIGNAL_AGE_DECAY_FLOOR, 1.0 - (age_min / SIGNAL_AGE_DECAY_HALF_MIN))
+            if age_min > _get_age_decay_start():
+                decay = max(_get_age_decay_floor(), 1.0 - (age_min / _get_age_decay_half()))
                 latest_conf *= decay
         else:
             latest_conf = 0
@@ -698,9 +730,9 @@ def get_age_decayed_confidence(ticker: str) -> tuple[float, float]:
         conf = latest.get("confidence", 0)
         age_sec = time.time() - latest.get("timestamp", time.time())
         age_min = age_sec / 60.0
-        if age_min <= SIGNAL_AGE_DECAY_START_MIN:
+        if age_min <= _get_age_decay_start():
             return conf, 1.0
-        decay = max(SIGNAL_AGE_DECAY_FLOOR, 1.0 - (age_min / SIGNAL_AGE_DECAY_HALF_MIN))
+        decay = max(_get_age_decay_floor(), 1.0 - (age_min / _get_age_decay_half()))
         return conf * decay, round(decay, 2)
 
 
@@ -1044,6 +1076,7 @@ def reset():
         _consecutive_neutral.clear()
         _consecutive_counter.clear()
         _active_direction.clear()
+        _state_entry_price.clear()
         _last_flip_cycle.clear()
         _take_profit_events.clear()
         _strategy_performance.clear()

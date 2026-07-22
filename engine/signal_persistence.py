@@ -215,6 +215,18 @@ def _get_pnl_force_exit_atr() -> float:
 def _get_regime_invalidation_factor() -> float:
     return float(get_setting("regime_invalidation_factor", 0.60))
 
+def _get_velocity_spike_atr() -> float:
+    """ATR/cycle threshold for instant conviction crash (0.30x)."""
+    return float(get_setting("velocity_spike_atr", 0.8))
+
+def _get_velocity_penalty_atr() -> float:
+    """ATR/cycle threshold for heavy conviction penalty (0.55x)."""
+    return float(get_setting("velocity_penalty_atr", 0.4))
+
+def _get_velocity_building_max() -> float:
+    """Max conviction cap when velocity supports the new thesis direction."""
+    return float(get_setting("velocity_building_max", 0.70))
+
 def _get_age_decay_start() -> float:
     return float(get_setting("signal_age_decay_start_min", 15))
 
@@ -322,15 +334,27 @@ def _compute_conviction(
     current_price: float,
     cycle_id: int,
     regime: str = "",
+    atr: float = 0.0,
 ) -> float:
-    """Compute conviction 0.0-1.0 from edge remaining + building + PnL."""
+    """Compute conviction 0.0-1.0 from edge remaining + building + PnL + velocity."""
     prev_state = _signal_state.get(ticker, "none")
     has_thesis = prev_state in ("pending", "active", "confirmed", "weakening")
     prev_conviction = _conviction_score.get(ticker, 0.0)
     entry_price = _state_entry_price.get(ticker, 0)
 
+    # ── Velocity detection (ATR/cycle) ──
+    velocity_atr = 0.0
+    price_dir = 0.0
+    if atr > 0 and current_price > 0:
+        mem = _signal_memory.get(ticker, [])
+        if mem:
+            prev_price = mem[-1].get("price", 0)
+            if prev_price > 0:
+                price_dir = current_price - prev_price
+                velocity_atr = abs(price_dir) / max(atr, 0.01)
+
     if has_thesis and _entry_cycle.get(ticker) is not None:
-        # ── Active thesis: validate using edge, time, regime, PnL ──
+        # ── Active thesis: validate using edge, time, regime, PnL, velocity ──
         entry_strategies = _thesis_strategies.get(ticker, [])
         curr_votes = strategy_votes or []
         entry_dir = _active_direction.get(ticker, "long")
@@ -359,7 +383,6 @@ def _compute_conviction(
                     support_auth += weight * 0.3
             edge = (support_auth / total_auth) if total_auth > 0 else 0.5
         else:
-            # No strategy votes → use net_score as edge proxy
             if direction == "neutral":
                 edge = 0.3
             elif direction == entry_dir:
@@ -367,38 +390,44 @@ def _compute_conviction(
             else:
                 edge = 0.3
 
-        # Thesis maturity: conviction ramps up over first N cycles
         maturity = min((elapsed + 2) / 4.0, 1.0)
-
-        # Time decay
         horizon = _get_thesis_horizon()
         time_factor = max(0.3, 1.0 - (elapsed / horizon))
-
-        # Regime compatibility
         entry_reg = _entry_regime.get(ticker, "")
         regime_factor = _get_regime_invalidation_factor() if (entry_reg and regime and entry_reg != regime) else 1.0
 
-        # PnL efficiency
         pnl_factor = 0.5
         if entry_price > 0 and current_price > 0:
             dir_sign = 1.0 if entry_dir == "long" else -1.0
             pnl_pct = (current_price - entry_price) / entry_price * dir_sign
             pnl_factor = max(0.0, min(1.0, 0.5 + pnl_pct * 5.0))
 
-        # Blend
         conviction = edge * 0.50 + time_factor * 0.20 + regime_factor * 0.10 + pnl_factor * 0.20
         conviction *= maturity
 
-        # Direction conflict: if current vote opposes thesis, penalize hard
         if direction not in ("neutral", entry_dir):
             if prev_state == "weakening":
-                conviction *= 0.4  # sustained opposition → dropping
+                conviction *= 0.4
             else:
-                conviction *= 0.6  # first opposition → warning
+                conviction *= 0.6
         elif direction == "neutral" and prev_state == "weakening":
-            conviction *= 0.5  # sustained neutral while weakening → accelerate decay
+            conviction *= 0.5
 
-        conviction *= _get_conviction_decay()
+        # ── Velocity penalty (adverse = against thesis direction) ──
+        is_adverse = (entry_dir == "long" and price_dir < 0) or (entry_dir == "short" and price_dir > 0)
+        if velocity_atr > 0 and is_adverse:
+            spike = _get_velocity_spike_atr()
+            penalty = _get_velocity_penalty_atr()
+            if velocity_atr >= spike:
+                conviction *= 0.30
+            elif velocity_atr >= penalty:
+                conviction *= 0.55
+            extra_decay = min(velocity_atr * 0.12, 0.15)
+            conviction *= max(_get_conviction_decay() - extra_decay, 0.80)
+        else:
+            if velocity_atr >= _get_velocity_penalty_atr() and not is_adverse:
+                conviction = min(conviction * 1.05, 0.95)
+            conviction *= _get_conviction_decay()
 
         # PnL Guardian overrides
         if entry_price > 0 and current_price > 0:
@@ -412,16 +441,24 @@ def _compute_conviction(
             if price_move < -_get_pnl_force_exit_atr() / 100.0:
                 conviction = min(conviction, 0.05)
     else:
-        # ── No active thesis: build conviction with warmup ──
+        # ── No active thesis: build conviction with warmup + velocity boost ──
         net_mag = abs(net_score)
         diversity = 1.0
         if strategy_votes:
             families = set(s.get("family", "") for s in strategy_votes if s.get("family"))
             diversity = min(len(families) / 3.0, 1.0)
 
-        # Building factor: conviction ramps over first few cycles
         cycles_seen = len(_signal_memory.get(ticker, []))
         building_factor = min((cycles_seen + 2) / 5.0, 1.0)
+
+        # ── Velocity boost: if price surging in same direction as new thesis ──
+        velocity_supports = False
+        if velocity_atr > 0 and direction in ("long", "short"):
+            velocity_supports = (direction == "long" and price_dir > 0) or (direction == "short" and price_dir < 0)
+            if velocity_supports:
+                max_boost = _get_velocity_building_max() - 0.40
+                v_boost = min(velocity_atr * 0.25, max_boost)
+                building_factor = min(building_factor + v_boost, 1.0)
 
         base = net_mag * 0.8 * building_factor
         if direction == prev_direction and prev_direction not in (None, "neutral"):
@@ -430,7 +467,9 @@ def _compute_conviction(
             base = prev_conviction * 0.92
         elif prev_direction not in (None, "neutral"):
             base = prev_conviction * 0.5
-        conviction = min(base * diversity, 0.40)
+
+        max_conv = _get_velocity_building_max() if velocity_supports else 0.40
+        conviction = min(base * diversity, max_conv)
 
     conviction = max(0.0, min(1.0, conviction))
     old_peak = _conviction_peak.get(ticker, 0.0)
@@ -500,12 +539,13 @@ def update(
     current_price: float = 0.0,
     instrument_type: str = "",
     regime: str = "",
+    atr: float = 0.0,
 ) -> dict | None:
     """Update signal state for a ticker with the latest cycle data.
 
     Uses conviction scoring (0-1) instead of cycle counting to determine
     signal states. Conviction is computed from thesis validation, edge
-    remaining, PnL efficiency, regime compatibility, and time decay.
+    remaining, PnL efficiency, regime compatibility, time decay, and velocity.
 
     Args:
         ticker: Ticker symbol
@@ -518,6 +558,7 @@ def update(
         current_price: Current price at this cycle (0 if unavailable)
         instrument_type: 'stock', 'future', or 'option'
         regime: Current primary market regime
+        atr: ATR in price units (e.g. 15.0 for SPX) for velocity detection. 0 = skip.
 
     Returns:
         Dict describing a significant flip event, or None if nothing noteworthy.
@@ -540,7 +581,7 @@ def update(
         # ── Compute conviction ──
         conviction = _compute_conviction(
             ticker, direction, net_score, strategy_votes,
-            prev_direction, current_price, cycle_id, regime,
+            prev_direction, current_price, cycle_id, regime, atr,
         )
 
         # ── Update memory ──

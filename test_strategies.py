@@ -741,9 +741,109 @@ except Exception as e:
         "option_cooldown_active": 12, "option_cooldown_confirmed": 20,
         "option_cooldown_max": 6, "option_sticky_counter": 3,
     })
-    persist_reset()  # Clean up before health score tests
+    persist_reset()  # Clean up before velocity and health score tests
 
-# -- 14. Test Signal Health Score --
+# -- 14. Test Velocity Detection (ATR/cycle) --
+print('\n--- VELOCITY DETECTION ---')
+try:
+    # Test 1: Slow drift below penalty threshold → no velocity penalty
+    cm_v = {
+        "consensus_families": {"momentum": 0.5, "flow": 0.3},
+        "consensus_family_count": 2,
+        "consensus_agreement_cv": 0.3,
+        "consensus_threshold": 0.2,
+        "consensus_dominant_share": 0.5,
+        "consensus_active_votes": 3,
+        "consensus_weighted_long": 0.6,
+        "consensus_weighted_short": 0.2,
+        "consensus_net_score": 0.4,
+        "consensus_counter_trend": "no",
+        "consensus_conviction_tier": "silver",
+    }
+    # Build long thesis at stable price
+    for i in range(6):
+        persist_update("VELO_SLOW", "long", 0.7, 0.4, cm_v, cycle_id=i+1, current_price=5500, instrument_type="future")
+    ts = get_ticker_state("VELO_SLOW")
+    assert ts["state"] in ("active", "confirmed"), f"expected active/confirmed, got {ts['state']}"
+    pre_conv = ts["conviction"]
+
+    # Slow drift: $2/cycle, ATR=15 → 0.13 ATR/cycle (below 0.4 penalty threshold)
+    flip = persist_update("VELO_SLOW", "long", 0.65, 0.3, cm_v, cycle_id=7, current_price=5498, instrument_type="future", atr=15.0)
+    ts = get_ticker_state("VELO_SLOW")
+    # No velocity penalty — just normal decay (0.97)
+    expected = pre_conv * 0.97
+    assert ts["conviction"] >= expected * 0.95, f"slow drift: expected ~{expected:.4f}, got {ts['conviction']}"
+    results['passed'] += 1
+    print(f'   [OK] Slow drift (0.13 ATR/cycle): no velocity penalty, conv={ts["conviction"]:.4f}')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'Velocity.slow_drift', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Slow drift FAILED: {str(e)[:80]}')
+
+try:
+    # Test 2: Moderate adverse velocity > 0.4 ATR/cycle → heavy penalty (0.55x)
+    persist_reset()
+    for i in range(6):
+        persist_update("VELO_MOD", "long", 0.7, 0.4, cm_v, cycle_id=i+1, current_price=5500, instrument_type="future")
+    ts = get_ticker_state("VELO_MOD")
+    pre_conv = ts["conviction"]
+
+    # Drop $7/cycle, ATR=15 → 0.47 ATR/cycle (above 0.4 penalty threshold)
+    flip = persist_update("VELO_MOD", "long", 0.6, 0.2, cm_v, cycle_id=7, current_price=5493, instrument_type="future", atr=15.0)
+    ts = get_ticker_state("VELO_MOD")
+    # Should be below what normal decay would give (0.55x penalty applied)
+    no_penalty = pre_conv * 0.97
+    assert ts["conviction"] < no_penalty * 0.85, f"moderate velocity: expected heavy penalty, got {ts['conviction']} vs {no_penalty}"
+    results['passed'] += 1
+    print(f'   [OK] Moderate adverse velocity (0.47 ATR/cycle): heavy penalty applied, conv={ts["conviction"]:.4f}')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'Velocity.moderate', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Moderate velocity FAILED: {str(e)[:80]}')
+
+try:
+    # Test 3: High adverse velocity > 0.8 ATR/cycle → instant crash (0.30x)
+    persist_reset()
+    for i in range(6):
+        persist_update("VELO_HIGH", "long", 0.7, 0.4, cm_v, cycle_id=i+1, current_price=5500, instrument_type="future")
+    ts = get_ticker_state("VELO_HIGH")
+    pre_conv = ts["conviction"]
+
+    # Drop $13/cycle, ATR=15 → 0.87 ATR/cycle (above 0.8 spike threshold)
+    flip = persist_update("VELO_HIGH", "long", 0.5, 0.0, cm_v, cycle_id=7, current_price=5487, instrument_type="future", atr=15.0)
+    ts = get_ticker_state("VELO_HIGH")
+    # Should crash hard — well below moderate penalty level
+    assert ts["conviction"] < pre_conv * 0.40, f"high velocity: expected crash, got {ts['conviction']} (pre={pre_conv})"
+    results['passed'] += 1
+    print(f'   [OK] High adverse velocity (0.87 ATR/cycle): instant crash, conv={ts["conviction"]:.4f}')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'Velocity.high', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] High velocity FAILED: {str(e)[:80]}')
+
+try:
+    # Test 4: Velocity building boost — new thesis with supportive velocity
+    persist_reset()
+    # Cycle 1: first snapshot to have prev_price for velocity
+    persist_update("VELO_BOOST", "long", 0.5, 0.3, cm_v, cycle_id=1, current_price=5500, instrument_type="future", atr=15.0)
+    # Cycle 2: price jumps up $10 from 5500, ATR=15 → 0.67 ATR/cycle, supports long
+    persist_update("VELO_BOOST", "long", 0.7, 0.6, cm_v, cycle_id=2, current_price=5510, instrument_type="future", atr=15.0)
+    # Cycle 3: price continues up $8 from 5510, velocity maintains support, prev_direction now matches
+    persist_update("VELO_BOOST", "long", 0.75, 0.7, cm_v, cycle_id=3, current_price=5518, instrument_type="future", atr=15.0)
+    ts = get_ticker_state("VELO_BOOST")
+    # Building max cap should be above 0.40 thanks to velocity boost + direction match
+    assert ts["conviction"] > 0.40, f"velocity boost: expected cap above 0.40, got {ts['conviction']}"
+    assert ts["conviction"] <= 0.70, f"velocity boost: should not exceed velocity_building_max(0.70), got {ts['conviction']}"
+    results['passed'] += 1
+    print(f'   [OK] Velocity building boost: conviction={ts["conviction"]:.4f} (cap raised above 0.40)')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'Velocity.boost', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Velocity boost FAILED: {str(e)[:80]}')
+
+persist_reset()
+
+# -- 15. Test Signal Health Score --
 print('\n--- SIGNAL HEALTH SCORE ---')
 try:
     # Build a solid confirmed signal with tight agreement

@@ -70,6 +70,10 @@ _DEFAULTS: dict[str, Any] = {
     "pnl_profit_confirm_atr": 3.0,  # ATR profit → force confirmed (0.80)
     "pnl_force_exit_atr": 2.5,      # ATR drawdown → force exit
     "regime_invalidation_factor": 0.60,  # Regime change conviction penalty
+    # ── Velocity Detection (ATR/cycle thresholds) ──
+    "velocity_spike_atr": 0.8,      # ATR/cycle → instant conviction crash (0.30x)
+    "velocity_penalty_atr": 0.4,    # ATR/cycle → heavy penalty (0.55x)
+    "velocity_building_max": 0.70,  # Max conviction cap when velocity supports new thesis
     # Verdict scoring thresholds (level at which each verdict fires)
     "verdict_exit_threshold": -1,   # level ≤ this → EXIT
     "verdict_reduce_threshold": 0,  # level ≤ this → REDUCE

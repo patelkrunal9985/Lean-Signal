@@ -180,6 +180,12 @@ async function loadSettings() {
     if (el && s.thesis_horizon !== undefined) el.value = s.thesis_horizon;
     el = document.getElementById('settings-regime-invalidation-factor');
     if (el && s.regime_invalidation_factor !== undefined) el.value = s.regime_invalidation_factor;
+    el = document.getElementById('settings-velocity-spike-atr');
+    if (el && s.velocity_spike_atr !== undefined) el.value = s.velocity_spike_atr;
+    el = document.getElementById('settings-velocity-penalty-atr');
+    if (el && s.velocity_penalty_atr !== undefined) el.value = s.velocity_penalty_atr;
+    el = document.getElementById('settings-velocity-building-max');
+    if (el && s.velocity_building_max !== undefined) el.value = s.velocity_building_max;
     el = document.getElementById('settings-pnl-profit-floor-atr');
     if (el && s.pnl_profit_floor_atr !== undefined) el.value = s.pnl_profit_floor_atr;
     el = document.getElementById('settings-pnl-profit-confirm-atr');
@@ -1191,6 +1197,9 @@ async function saveSettings() {
   var pnlProfitFloorAtr = document.getElementById('settings-pnl-profit-floor-atr')?.value;
   var pnlProfitConfirmAtr = document.getElementById('settings-pnl-profit-confirm-atr')?.value;
   var pnlForceExitAtr = document.getElementById('settings-pnl-force-exit-atr')?.value;
+  var velocitySpikeAtr = document.getElementById('settings-velocity-spike-atr')?.value;
+  var velocityPenaltyAtr = document.getElementById('settings-velocity-penalty-atr')?.value;
+  var velocityBuildingMax = document.getElementById('settings-velocity-building-max')?.value;
   // Verdict thresholds
   var verdictExit = document.getElementById('settings-verdict-exit')?.value;
   var verdictReduce = document.getElementById('settings-verdict-reduce')?.value;
@@ -1210,6 +1219,9 @@ async function saveSettings() {
         pnl_profit_floor_atr: parseFloat(pnlProfitFloorAtr) ?? 2.0,
         pnl_profit_confirm_atr: parseFloat(pnlProfitConfirmAtr) ?? 3.0,
         pnl_force_exit_atr: parseFloat(pnlForceExitAtr) ?? 2.5,
+        velocity_spike_atr: parseFloat(velocitySpikeAtr) ?? 0.8,
+        velocity_penalty_atr: parseFloat(velocityPenaltyAtr) ?? 0.4,
+        velocity_building_max: parseFloat(velocityBuildingMax) ?? 0.70,
         odte_mode: document.getElementById('settings-odte-mode')?.checked || false,
         verdict_exit_threshold: parseInt(verdictExit) ?? -1,
         verdict_reduce_threshold: parseInt(verdictReduce) ?? 0,

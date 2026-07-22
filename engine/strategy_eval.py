@@ -205,6 +205,7 @@ def evaluate_tickers(
             "direction": direction,
             "current_price": data.get("current_price", 0),
             "ohlcv_len": len(data.get("ohlcv", [])),
+            "atr": atr,
             "consensus_confidence": round(conf, 4),
             "regime": regime.get("primary_regime", "unknown"),
             "gate_passed": gate_result.get("passed", False),

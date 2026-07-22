@@ -18,7 +18,7 @@ from engine.v3.gate import SignalQualityGate
 from engine.consensus_coordinator import compute_consensus
 from regime.detector import RegimeDetector
 from engine.subscription_manager import set_priority
-from engine.signal_persistence import update_strategy_performance
+from engine.signal_persistence import update_strategy_performance, evaluate_pending_predictions
 from engine.account_monitor import check_signal_blockers
 from engine.entry_exit import compute_entry_exit_levels
 from engine.strike_selector import recommend_strike
@@ -48,6 +48,14 @@ def evaluate_tickers(
 
     signals: list[dict] = []
     gate_evaluations: list[dict] = []
+
+    # ── Evaluate pending predictions from previous cycles ──
+    # This checks whether price moved as predicted, updating EWMA authority.
+    # Must happen BEFORE new strategies run to avoid feedback loop.
+    try:
+        evaluate_pending_predictions(ticker_data_map, cycle_id)
+    except Exception:
+        pass
 
     for ticker, data in ticker_data_map.items():
         # ── Watchdog: abort cycle if it's running too long ──
@@ -136,7 +144,9 @@ def evaluate_tickers(
         all_strategy_votes = v2_results + v3_results_raw
         set_priority(ticker, instr_type, int(conf * 100))
 
-        # ── Feed back strategy performance to dynamic authority tracker ──
+        # ── Record strategy predictions for outcome-based EWMA evaluation ──
+        # Predictions are evaluated in the NEXT cycle's evaluate_pending_predictions()
+        # against actual price movement (not consensus direction — no circularity).
         if direction != "neutral":
             for sv in all_strategy_votes:
                 try:
@@ -145,7 +155,10 @@ def evaluate_tickers(
                     sv_dir = sv.get("direction", "neutral")
                     sv_name = sv.get("name", sv.get("strategy", ""))
                     if sv_dir != "neutral" and sv_name:
-                        update_strategy_performance(sv_name, sv_dir, direction)
+                        update_strategy_performance(
+                            ticker, sv_name, sv_dir,
+                            data.get("current_price", 0), cycle_id,
+                        )
                 except Exception:
                     pass
 

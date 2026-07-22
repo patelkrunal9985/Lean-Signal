@@ -39,8 +39,53 @@ def get_country_setting(key, default=None):
 DEFAULT_TICKERS = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "TSLA", "AMZN"]
 
 
-def is_market_hours():
-    return True
+def is_market_hours(dt: datetime | None = None) -> bool:
+    """Check if US equity markets are currently open.
+
+    Handles:
+      - Weekends (Sat/Sun → closed)
+      - Weekdays before 9:30 AM ET → closed
+      - Weekdays after 4:00 PM ET → closed
+      - NYSE holidays → closed
+      - Early close days (1:00 PM ET) → closed after 1:00 PM
+
+    Args:
+        dt: datetime to check (defaults to now NY time)
+
+    Returns:
+        True if markets are open at the given time
+    """
+    try:
+        from datetime import timezone as tz
+        if dt is None:
+            import pytz
+            ny_tz = pytz.timezone("America/New_York")
+            from datetime import datetime as dt_now
+            dt = dt_now.now(ny_tz)
+        elif dt.tzinfo is None:
+            import pytz
+            ny_tz = pytz.timezone("America/New_York")
+            dt = dt.replace(tzinfo=ny_tz)
+
+        # Weekend check
+        if dt.weekday() >= 5:
+            return False
+
+        # Holiday check
+        if (dt.month, dt.day) in NYSE_HOLIDAYS_2026:
+            return False
+
+        # Time-of-day check
+        market_open = MARKET_OPEN  # 9:30
+        market_close = MARKET_CLOSE  # 16:00
+        early_close = EARLY_CLOSE_TIME  # 13:00
+
+        if (dt.month, dt.day) in EARLY_CLOSE_DATES:
+            return market_open <= dt.time() < early_close
+
+        return market_open <= dt.time() < market_close
+    except Exception:
+        return True  # Conservative: assume open on error
 
 
 MARKET_OPEN = time(9, 30)

@@ -80,6 +80,8 @@ def get_status() -> dict:
         option_health = get_option_health_events()[-10:]  # last 10
     except Exception:
         pass
+    from utils.config import is_market_hours
+    mh = is_market_hours()
     return {
         "cycle_in_progress": _cycle_in_progress,
         "cycle_count": _cycle_count,
@@ -89,6 +91,7 @@ def get_status() -> dict:
         "connection": get_connection_status(),
         "slot_usage": get_slot_summary(),
         "option_health": option_health,
+        "market_hours": mh,
     }
 
 

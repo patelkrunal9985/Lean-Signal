@@ -29,6 +29,9 @@ _DEFAULTS: dict[str, Any] = {
     "signal_age_decay_floor": 0.50,
     # 0DTE Mode — filters strategies to gamma/flow/dealer only for option signals
     "odte_mode": False,
+    # Closing pin — block new entries in last 30 minutes before close
+    # 0DTE traders may want this ON (quality) or OFF (last-minute scalps)
+    "block_entries_in_closing_pin": True,
 }
 
 # ── ODTE Strategy Whitelist ─────────────────────────────────────

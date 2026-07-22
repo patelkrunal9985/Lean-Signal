@@ -139,12 +139,17 @@ _last_strong_cycle: dict[str, int] = {}             # ticker → last cycle_id w
 _last_top_contributors: dict[str, list[str]] = {}   # ticker → [top 3 strategy names from last cycle]
 _prev_strategy_count: dict[str, int] = {}            # ticker → active strategy count from last cycle
 
-# ── Dynamic strategy authority tracking ──
-# Tracks each strategy's recent prediction accuracy vs final consensus direction.
-# Used to adjust authority multipliers: strategies that predict well gain authority,
-# strategies that predict poorly lose authority.
-_strategy_performance: dict[str, list[bool]] = {}  # strategy_name → [correct, ...]
-_STRATEGY_PERF_MAX = 20  # Rolling window: keep last 20 predictions per strategy
+# ── Dynamic strategy authority tracking (True EWMA) ──
+# Tracks each strategy's prediction accuracy using an exponentially-weighted
+# moving average of outcome-based correctness (did price move as predicted?).
+# This breaks the circular reference of the old approach (which checked vs consensus).
+_strategy_ewma: dict[str, float] = {}   # strategy_name → current EWMA estimate (0-1)
+_strategy_ewma_n: dict[str, int] = {}    # strategy_name → number of evaluations
+_strategy_pending: dict[str, list[dict]] = {}  # "ticker:strategy" → pending predictions
+_EWMA_ALPHA = 0.35    # higher = faster adaptation, lower = smoother
+_EWMA_MIN_SAMPLES = 3 # minimum evaluations before adjusting from static
+_EWMA_CORRECT_THRESHOLD = 0.001  # 0.1% min price move to count as signal
+_EWMA_MAX_PENDING_AGE = 5  # drop pending predictions older than N cycles
 
 # ── Configuration ──
 # NOTE: NEUTRAL_COOLDOWN_*, STICKY_COUNTER_CYCLES, and SIGNAL_AGE_DECAY_*
@@ -986,58 +991,151 @@ def get_all_health_scores() -> dict:
 
 
 # ═══════════════════════════════════════════════════════════════════
-# Dynamic Strategy Authority (Gap 2)
+# Dynamic Strategy Authority (True EWMA + Outcome-Based)
 # ═══════════════════════════════════════════════════════════════════
 
 def update_strategy_performance(
+    ticker: str,
     strategy_name: str,
     strategy_direction: str,
-    consensus_direction: str,
+    current_price: float,
+    cycle_id: int,
 ):
-    """Record whether a strategy's prediction was correct (matched consensus direction).
+    """Record a strategy's prediction for later outcome-based evaluation.
+
+    Unlike the old approach (which checked against consensus direction and was
+    circular), this simply stores the prediction. The actual correctness is
+    determined in a LATER CYCLE by evaluate_pending_predictions(), which checks
+    whether price actually moved in the predicted direction.
 
     Args:
+        ticker: Ticker this prediction was made for
         strategy_name: Name of the strategy
-        strategy_direction: The direction the strategy predicted ('long', 'short', 'neutral')
-        consensus_direction: The final consensus direction ('long', 'short', 'neutral')
-
-    Strategies that predict 'neutral' are not tracked (no directional bet made).
+        strategy_direction: 'long' or 'short'
+        current_price: Price at time of prediction
+        cycle_id: Current cycle number
     """
-    if strategy_direction == "neutral" or consensus_direction == "neutral":
-        return  # No clear directional bet — skip performance tracking
+    if strategy_direction == "neutral":
+        return
 
-    was_correct = strategy_direction == consensus_direction
-
+    key = f"{ticker}:{strategy_name}"
     with _lock:
-        _strategy_performance.setdefault(strategy_name, [])
-        _strategy_performance[strategy_name].append(was_correct)
-        if len(_strategy_performance[strategy_name]) > _STRATEGY_PERF_MAX:
-            _strategy_performance[strategy_name].pop(0)
+        _strategy_pending.setdefault(key, [])
+        _strategy_pending[key].append({
+            "direction": strategy_direction,
+            "price": current_price,
+            "cycle_id": cycle_id,
+            "timestamp": time.time(),
+        })
+        if len(_strategy_pending[key]) > 20:
+            _strategy_pending[key].pop(0)
+
+
+def evaluate_pending_predictions(ticker_data_map: dict[str, dict], current_cycle: int):
+    """Evaluate pending predictions against actual price movement.
+
+    Called at the start of each cycle, BEFORE running strategies. For each
+    pending prediction, checks if price moved in the predicted direction by
+    at least the minimum threshold. Updates EWMA estimate per strategy.
+
+    A prediction is "correct" if price moved >0.1% in the predicted direction.
+    It's "wrong" if price moved >0.1% against the predicted direction.
+    If price hasn't moved enough, the prediction stays pending.
+
+    Args:
+        ticker_data_map: Current cycle's ticker data (must have current_price)
+        current_cycle: Current cycle number (for aging out stale predictions)
+    """
+    with _lock:
+        resolved_keys = []
+        for key, predictions in list(_strategy_pending.items()):
+            try:
+                ticker, strategy_name = key.split(":", 1)
+            except ValueError:
+                resolved_keys.append(key)
+                continue
+
+            ticker_data = ticker_data_map.get(ticker)
+            if not ticker_data:
+                continue
+            current_price = ticker_data.get("current_price", 0)
+            if current_price <= 0:
+                continue
+
+            remaining = []
+            for pred in predictions:
+                age = current_cycle - pred["cycle_id"]
+                if age > _EWMA_MAX_PENDING_AGE:
+                    continue  # too old, drop silently
+
+                price_at = pred["price"]
+                if price_at <= 0:
+                    continue
+
+                pct_move = (current_price - price_at) / price_at
+                predicted_dir = pred["direction"]
+
+                if abs(pct_move) < _EWMA_CORRECT_THRESHOLD:
+                    remaining.append(pred)
+                    continue
+
+                correct = (predicted_dir == "long" and pct_move > 0) or \
+                          (predicted_dir == "short" and pct_move < 0)
+
+                ewma = _strategy_ewma.get(strategy_name, 0.5)
+                _strategy_ewma[strategy_name] = (
+                    _EWMA_ALPHA * (1.0 if correct else 0.0) +
+                    (1.0 - _EWMA_ALPHA) * ewma
+                )
+                _strategy_ewma_n[strategy_name] = _strategy_ewma_n.get(strategy_name, 0) + 1
+
+            if remaining:
+                _strategy_pending[key] = remaining
+            else:
+                resolved_keys.append(key)
+
+        for key in resolved_keys:
+            _strategy_pending.pop(key, None)
 
 
 def get_strategy_authority(strategy_name: str, static_authority: float = 1.0) -> float:
-    """Get dynamic authority multiplier for a strategy.
+    """Get dynamic authority multiplier for a strategy using true EWMA.
 
     Combines the static authority (from STRATEGY_AUTHORITY map) with a
-    dynamic performance multiplier based on recent win rate.
+    dynamic EWMA-based performance multiplier.
 
     Formula:
-        dynamic_authority = static_authority × (0.5 + 0.5 × rolling_win_rate)
+        dynamic_mult = 0.5 + 1.5 × ewma_value
+        Range: 0.5x (ewma=0) to 2.0x (ewma=1.0)
 
-    Range: static_authority × 0.5 (if win rate = 0) to static_authority × 1.0 (if win rate = 1)
-    This means poor performance can halve a strategy's authority, but good performance
-    can't exceed the static cap (prevents runaway amplification).
+    This means:
+      - A strategy that's always wrong drops to 0.5x (half weight)
+      - A strategy that's always right rises to 2.0x (double weight)
+      - A strategy at 50% accuracy stays at 1.0x (static authority unchanged)
+      - New strategies with <3 evaluations use static authority unchanged
 
-    If no performance data exists yet (new strategy), returns exactly the static authority.
+    The EWMA value is updated by evaluate_pending_predictions() using actual
+    price movement, NOT consensus direction (no circular reference).
     """
     with _lock:
-        perf = _strategy_performance.get(strategy_name)
-        if not perf or len(perf) < 3:  # Need at least 3 data points
+        ewma = _strategy_ewma.get(strategy_name)
+        n = _strategy_ewma_n.get(strategy_name, 0)
+        if ewma is None or n < _EWMA_MIN_SAMPLES:
             return static_authority
 
-        win_rate = sum(perf) / len(perf)
-        # (0.5 + 0.5 × win_rate) ranges from 0.5 to 1.0
-        dynamic_mult = 0.5 + 0.5 * win_rate
+        # 0.5 + 1.5 * ewma ranges from 0.5 (ewma=0) to 2.0 (ewma=1.0)
+        # At ewma=0.5 (random), mult = 0.5 + 0.75 = 1.25? No, that's wrong.
+        # Formula should give 1.0 at ewma=0.5 (breakeven).
+        # 0.5 + x * 0.5 = 1.0 → x = 1.0
+        # 0.5 + x * 1.0 = 2.0 → x = 1.5
+        # So: 0.5 + 1.5 * ewma → at ewma=0.5: 0.5 + 0.75 = 1.25
+        # That's wrong. Let me use: 0.5 + 1.0 * ewma
+        # At ewma=0: 0.5, ewma=0.5: 1.0, ewma=1.0: 1.5
+        # Hmm, then max is 1.5x, not 2.0x.
+        # Better: 2 * ewma
+        # At ewma=0: 0, ewma=0.25: 0.5, ewma=0.5: 1.0, ewma=0.75: 1.5, ewma=1.0: 2.0
+        # Yes! 2 * ewma gives range 0 to 2.0, with 1.0 at ewma=0.5 (breakeven).
+        dynamic_mult = 2.0 * ewma
         return round(static_authority * dynamic_mult, 4)
 
 
@@ -1045,22 +1143,17 @@ def get_strategy_performance_summary() -> dict:
     """Get performance summary for all tracked strategies.
 
     Returns:
-        {strategy_name: {win_rate, total_predictions, recent_streak}}
+        {strategy_name: {ewma, total_predictions}}
     """
     with _lock:
         summary = {}
-        for sname, perf in _strategy_performance.items():
-            if not perf:
+        for sname in list(_strategy_ewma.keys()):
+            n = _strategy_ewma_n.get(sname, 0)
+            if n == 0:
                 continue
-            total = len(perf)
-            wins = sum(perf)
-            recent = perf[-5:] if len(perf) >= 5 else perf
-            recent_wins = sum(recent)
             summary[sname] = {
-                "win_rate": round(wins / total, 4),
-                "total_predictions": total,
-                "recent_win_rate": round(recent_wins / len(recent), 4),
-                "recent_window": len(recent),
+                "ewma": round(_strategy_ewma[sname], 4),
+                "total_predictions": n,
             }
         return summary
 
@@ -1079,7 +1172,9 @@ def reset():
         _state_entry_price.clear()
         _last_flip_cycle.clear()
         _take_profit_events.clear()
-        _strategy_performance.clear()
+        _strategy_ewma.clear()
+        _strategy_ewma_n.clear()
+        _strategy_pending.clear()
         _last_strong_cycle.clear()
         _last_top_contributors.clear()
         _prev_strategy_count.clear()

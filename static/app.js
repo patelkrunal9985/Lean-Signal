@@ -280,6 +280,18 @@ function updateUI() {
     ibkrEl.className = 'status-badge disconnected';
   }
 
+  // ── Market hours ──
+  var mhEl = document.getElementById('market-hours-badge');
+  if (!mhEl) {
+    mhEl = document.createElement('span');
+    mhEl.id = 'market-hours-badge';
+    mhEl.className = 'status-badge';
+    document.getElementById('summary-bar-extra')?.prepend(mhEl);
+  }
+  var marketOpen = _status.market_hours;
+  mhEl.textContent = marketOpen ? 'Market Open' : 'Market Closed';
+  mhEl.className = 'status-badge ' + (marketOpen ? 'connected' : 'disconnected');
+
   // ── Cycle state ──
   var cycleEl = document.getElementById('cycle-status');
   if (_status.cycle_in_progress) {

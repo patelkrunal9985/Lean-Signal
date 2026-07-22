@@ -403,7 +403,7 @@ def compute_option_metrics(ticker: str, underlying_price: float, ticker_data_map
         ticker, pc_ratio, atm_iv, gamma_flip, charm_direction,
         total_contracts, with_volume, with_oi, with_iv, with_greeks, with_bidask,
     )
-    return {
+    result = {
         "ticker": f"{ticker}_OPT",
         "instrument_type": "option",
         "underlying": ticker,
@@ -446,3 +446,24 @@ def compute_option_metrics(ticker: str, underlying_price: float, ticker_data_map
         "data_source": "ibkr",
         "data_quality": data_quality,
     }
+
+    # ── 0DTE-specific metric aliases ──
+    # When DTE=0, the nearest-expiry chain IS the 0DTE chain.
+    # These aliases let strategies and dashboard explicitly reference
+    # 0DTE metrics without ambiguity (vs future monthly metrics).
+    if dte == 0:
+        result["odte"] = True
+        result["odte_dte"] = 0
+        result["odte_gamma_flip"] = gamma_flip
+        result["odte_gamma_walls"] = gamma_walls
+        result["odte_total_vanna"] = round(total_vanna, 2)
+        result["odte_total_charm"] = round(total_charm, 2)
+        result["odte_charm_direction"] = charm_direction
+        result["odte_charm_magnitude"] = round(charm_magnitude, 6)
+        result["odte_pc_ratio"] = pc_ratio
+        result["odte_atm_iv"] = atm_iv
+        result["odte_atm_straddle"] = atm_straddle_price
+    else:
+        result["odte"] = False
+
+    return result

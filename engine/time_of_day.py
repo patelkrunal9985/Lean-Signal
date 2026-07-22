@@ -242,9 +242,15 @@ def can_enter_new_trade(
     """
     window = get_time_window()
 
-    # Always block in closing_pin for 0DTE
-    if dte == 0 and BLOCK_NEW_ENTRIES_IN_CLOSING:
-        if window == "closing_pin":
+    # Block in closing_pin for 0DTE (configurable via settings)
+    # Quality-focused traders keep this ON; scalpers may turn it OFF.
+    if dte == 0:
+        try:
+            from utils.settings_manager import get as get_setting
+            block_closing = get_setting("block_entries_in_closing_pin", True)
+        except Exception:
+            block_closing = True
+        if block_closing and window == "closing_pin":
             return False, "blocked_closing_pin_0dte"
 
     # Cash-session instruments: block within N minutes of close.

@@ -1,8 +1,10 @@
 """
 Futures-specific data computations: intraday VWAP, cumulative delta,
-volume profile (POC/VAH/VAL), and Globex session range.
+volume profile (POC/VAH/VAL), Globex session range, and tick cluster analysis.
 All IBKR-only — returns empty data on disconnect.
 """
+
+from collections import Counter
 
 
 def compute_intraday_vwap(candles_1m: list) -> dict:
@@ -213,6 +215,117 @@ def get_globex_range(ticker: str) -> dict:
         }
     except Exception:
         return {}
+
+
+def compute_tick_clusters(tick_buffer: list) -> dict:
+    """Build tick cluster data for order_flow_burst and iceberg_detection strategies.
+
+    Analyzes the tick buffer (signed trades) to detect:
+    - Price levels with concentrated volume (tick clusters)
+    - Acceleration in tick arrival rate
+    - Large prints (unusually large trades)
+    - Iceberg order patterns (size repetition at same price)
+
+    Returns a dict with cluster/acceleration/iceberg data, or empty dict if no ticks.
+    """
+    if not tick_buffer or len(tick_buffer) < 5:
+        return {}
+
+    # ── Price clustering: group ticks by price level (rounded to 0.5 increments) ──
+    price_clusters = Counter()
+    volume_by_price = {}
+    for t in tick_buffer:
+        price = t.get("price", 0)
+        if price <= 0:
+            continue
+        rounded = round(price * 2) / 2.0  # round to nearest 0.5
+        size = abs(t.get("size", 0))
+        price_clusters[rounded] += 1
+        volume_by_price[rounded] = volume_by_price.get(rounded, 0) + size
+
+    if not price_clusters:
+        return {}
+
+    # ── Acceleration: compare tick rate in first half vs second half of buffer ──
+    half = len(tick_buffer) // 2
+    first_half = tick_buffer[:half]
+    second_half = tick_buffer[half:]
+
+    first_times = [t.get("time", 0) for t in first_half if t.get("time", 0) > 0]
+    second_times = [t.get("time", 0) for t in second_half if t.get("time", 0) > 0]
+
+    accel = 0.0
+    accel_up = False
+    accel_down = False
+    if len(first_times) >= 2 and len(second_times) >= 2:
+        first_duration = first_times[-1] - first_times[0]
+        second_duration = second_times[-1] - second_times[0]
+        first_rate = len(first_times) / max(first_duration, 0.001)
+        second_rate = len(second_times) / max(second_duration, 0.001)
+        if first_rate > 0:
+            accel = (second_rate - first_rate) / first_rate
+            accel_up = accel > 0.2
+            accel_down = accel < -0.2
+
+    # ── Large prints: trades > 2x average trade size ──
+    sizes = [abs(t.get("size", 0)) for t in tick_buffer if t.get("size", 0) > 0]
+    avg_size = sum(sizes) / max(len(sizes), 1) if sizes else 0
+    large_threshold = avg_size * 2.0
+
+    large_buy_prints = []
+    large_sell_prints = []
+    for t in tick_buffer:
+        size = abs(t.get("size", 0))
+        if size >= large_threshold and t.get("sign") == "buy":
+            large_buy_prints.append({"price": t.get("price", 0), "size": size})
+        elif size >= large_threshold and t.get("sign") == "sell":
+            large_sell_prints.append({"price": t.get("price", 0), "size": size})
+
+    # ── Iceberg detection: same price, similar size repeated ──
+    icebergs = []
+    price_size_map = {}
+    for t in tick_buffer:
+        price = t.get("price", 0)
+        size = abs(t.get("size", 0))
+        if price <= 0:
+            continue
+        if price not in price_size_map:
+            price_size_map[price] = []
+        price_size_map[price].append(size)
+    for price, sz_list in price_size_map.items():
+        if len(sz_list) >= 3:
+            size_counter = Counter(sz_list)
+            most_common_size = size_counter.most_common(1)[0]
+            if most_common_size[1] >= 3:
+                icebergs.append({
+                    "price": price,
+                    "size": most_common_size[0],
+                    "count": most_common_size[1],
+                    "is_buying": any(
+                        t.get("sign") == "buy" for t in tick_buffer
+                        if t.get("price", 0) == price
+                    ),
+                })
+
+    return {
+        "tick_count": len(tick_buffer),
+        "acceleration": {
+            "acceleration": round(accel, 4),
+            "accelerating_up": accel_up,
+            "accelerating_down": accel_down,
+            "first_half_rate": round(first_rate, 2) if len(first_times) >= 2 else 0,
+            "second_half_rate": round(second_rate, 2) if len(second_times) >= 2 else 0,
+        },
+        "large_prints": [
+            {"large_buy_prints": large_buy_prints},
+            {"large_sell_prints": large_sell_prints},
+        ] if large_buy_prints or large_sell_prints else [],
+        "icebergs": icebergs,
+        "price_clusters": {
+            str(price): {"count": count, "volume": volume_by_price.get(price, 0)}
+            for price, count in price_clusters.most_common(10)
+        },
+    }
 
 
 _RTH_OPEN_TIMES = {

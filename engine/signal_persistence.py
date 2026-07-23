@@ -68,7 +68,7 @@ def _autosave():
         with open(_STATE_FILE, "w") as f:
             json.dump(data, f, indent=2, default=str)
     except Exception as e:
-        logger.debug("Signal state autosave failed (non-critical): %s", e)
+        logger.warning("Signal state autosave failed (non-critical): %s", e)
 
 
 def _autoload():
@@ -205,6 +205,9 @@ def _get_thesis_horizon(instr_type: str = "") -> int:
 
 def _get_pnl_profit_floor_atr() -> float:
     return float(get_setting("pnl_profit_floor_atr", 2.0))
+
+def _get_pnl_profit_mid_atr() -> float:
+    return float(get_setting("pnl_profit_mid_atr", 1.5))
 
 def _get_pnl_profit_confirm_atr() -> float:
     return float(get_setting("pnl_profit_confirm_atr", 3.0))
@@ -391,7 +394,7 @@ def _compute_conviction(
                 edge = 0.3
 
         maturity = min((elapsed + 2) / 4.0, 1.0)
-        horizon = _get_thesis_horizon()
+        horizon = max(_get_thesis_horizon(), 1)
         time_factor = max(0.3, 1.0 - (elapsed / horizon))
         entry_reg = _entry_regime.get(ticker, "")
         regime_factor = _get_regime_invalidation_factor() if (entry_reg and regime and entry_reg != regime) else 1.0
@@ -429,16 +432,29 @@ def _compute_conviction(
                 conviction = min(conviction * 1.05, 0.95)
             conviction *= _get_conviction_decay()
 
-        # PnL Guardian overrides
+        # PnL Guardian overrides (ATR-distance, not percentage)
         if entry_price > 0 and current_price > 0:
-            price_move = (current_price - entry_price) / entry_price
+            if atr > 0:
+                atr_dist = (current_price - entry_price) / max(atr, 0.01)
+                confirm_th = _get_pnl_profit_confirm_atr()
+                floor_th = _get_pnl_profit_floor_atr()
+                mid_th = _get_pnl_profit_mid_atr()
+                exit_th = _get_pnl_force_exit_atr()
+            else:
+                atr_dist = (current_price - entry_price) / entry_price
+                confirm_th = _get_pnl_profit_confirm_atr() / 100.0
+                floor_th = _get_pnl_profit_floor_atr() / 100.0
+                mid_th = _get_pnl_profit_mid_atr() / 100.0
+                exit_th = _get_pnl_force_exit_atr() / 100.0
             if direction == "short":
-                price_move = -price_move
-            if price_move > _get_pnl_profit_confirm_atr() / 100.0:
+                atr_dist = -atr_dist
+            if atr_dist > confirm_th:
                 conviction = max(conviction, 0.80)
-            elif price_move > _get_pnl_profit_floor_atr() / 100.0:
+            elif atr_dist > floor_th:
                 conviction = max(conviction, 0.20)
-            if price_move < -_get_pnl_force_exit_atr() / 100.0:
+            elif atr_dist > mid_th:
+                conviction = max(conviction, 0.15)
+            if atr_dist < -exit_th:
                 conviction = min(conviction, 0.05)
     else:
         # ── No active thesis: build conviction with warmup + velocity boost ──
@@ -476,6 +492,9 @@ def _compute_conviction(
     if conviction >= old_peak:
         _conviction_peak[ticker] = conviction
         _conviction_weakening_counter[ticker] = 0
+    else:
+        erosion = 0.02
+        _conviction_peak[ticker] = max(conviction, old_peak - erosion)
     _conviction_score[ticker] = conviction
     return conviction
 
@@ -490,11 +509,10 @@ def _compute_state(
     Returns (new_state, significant_transition).
 
     Strengthening → escalates through: watching → pending → active → confirmed
-    Weakening → catches via: drop from peak > 0.20 triggers weakening state
+    Weakening → catches via: drop from peak > 0.15 triggers weakening state
     Death → conviction < 0.10 → none
     """
     prev_state = _signal_state.get(ticker, "none")
-    prev_dir = _active_direction.get(ticker)
 
     # ── Threshold-based state selection ──
     if conviction >= 0.70:
@@ -512,16 +530,12 @@ def _compute_state(
     if prev_state in ("active", "confirmed", "weakening"):
         peak = _conviction_peak.get(ticker, conviction)
         if peak - conviction >= 0.15 and new_state != "confirmed":
-            if prev_state in ("active", "confirmed"):
-                new_state = "weakening"  # enter weakening
-            elif conviction >= 0.10:
-                new_state = "weakening"  # stay in weakening (not yet decayed)
+            if conviction >= 0.10:
+                new_state = "weakening"  # enter or stay in weakening
             # else conviction < 0.10 → let threshold give "none"
 
     # ── Significant transition detection ──
     significant = new_state != prev_state
-    if significant and new_state in ("weakening", "none") and prev_state in ("active", "confirmed"):
-        significant = True
     if new_state == "pending" and prev_state in ("watching", "none"):
         significant = True
 
@@ -569,6 +583,11 @@ def update(
     global _conviction_weakening_counter
 
     with _lock:
+        # ── Direction input normalization ──
+        direction = direction.strip().lower() if direction else "neutral"
+        if direction not in ("long", "short", "neutral"):
+            direction = "neutral"
+
         # ── Determine previous direction ──
         current_state = _signal_state.get(ticker, "none")
         if current_state == "none" or _active_direction.get(ticker) is None:
@@ -598,6 +617,7 @@ def update(
             "agreement_cv": consensus_meta.get("consensus_agreement_cv", 0.5),
             "threshold": consensus_meta.get("consensus_threshold", 0.2),
             "dominant_share": consensus_meta.get("consensus_dominant_share", 0.0),
+            "counter_trend": consensus_meta.get("consensus_counter_trend", "no"),
             "active_votes": consensus_meta.get("consensus_active_votes", 0),
             "weighted_long": consensus_meta.get("consensus_weighted_long", 0),
             "weighted_short": consensus_meta.get("consensus_weighted_short", 0),
@@ -617,13 +637,13 @@ def update(
         if new_state != old_state:
             _signal_state[ticker] = new_state
             _state_since[ticker] = time.time()
-            was_thesis = old_state in ("pending", "active", "confirmed")
+            was_thesis = old_state in ("pending", "active", "confirmed", "weakening")
 
             if new_state in ("pending", "active", "confirmed"):
                 _active_direction[ticker] = direction
-                _state_entry_price[ticker] = current_price
                 # Snapshot thesis on entry (first time entering thesis state)
                 if not was_thesis:
+                    _state_entry_price[ticker] = current_price
                     _thesis_strategies[ticker] = list(strategy_votes or [])
                     _entry_cycle[ticker] = cycle_id
                     _entry_regime[ticker] = regime
@@ -646,35 +666,41 @@ def update(
                 _entry_regime.pop(ticker, None)
                 _conviction_peak.pop(ticker, None)
                 _conviction_weakening_counter.pop(ticker, None)
-                _conviction_score.pop(ticker, None)
+                # Keep last 2 memory snapshots for trend continuity on re-entry
+                if len(_signal_memory.get(ticker, [])) > 2:
+                    _signal_memory[ticker] = _signal_memory[ticker][-2:]
 
                 logger.info(
                     "%s: THESIS EXIT — prev_state=%s prev_dir=%s",
                     ticker, old_state, prev_direction,
                 )
 
-            # ── Take-profit event on weakening ──
+            # ── Take-profit event on weakening (with dedup) ──
             if old_state in ("active", "confirmed") and new_state == "weakening":
-                tp_event = {
-                    "ticker": ticker,
-                    "type": "take_profit",
-                    "from_state": old_state,
-                    "to_state": new_state,
-                    "direction": _active_direction.get(ticker, "neutral"),
-                    "reason": _build_take_profit_reason(direction, old_state),
-                    "cycle_id": cycle_id,
-                    "timestamp": time.time(),
-                    "confidence": confidence,
-                    "conviction": round(conviction, 4),
-                }
-                _take_profit_events.setdefault(ticker, [])
-                _take_profit_events[ticker].append(tp_event)
-                if len(_take_profit_events[ticker]) > MAX_TAKE_PROFIT_EVENTS:
-                    _take_profit_events[ticker].pop(0)
-                logger.info(
-                    "%s: TAKE PROFIT — %s → %s (conviction=%.3f)",
-                    ticker, old_state.upper(), new_state.upper(), conviction,
-                )
+                last_tps = _take_profit_events.get(ticker, [])
+                if last_tps and last_tps[-1].get("cycle_id", 0) == cycle_id:
+                    pass
+                else:
+                    tp_event = {
+                        "ticker": ticker,
+                        "type": "take_profit",
+                        "from_state": old_state,
+                        "to_state": new_state,
+                        "direction": _active_direction.get(ticker, "neutral"),
+                        "reason": _build_take_profit_reason(direction, old_state),
+                        "cycle_id": cycle_id,
+                        "timestamp": time.time(),
+                        "confidence": confidence,
+                        "conviction": round(conviction, 4),
+                    }
+                    _take_profit_events.setdefault(ticker, [])
+                    _take_profit_events[ticker].append(tp_event)
+                    if len(_take_profit_events[ticker]) > MAX_TAKE_PROFIT_EVENTS:
+                        _take_profit_events[ticker].pop(0)
+                    logger.info(
+                        "%s: TAKE PROFIT — %s → %s (conviction=%.3f)",
+                        ticker, old_state.upper(), new_state.upper(), conviction,
+                    )
         else:
             if direction != "neutral":
                 _active_direction[ticker] = direction
@@ -1011,8 +1037,10 @@ def get_signal_health_score(ticker: str) -> dict:
         # Track dropped count for warning
         _dropped = max(prev_votes_count - curr_votes, 0)
         # Count how many families are in current vs previous
-        curr_families = set(current.get("families", {}).keys())
-        prev_families = set(prev.get("families", {}).keys())
+        curr_fam_raw = current.get("families", {})
+        curr_families = set(curr_fam_raw.keys()) if isinstance(curr_fam_raw, dict) else set()
+        prev_fam_raw = prev.get("families", {})
+        prev_families = set(prev_fam_raw.keys()) if isinstance(prev_fam_raw, dict) else set()
         if len(prev_families) > 0:
             family_retention = len(curr_families & prev_families) / len(prev_families)
         else:
@@ -1291,18 +1319,8 @@ def get_strategy_authority(strategy_name: str, static_authority: float = 1.0) ->
         if ewma is None or n < _EWMA_MIN_SAMPLES:
             return static_authority
 
-        # 0.5 + 1.5 * ewma ranges from 0.5 (ewma=0) to 2.0 (ewma=1.0)
-        # At ewma=0.5 (random), mult = 0.5 + 0.75 = 1.25? No, that's wrong.
-        # Formula should give 1.0 at ewma=0.5 (breakeven).
-        # 0.5 + x * 0.5 = 1.0 → x = 1.0
-        # 0.5 + x * 1.0 = 2.0 → x = 1.5
-        # So: 0.5 + 1.5 * ewma → at ewma=0.5: 0.5 + 0.75 = 1.25
-        # That's wrong. Let me use: 0.5 + 1.0 * ewma
-        # At ewma=0: 0.5, ewma=0.5: 1.0, ewma=1.0: 1.5
-        # Hmm, then max is 1.5x, not 2.0x.
-        # Better: 2 * ewma
-        # At ewma=0: 0, ewma=0.25: 0.5, ewma=0.5: 1.0, ewma=0.75: 1.5, ewma=1.0: 2.0
-        # Yes! 2 * ewma gives range 0 to 2.0, with 1.0 at ewma=0.5 (breakeven).
+        # dynamic_mult = 2 * ewma: range 0.0 (always wrong) to 2.0 (always right)
+        # breakeven (ewma=0.5) gives 1.0x — static authority unchanged
         dynamic_mult = 2.0 * ewma
         return round(static_authority * dynamic_mult, 4)
 
@@ -1349,6 +1367,28 @@ def reset():
         _thesis_strategies.clear()
         _entry_cycle.clear()
         _entry_regime.clear()
+
+
+def remove_ticker(ticker: str):
+    """Remove all state for a ticker (cleanup when ticker is removed from watchlist)."""
+    with _lock:
+        _signal_memory.pop(ticker, None)
+        _signal_state.pop(ticker, None)
+        _state_since.pop(ticker, None)
+        _flip_history.pop(ticker, None)
+        _active_direction.pop(ticker, None)
+        _state_entry_price.pop(ticker, None)
+        _last_flip_cycle.pop(ticker, None)
+        _take_profit_events.pop(ticker, None)
+        _last_strong_cycle.pop(ticker, None)
+        _last_top_contributors.pop(ticker, None)
+        _prev_strategy_count.pop(ticker, None)
+        _conviction_score.pop(ticker, None)
+        _conviction_peak.pop(ticker, None)
+        _conviction_weakening_counter.pop(ticker, None)
+        _thesis_strategies.pop(ticker, None)
+        _entry_cycle.pop(ticker, None)
+        _entry_regime.pop(ticker, None)
 
 
 # ── Restore state from disk on import ──

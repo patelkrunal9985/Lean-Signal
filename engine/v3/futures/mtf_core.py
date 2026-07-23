@@ -5,6 +5,7 @@ class MTFCore(BaseV3Strategy):
     name = "mtf_core"
     description = "Multi-timeframe alignment check: daily/15m/5m trend concurrency"
     applies_to = ("future", "stock", "option")
+    default_weight = 0.08
 
     def compute(self, context: dict) -> dict:
         ohlcv = context.get("ohlcv", [])

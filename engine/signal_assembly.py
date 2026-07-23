@@ -107,7 +107,18 @@ def compute_verdict(signal: dict, health: dict | None, signal_states: dict | Non
         return "EXIT" if state in ("active", "confirmed", "weakening") else "AVOID"
 
     if state == "weakening":
-        return "REDUCE" if health_label in ("robust", "caution") else "EXIT"
+        weakening_level = _VERDICT_STATE_BASE.get(state, 0)
+        if counter_trend:
+            weakening_level -= 1
+        if age_decay < 0.7:
+            weakening_level -= 1
+        if not gate_passed:
+            weakening_level -= 2
+        if health_label == "fragile":
+            weakening_level -= 1
+        if weakening_level <= 0:
+            return "EXIT"
+        return "REDUCE"
 
     if state == "pending":
         if not gate_passed or health_label == "fragile":
@@ -195,7 +206,7 @@ def assemble_cycle_result(
             "buying_power": account_data.get("buying_power", 0),
             "daily_loss_limit_hit": account_data.get("daily_loss_limit_hit", False),
             "position_count": positions_data.get("position_count", 0),
-            "direction_skew": positions_data.get("direction_skew", 0),
+            "direction_skew": positions_data.get("direction_skew", 0) if positions_data else 0,
         } if account_data else {}
 
     result: dict[str, Any] = {
@@ -291,8 +302,8 @@ def assemble_cycle_result(
     try:
         from engine.signal_persistence import _autosave
         _autosave()
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Cycle #%d: autosave failed: %s", cycle_id, exc)
 
     # ── Take-profit events ──
     try:
@@ -339,17 +350,30 @@ def assemble_cycle_result(
     gate_by_ticker: dict[str, dict] = {e["ticker"]: e for e in gate_evaluations}
     existing_tickers: set = {s["ticker"] for s in signals}
 
+    # Track persistent slot count to enforce hard cap
+    _PERSISTENT_SLOT_MAX = 30
+    persistent_slot_count = 0
+
     if all_states and all_states.get("by_ticker"):
         for ticker, ts in all_states["by_ticker"].items():
             state = ts.get("state", "none")
             if state not in ("active", "confirmed", "weakening"):
                 continue
             if ticker in existing_tickers:
-                # Already has a fresh signal this cycle — no slot needed
                 continue
 
-            gate_eval = gate_by_ticker.get(ticker, {})
+            # ── Freshness check: skip if not scanned in 5+ cycles ──
             last_snap = ts.get("current_signal") or {}
+            last_cycle = last_snap.get("cycle_id", 0)
+            if last_cycle > 0 and cycle_id - last_cycle > 5:
+                continue
+
+            # ── Hard cap: max 30 persistent slots ──
+            if persistent_slot_count >= _PERSISTENT_SLOT_MAX:
+                continue
+            persistent_slot_count += 1
+
+            gate_eval = gate_by_ticker.get(ticker, {})
 
             # ── Instrument type (with fallback for old disk state) ──
             instr_type = (
@@ -397,7 +421,13 @@ def assemble_cycle_result(
                 # State machine info
                 "state": state,
                 "persistent_slot": True,  # Flag for frontend
-                "consensus_meta": {"consensus_conviction_tier": conv_tier},
+                "consensus_meta": {
+                    "consensus_conviction_tier": conv_tier,
+                    "consensus_counter_trend": (
+                        gate_eval.get("consensus_meta", {}).get("consensus_counter_trend")
+                        or last_snap.get("counter_trend", "no")
+                    ),
+                },
                 "strategies": [],
                 "market_dashboard": {},
             }

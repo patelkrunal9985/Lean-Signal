@@ -66,6 +66,7 @@ _DEFAULTS: dict[str, Any] = {
     "conviction_decay": 0.97,       # Leak per cycle (lower = faster decay)
     "min_conviction": 0.25,         # Min conviction to enter a thesis
     "thesis_horizon": 30,           # Cycles before thesis is "stale"
+    "pnl_profit_mid_atr": 1.5,      # ATR profit → conviction floor 0.15 (mid-tier)
     "pnl_profit_floor_atr": 2.0,    # ATR profit → conviction floor 0.20
     "pnl_profit_confirm_atr": 3.0,  # ATR profit → force confirmed (0.80)
     "pnl_force_exit_atr": 2.5,      # ATR drawdown → force exit

@@ -2,7 +2,7 @@
 Data Preparation Phase — Fetches all market data and builds the ticker data map.
 
 Extracted from engine/runner.py during the 3-way refactor.
-Stateless: takes cycle metadata, returns ticker_data_map and associated context.
+Takes cycle metadata, returns ticker_data_map and associated context.
 """
 import time
 from typing import Any
@@ -11,6 +11,10 @@ from utils.logger import get_logger
 from utils.time_utils import now_ny
 
 logger = get_logger("engine.data_prep")
+
+
+# ── Module-level caches for data that persists across cycles ──
+_last_globex_ranges: dict[str, dict] = {}
 
 
 def prepare_all_data(
@@ -92,9 +96,15 @@ def prepare_all_data(
 
         # ── Volume profile from 1m bars ──
         vol_profile: dict = {}
+        vwap_data: dict = {}
         if instr_type == "future" and ohlcv_1m:
             try:
                 vol_profile = compute_volume_profile(ohlcv_1m)
+            except Exception:
+                pass
+            try:
+                from engine.futures_data import compute_intraday_vwap
+                vwap_data = compute_intraday_vwap(ohlcv_1m)
             except Exception:
                 pass
 
@@ -192,7 +202,7 @@ def prepare_all_data(
             "order_book_summary": ob_analysis if ob_analysis and ob_analysis.get("available") else {},
             "tpo_profile": tpo_profile if instr_type == "future" else {},
             "volume_profile_intraday": vol_profile if instr_type == "future" else {},
-            "intraday_vwap": vol_profile,
+            "intraday_vwap": vwap_data,
             "ob_analysis": ob_analysis,
             "indicators": indicators,
             "cot": cot_data,
@@ -209,7 +219,7 @@ def prepare_all_data(
 
     # ── Phase 2: Futures cumulative delta ──
     from engine.tick_engine import get_tick_stats
-    from engine.futures_data import compute_cumulative_delta
+    from engine.futures_data import compute_cumulative_delta, compute_tick_clusters
     for t, instr in all_tickers:
         if instr != "future":
             continue
@@ -230,6 +240,22 @@ def prepare_all_data(
         except Exception:
             pass
 
+    # ── Tick buffer + clusters for micro-structure strategies (order_flow_burst, iceberg_detection) ──
+    for t, instr in all_tickers:
+        if instr != "future":
+            continue
+        td = ticker_data_map.get(t, {})
+        if not td:
+            continue
+        try:
+            tick_stats = get_tick_stats(t)
+            if tick_stats:
+                buf = tick_stats.get("tick_buffer", [])
+                td["tick_buffer"] = buf
+                td["tick_clusters"] = compute_tick_clusters(buf)
+        except Exception:
+            pass
+
     # ── Phase 3: Globex range + session classifier (futures only) ──
     from engine.futures_data import get_globex_range
     from engine.session_classifier import compute_session_context
@@ -240,12 +266,22 @@ def prepare_all_data(
         try:
             gr = get_globex_range(t)
             if gr:
+                _last_globex_ranges[t] = gr  # Update cache
+            elif t in _last_globex_ranges:
+                gr = _last_globex_ranges[t]  # Use cached version
+            if gr:
                 globex_ranges[t] = gr
                 td = ticker_data_map.get(t, {})
                 if td:
                     td["globex_range"] = gr
         except Exception:
-            pass
+            # Use cached globex range if fetch fails
+            if t in _last_globex_ranges:
+                gr = _last_globex_ranges[t]
+                globex_ranges[t] = gr
+                td = ticker_data_map.get(t, {})
+                if td:
+                    td["globex_range"] = gr
         # Compute enriched session context
         td = ticker_data_map.get(t, {})
         if td and td.get("ohlcv_1m"):
@@ -280,7 +316,51 @@ def prepare_all_data(
         cancel_all_option_subscriptions()
         time.sleep(1.5)
 
-    # ── Phase 5: Market breadth ──
+    # ── Phase 5: VIX data injection + Market breadth ──
+    # Inject VIX data into all futures tickers for vix_term_structure strategy
+    vx_data = ticker_data_map.get("VX=F", {})
+    vix_spot = vx_data.get("current_price", 0)
+    vix_1m = float(vix_spot)
+    vix_2m = float(vix_spot) * 1.05  # rough contango estimate
+    if vix_spot > 0:
+        for key, data in ticker_data_map.items():
+            if data.get("instrument_type") == "future" or data.get("instrument_type") == "stock":
+                data["vix_spot"] = vix_spot
+                data["vix_1m"] = vix_1m
+                data["vix_2m"] = vix_2m
+
+    # ── Phase 5b: Gamma level injection into futures contexts ──
+    # Gamma levels are computed from SPY options (track ES) and QQQ options (track NQ).
+    # Inject SPY gamma into ES=F/MES=F, QQQ gamma into NQ=F/MNQ=F.
+    _gamma_source_map = {
+        "ES=F": "SPY", "MES=F": "SPY",
+        "NQ=F": "QQQ", "MNQ=F": "QQQ",
+    }
+    for key, data in ticker_data_map.items():
+        expected_underlying = _gamma_source_map.get(key)
+        if not expected_underlying or data.get("instrument_type") != "future":
+            continue
+        for opt_key, opt_data in ticker_data_map.items():
+            if expected_underlying not in opt_key:
+                continue
+            gamma_levels = opt_data.get("gamma_walls", [])
+            gamma_flip = opt_data.get("gamma_flip_level", 0)
+            if gamma_levels or gamma_flip:
+                data["es_gamma_levels"] = {
+                    "levels": gamma_levels,
+                    "zero_gamma": gamma_flip,
+                    "total_net_gex": opt_data.get("total_net_gex", 0),
+                    "prev_price": data.get("current_price", 0),
+                }
+                break
+
+    # ── Phase 5c: Front/next month futures prices ──
+    # calendar_spread and carry_yield strategies require front/next month contract prices.
+    # Proper implementation requires fetching actual front and next futures contracts from IBKR.
+    # For now, we skip this (strategies will return neutral until properly implemented).
+    pass
+
+    # ── Phase 6: Market breadth ──
     try:
         from engine.market_breadth import compute_market_breadth
         breadth_ctx = compute_market_breadth(ticker_data_map)

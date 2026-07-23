@@ -529,6 +529,16 @@ header {
 .settings-panel { max-width: 500px; }
 .settings-panel h2 { font-size: 16px; margin-bottom: 12px; }
 .settings-panel h3 { font-size: 14px; margin-top: 16px; }
+.settings-table { width: 100%; border-collapse: collapse; margin: 8px 0; }
+.settings-table th { font-size: 13px; text-align: center; padding: 6px 4px; border-bottom: 2px solid var(--border); color: var(--text-muted); }
+.settings-table td { font-size: 13px; padding: 6px 4px; border-bottom: 1px solid var(--border); }
+.settings-table td:first-child { color: var(--text); white-space: nowrap; }
+.settings-table td:not(:first-child) { text-align: center; }
+.settings-table input[type="number"] {
+  width: 70px; padding: 4px 6px;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); color: var(--text); font-size: 13px; text-align: center;
+}
 .setting-row {
   display: flex; justify-content: space-between; align-items: center;
   padding: 8px 0; border-bottom: 1px solid var(--border);

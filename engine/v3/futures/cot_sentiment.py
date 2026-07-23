@@ -8,7 +8,7 @@ class COTSentiment(BaseV3Strategy):
     default_weight = 0.06
 
     def compute(self, context: dict) -> dict:
-        cot = context.get("cot_data", {})
+        cot = context.get("cot", {})
         total = cot.get("total_open_interest", 1)
         com_net = (cot.get("commercial_long", 0) - cot.get("commercial_short", 0)) / max(total, 1)
         spec_net = (cot.get("noncommercial_long", 0) - cot.get("noncommercial_short", 0)) / max(total, 1)

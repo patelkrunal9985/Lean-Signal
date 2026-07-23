@@ -231,6 +231,12 @@ STRATEGY_AUTHORITY: dict[str, float] = {
     "delta_divergence": 1.1,
     "fvg_liquidity_sweep": 1.1,
     "iceberg_detection": 1.1,
+    "momentum_jerk": 1.1,
+    "order_flow_exhaustion": 1.1,
+    "volume_profile_decay": 1.1,
+    "spread_reversion": 1.0,
+    "session_regime": 1.0,
+    "time_of_day_momentum": 1.0,
     # ── Stock strategies ──
     "short_squeeze": 1.3,
     "premarket_gapper": 1.1,
@@ -512,8 +518,6 @@ def compute_consensus(
     meta["consensus_dominant_share"] = fam_div["dominant_share"]
     meta["consensus_diversity_penalty"] = fam_div["diversity_penalty"]
 
-    # Apply diversity penalty/bonus to total_weight
-    total_weight *= fam_div["diversity_penalty"]
     meta["consensus_total_weight"] = round(total_weight, 4)
 
     meta["consensus_active_votes"] = active_votes
@@ -543,6 +547,8 @@ def compute_consensus(
     # making net score = 0.3/6.75 = 0.044, far below 0.40 threshold).
     participation = max(total_weight, MIN_PARTICIPATION_WEIGHT)
     net = (weighted_long - weighted_short) / max(participation, 0.01) if total_weight > 0 else 0.0
+    # Apply diversity penalty to net score (was previously applied to denominator, inflating net)
+    net *= fam_div["diversity_penalty"]
 
     net = max(-1.0, min(1.0, net))
     meta["consensus_net_score"] = round(net, 4)
@@ -585,7 +591,7 @@ def compute_consensus(
     else:
         base_confidence = min(abs(net) * 1.2, 0.95)
         if trend_dir is not None and direction != trend_dir:
-            base_confidence = max(base_confidence, 0.75)
+            base_confidence = min(base_confidence, 0.75)
 
     # ── Weak signal dampening ──
     # If total active weight is low, cap confidence proportionally.

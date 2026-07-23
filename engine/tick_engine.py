@@ -4,9 +4,12 @@ Attaches to IBKRStreamer._on_pending_tickers and signs every STK/FUT tick.
 No additional IBKR market data subscriptions required — piggybacks on existing tickers.
 """
 
+import json
 import time
 import math
 from collections import deque
+from datetime import date
+from pathlib import Path
 from threading import Lock
 from typing import Optional
 
@@ -14,10 +17,125 @@ from utils.logger import get_logger
 
 logger = get_logger("engine.tick_engine")
 
-# ── Per-ticker state ──
+# ── Checkpoint persistence (survives server restarts within same trading day) ──
+_CHECKPOINT_DIR = Path(__file__).parent.parent / "data" / "tick_state"
+_autosave_counter = 0
+_AUTOSAVE_INTERVAL = 50  # Save every 50 get_tick_stats() calls
 
+# ── Per-ticker state ──
 _ticker_state: dict[str, dict] = {}
 _lock = Lock()
+
+
+def _trading_date() -> str:
+    """Get today's trading date as ISO string for checkpoint keying."""
+    return date.today().isoformat()
+
+
+def save_checkpoint() -> None:
+    """Save current tick state to disk for the current trading date.
+
+    Serializes deques as lists so JSON can handle them.
+    Only saves the essential fields needed for recovery:
+    cumulative_delta, buy/sell volumes, last prices, tick_buffer, volume_buckets.
+    """
+    global _ticker_state
+    trading_date = _trading_date()
+    with _lock:
+        state_copy = {}
+        for ticker, st in _ticker_state.items():
+            # Filter out time-sensitive 60s trades (stale after restart anyway)
+            state_copy[ticker] = {
+                "cumulative_delta": st["cumulative_delta"],
+                "total_buy_vol": st["total_buy_vol"],
+                "total_sell_vol": st["total_sell_vol"],
+                "buy_count": st["buy_count"],
+                "sell_count": st["sell_count"],
+                "last_price": st["last_price"],
+                "last_bid": st["last_bid"],
+                "last_ask": st["last_ask"],
+                "prev_volume": st["prev_volume"],
+                "prev_last_price": st["prev_last_price"],
+                "last_trade_size": st["last_trade_size"],
+                "tick_buffer": list(st["tick_buffer"]),
+                "volume_buckets": list(st["volume_buckets"]),
+                "bucket_buy_vol": st["bucket_buy_vol"],
+                "bucket_sell_vol": st["bucket_sell_vol"],
+                "bucket_target_vol": st["bucket_target_vol"],
+                "last_updated": st["last_updated"],
+            }
+
+    # Write atomically via temp file
+    _CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
+    temp_path = _CHECKPOINT_DIR / f"{trading_date}.tmp"
+    final_path = _CHECKPOINT_DIR / f"{trading_date}.json"
+    try:
+        with open(temp_path, "w") as f:
+            json.dump(state_copy, f, indent=2, default=str)
+        temp_path.replace(final_path)
+    except Exception as e:
+        logger.debug("tick_engine.save_checkpoint: %s", e)
+
+
+def load_checkpoint(trading_date: str = None) -> bool:
+    """Load tick state from disk for a given trading date.
+
+    Args:
+        trading_date: ISO date string (e.g., '2026-07-21').
+                      Defaults to today.
+
+    Returns:
+        True if checkpoint was loaded, False if no checkpoint exists.
+    """
+    global _ticker_state
+    if trading_date is None:
+        trading_date = _trading_date()
+
+    path = _CHECKPOINT_DIR / f"{trading_date}.json"
+    if not path.exists():
+        return False
+
+    try:
+        with open(path) as f:
+            data = json.load(f)
+    except Exception as e:
+        logger.warning("tick_engine.load_checkpoint: corrupt checkpoint %s: %s", path, e)
+        return False
+
+    with _lock:
+        for ticker, st in data.items():
+            new_state = _empty_state()
+            new_state["cumulative_delta"] = st.get("cumulative_delta", 0)
+            new_state["total_buy_vol"] = st.get("total_buy_vol", 0)
+            new_state["total_sell_vol"] = st.get("total_sell_vol", 0)
+            new_state["buy_count"] = st.get("buy_count", 0)
+            new_state["sell_count"] = st.get("sell_count", 0)
+            new_state["last_price"] = st.get("last_price", 0.0)
+            new_state["last_bid"] = st.get("last_bid", 0.0)
+            new_state["last_ask"] = st.get("last_ask", 0.0)
+            new_state["prev_volume"] = st.get("prev_volume", 0)
+            new_state["prev_last_price"] = st.get("prev_last_price", 0.0)
+            new_state["last_trade_size"] = st.get("last_trade_size", 0)
+            new_state["bucket_buy_vol"] = st.get("bucket_buy_vol", 0)
+            new_state["bucket_sell_vol"] = st.get("bucket_sell_vol", 0)
+            new_state["bucket_target_vol"] = st.get("bucket_target_vol", 0)
+            new_state["last_updated"] = st.get("last_updated", 0.0)
+
+            # Reconstruct deques
+            raw_buf = st.get("tick_buffer", [])
+            if isinstance(raw_buf, list):
+                new_state["tick_buffer"] = deque(raw_buf, maxlen=100)
+            raw_buckets = st.get("volume_buckets", [])
+            if isinstance(raw_buckets, list):
+                new_state["volume_buckets"] = deque(raw_buckets, maxlen=50)
+
+            _ticker_state[ticker] = new_state
+
+    logger.info(
+        "tick_engine: loaded checkpoint for %s (%d tickers)",
+        trading_date, len(data),
+    )
+    return True
 
 
 def _empty_state() -> dict:
@@ -192,7 +310,11 @@ def get_tick_stats(ticker: str) -> dict:
 
     Returns dict with cumulative delta, buy/sell breakdown, VPIN, etc.
     Returns empty dict if no tick data has been collected.
+    Periodically auto-saves checkpoint to disk.
     """
+    global _autosave_counter
+
+    should_save = False
     with _lock:
         state = _ticker_state.get(ticker)
         if state is None:
@@ -214,7 +336,16 @@ def get_tick_stats(ticker: str) -> dict:
         if total_vol > 0:
             vol_imb = (state["total_buy_vol"] - state["total_sell_vol"]) / max(total_vol, 1)
 
-        return {
+        # Serialize tick_buffer for micro-structure strategies
+        tick_buffer = list(state["tick_buffer"])[-50:]  # last 50 ticks
+
+        # Periodic auto-save checkpoint (flag set inside lock, save outside to avoid deadlock)
+        _autosave_counter += 1
+        if _autosave_counter >= _AUTOSAVE_INTERVAL:
+            _autosave_counter = 0
+            should_save = True
+
+        result = {
             "cumulative_delta": state["cumulative_delta"],
             "delta_60s": delta_60s,
             "total_buy_vol": state["total_buy_vol"],
@@ -232,7 +363,17 @@ def get_tick_stats(ticker: str) -> dict:
             "last_trade_size": state["last_trade_size"],
             "last_updated": state["last_updated"],
             "source": "tick_engine",
+            "tick_buffer": tick_buffer,
         }
+
+    # ── Periodic auto-save checkpoint (outside lock to prevent deadlock) ──
+    if should_save:
+        try:
+            save_checkpoint()
+        except Exception:
+            pass
+
+    return result
 
 
 def get_vpin(ticker: str) -> float:
@@ -243,7 +384,8 @@ def get_vpin(ticker: str) -> float:
 
 def reset():
     """Clear all accumulated tick state."""
-    global _ticker_state
+    global _ticker_state, _autosave_counter
     with _lock:
         _ticker_state = {}
+        _autosave_counter = 0
     logger.debug("tick_engine: state reset")

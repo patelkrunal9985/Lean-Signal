@@ -234,6 +234,14 @@ def stop_auto_run():
 
 def init():
     _load_history()
+
+    # ── Load tick state checkpoint for today's session ──
+    # This ensures cumulative delta survives server restart within the same trading day.
+    from engine.tick_engine import load_checkpoint, reset as reset_tick_engine
+    if not load_checkpoint():
+        logger.info("No tick checkpoint for today — starting fresh session")
+        reset_tick_engine()
+
     from engine.ibkr_data_feed import get_streamer, IBKRStreamer
     from utils.config import IBKR_HOST, IBKR_PORT, IBKR_CLIENT_ID
     streamer = get_streamer()

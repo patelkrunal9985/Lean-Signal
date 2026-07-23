@@ -21,7 +21,7 @@ class CarryYield(BaseV3Strategy):
         if nxt <= 0:
             next_hist = context.get("next_hist", [])
             if next_hist and len(next_hist) >= 1:
-                nxt = next_hist[-1]
+                nxt = next_hist[-1].get("close", 0) if isinstance(next_hist[-1], dict) else next_hist[-1]
         if front <= 0 or nxt <= 0:
             logger.info("carry_yield: neutral (front=%s, next=%s) — one or both missing", front, nxt)
             return {"direction": "neutral", "confidence": 0.0, "strategy": self.name}

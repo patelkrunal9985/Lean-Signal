@@ -292,7 +292,7 @@ class SignalQualityGate:
         # ── Layer 2: Alignment ──
         ag = self._apply_settings(ALIGNMENT_GATE)
         alignment = self._check_alignment(
-            active_strategies, regime, ticker_data, instr_type, ag
+            active_strategies, regime, ticker_data, instr_type, ag, signal_direction
         )
         if not alignment["passed"]:
             return {
@@ -438,7 +438,7 @@ class SignalQualityGate:
         if session_ctx and instr_type == "option":
             vwap_ok, vwap_reason = vwap_alignment_ok(session_ctx, direction)
             vwap_pos = session_ctx.get("vwap_position", "unknown")
-            if "counter" in vwap_reason:
+            if "counter" in vwap_reason.split():
                 confidence_mult *= 0.85  # counter-VWAP trades need extra conviction
             if not vwap_ok:
                 return {"passed": False, "reason": vwap_reason, "window": window,
@@ -469,7 +469,11 @@ class SignalQualityGate:
         # The data_source guard above already verified the source is legit.
         if ds != "ibkr_ohlcv":
             price_age = ticker_data.get("price_age_seconds", 0)
-            max_age = ig["gate_max_price_age_seconds"]
+            # Use option-specific max age for options, generic for others
+            if instr_type == "option":
+                max_age = ig.get("gate_max_option_age_seconds", 60.0)
+            else:
+                max_age = ig["gate_max_price_age_seconds"]
             # ── Globex: relax price age for futures (tick frequency is lower after-hours) ──
             if instr_type == "future":
                 try:
@@ -573,13 +577,14 @@ class SignalQualityGate:
         ticker_data: dict,
         instr_type: str,
         ag: dict,
+        consensus_direction: str = "",
     ) -> dict:
         regime_type = regime.get("primary_regime", "ranging")
         regime_conf = regime.get("confidence", 0.5)
         ohlcv = ticker_data.get("ohlcv", [])
         indicators = ticker_data.get("indicators", {})
 
-        # ── Determine signal direction from strategy votes ──
+        # ── Determine signal direction: prefer consensus, fall back to raw votes ──
         long_weight = sum(
             s.get("confidence", 0) * 0.5
             for s in active_strategies
@@ -591,7 +596,9 @@ class SignalQualityGate:
             if s.get("direction") == "short"
         )
         total_weight = long_weight + short_weight
-        signal_dir = "long" if long_weight >= short_weight else "short"
+        derived_dir = "long" if long_weight >= short_weight else "short"
+        # Use consensus direction when available and non-neutral
+        signal_dir = consensus_direction if consensus_direction in ("long", "short") else derived_dir
 
         if total_weight == 0:
             return {"passed": False, "reason": "no_strategy_direction"}
@@ -724,10 +731,11 @@ class SignalQualityGate:
                             f"cot_commercials_net_long_{cot_ratio:.1%}"
                         )
 
-        # ── Directional bias cap ──
+        # ── Directional bias cap (only penalize when opposition exists) ──
         dominant_weight = max(long_weight, short_weight)
         bias_ratio = dominant_weight / total_weight if total_weight > 0 else 0.5
-        if bias_ratio > ag.get("gate_directional_bias_threshold", 0.70):
+        has_opposition = min(long_weight, short_weight) > total_weight * 0.05
+        if has_opposition and bias_ratio > ag.get("gate_directional_bias_threshold", 0.70):
             confidence_mult *= ag.get("gate_directional_bias_penalty", 0.85)
 
         return {
@@ -753,20 +761,13 @@ class SignalQualityGate:
             strat_conf_key, cg.get("gate_strategy_confidence_min", 0.12)
         )
 
-        # Filter strategies by confidence
-        if instr_type == "option":
-            votes = [
-                s
-                for s in active_strategies
-                if s.get("confidence", 0) >= strat_conf_min
-            ]
-        else:
-            votes = [
-                s
-                for s in active_strategies
-                if s.get("direction") == signal_direction
-                and s.get("confidence", 0) >= strat_conf_min
-            ]
+        # Filter strategies by confidence AND direction (all types including options)
+        votes = [
+            s
+            for s in active_strategies
+            if s.get("direction") == signal_direction
+            and s.get("confidence", 0) >= strat_conf_min
+        ]
 
         strat_agree_key = f"gate_min_strategies_agree_{instr_type}"
         min_agree = cg.get(

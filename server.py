@@ -35,8 +35,6 @@ PROJECT_ROOT = Path(__file__).parent
 TEMPLATES_DIR = PROJECT_ROOT / "templates"
 STATIC_DIR = PROJECT_ROOT / "static"
 
-HTML_CACHE = {}
-
 _RATE_LIMITS: dict[str, list] = {}
 _RATE_LIMIT_WINDOW = 60
 _RATE_LIMIT_MAX = 120
@@ -67,13 +65,9 @@ def _auto_expire_validation():
 
 
 def _load_html(name: str) -> str:
-    if name in HTML_CACHE:
-        return HTML_CACHE[name]
     path = TEMPLATES_DIR / name
     if path.exists():
-        content = path.read_text(encoding="utf-8")
-        HTML_CACHE[name] = content
-        return content
+        return path.read_text(encoding="utf-8")
     return ""
 
 
@@ -146,7 +140,7 @@ class LeanSignalsHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         ip = self.client_address[0]
-        if _rate_limited(ip) and "/api/" not in self.path:
+        if not self.path.startswith("/static/") and _rate_limited(ip) and "/api/" not in self.path:
             self._send_json({"error": "rate_limited"}, 429)
             return
 

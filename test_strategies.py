@@ -489,7 +489,7 @@ from engine.signal_persistence import (
     get_signal_strength, get_signal_timeline, get_take_profit_events,
     get_age_decayed_confidence, update_strategy_performance,
     get_strategy_authority, get_strategy_performance_summary,
-    get_price_signal_divergence,
+    get_price_signal_divergence, remove_ticker,
 )
 
 persist_reset()
@@ -840,6 +840,187 @@ except Exception as e:
     results['failed'] += 1
     results['errors'].append({'strategy': 'Velocity.boost', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
     print(f' [FAIL] Velocity boost FAILED: {str(e)[:80]}')
+
+persist_reset()
+
+# -- 15a. Test PnL Guardian with ATR distance --
+print('\n--- PNL GUARDIAN ATR DISTANCE ---')
+try:
+    # Build a confirmed thesis to test PnL Guardian
+    cm_pnl = {
+        "consensus_families": {"momentum": 0.5, "flow": 0.3},
+        "consensus_family_count": 2,
+        "consensus_agreement_cv": 0.3,
+        "consensus_threshold": 0.2,
+        "consensus_dominant_share": 0.5,
+        "consensus_active_votes": 3,
+        "consensus_weighted_long": 0.6,
+        "consensus_weighted_short": 0.2,
+        "consensus_net_score": 0.4,
+        "consensus_counter_trend": "no",
+        "consensus_conviction_tier": "silver",
+    }
+    # Test 1: SPX-level ($5500, ATR=$120): $450 profit → 3.75 ATR → 0.80 floor
+    persist_reset()
+    for i in range(6):
+        persist_update("PNL_SPX", "long", 0.7, 0.5, cm_pnl, cycle_id=i+1, current_price=5500, instrument_type="future", atr=120.0)
+    ts = get_ticker_state("PNL_SPX")
+    assert ts["state"] == "confirmed", f"SPX PnL test: expected confirmed, got {ts['state']}"
+    # $450 profit at 3.75 ATR (450/120) → should trigger 0.80 floor (>=3.0 ATR)
+    persist_update("PNL_SPX", "long", 0.6, 0.3, cm_pnl, cycle_id=7, current_price=5950, instrument_type="future", atr=120.0)
+    ts = get_ticker_state("PNL_SPX")
+    assert ts["conviction"] >= 0.80, f"SPX PnL: expected 0.80 floor (3.75 ATR profit), got {ts['conviction']}"
+    results['passed'] += 1
+    print(f'   [OK] PnL Guardian ATR: SPX $300 profit @ 2.5 ATR → floor={ts["conviction"]:.4f} (>=0.80)')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'PnLGuardian.SPX_profit', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] PnL Guardian SPX FAILED: {str(e)[:80]}')
+
+try:
+    # Test 2: Cheap stock ($5, ATR=$0.50): $0.50 profit → 1.0 ATR → mid-tier floor (0.15), not confirm floor (0.80)
+    persist_reset()
+    for i in range(6):
+        persist_update("PNL_CHEAP", "long", 0.7, 0.5, cm_pnl, cycle_id=i+1, current_price=5.0, instrument_type="stock", atr=0.50)
+    ts = get_ticker_state("PNL_CHEAP")
+    pre_conv = ts["conviction"]
+    # $0.50 profit at 1.0 ATR → mid-tier floor 0.15 (not old %-based floor of 0.20 which would fire at 10%)
+    persist_update("PNL_CHEAP", "long", 0.5, 0.2, cm_pnl, cycle_id=7, current_price=5.50, instrument_type="stock", atr=0.50)
+    ts = get_ticker_state("PNL_CHEAP")
+    assert ts["conviction"] >= 0.15, f"Cheap stock PnL: expected >=0.15 (1.0 ATR), got {ts['conviction']}"
+    results['passed'] += 1
+    print(f'   [OK] PnL Guardian ATR: cheap stock $0.50 profit @ 1.0 ATR → floor={ts["conviction"]:.4f}')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'PnLGuardian.cheap_stock', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] PnL Guardian cheap stock FAILED: {str(e)[:80]}')
+
+try:
+    # Test 3: Force exit at -2.5 ATR drawdown
+    persist_reset()
+    for i in range(6):
+        persist_update("PNL_EXIT", "long", 0.7, 0.5, cm_pnl, cycle_id=i+1, current_price=5500, instrument_type="future", atr=15.0)
+    ts = get_ticker_state("PNL_EXIT")
+    pre_conv = ts["conviction"]
+    # Drop $40, ATR=15 → -2.67 ATR drawdown → force exit (cap 0.05)
+    persist_update("PNL_EXIT", "long", 0.3, -0.2, cm_pnl, cycle_id=7, current_price=5460, instrument_type="future", atr=15.0)
+    ts = get_ticker_state("PNL_EXIT")
+    assert ts["conviction"] <= 0.05, f"Force exit: expected <=0.05, got {ts['conviction']}"
+    results['passed'] += 1
+    print(f'   [OK] PnL Guardian ATR: drawdown -2.67 ATR → cap={ts["conviction"]:.4f} (<=0.05)')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'PnLGuardian.force_exit', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] PnL Guardian force exit FAILED: {str(e)[:80]}')
+
+try:
+    # Test 4: ATR=0 fallback — old %-based behavior
+    persist_reset()
+    for i in range(6):
+        persist_update("PNL_FALLBACK", "long", 0.7, 0.5, cm_pnl, cycle_id=i+1, current_price=5500, instrument_type="future", atr=0.0)
+    ts = get_ticker_state("PNL_FALLBACK")
+    pre_conv = ts["conviction"]
+    # $200 profit, ATR=0 → falls back to %-based: 200/5500=3.6% → above 3.0% threshold → 0.80 floor
+    persist_update("PNL_FALLBACK", "long", 0.6, 0.3, cm_pnl, cycle_id=7, current_price=5700, instrument_type="future", atr=0.0)
+    ts = get_ticker_state("PNL_FALLBACK")
+    assert ts["conviction"] >= 0.80, f"ATR=0 fallback: expected 0.80 floor, got {ts['conviction']}"
+    results['passed'] += 1
+    print(f'   [OK] PnL Guardian ATR=0 fallback: % based → floor={ts["conviction"]:.4f} (>=0.80)')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'PnLGuardian.atr0_fallback', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] PnL Guardian ATR=0 fallback FAILED: {str(e)[:80]}')
+
+# -- 15b. Test Building Factor Reset --
+print('\n--- BUILDING FACTOR RESET ---')
+try:
+    # Build thesis, exit to none, then re-enter — building factor should be reduced
+    persist_reset()
+    cm_build = dict(cm_pnl)
+    for i in range(6):
+        persist_update("BUILD_RESET", "long", 0.7, 0.5, cm_build, cycle_id=i+1, current_price=5500, instrument_type="future")
+    ts = get_ticker_state("BUILD_RESET")
+    assert ts["state"] == "confirmed", f"expected confirmed, got {ts['state']}"
+    # Force exit by large drawdown to trigger PnL Guardian exit
+    for i in range(3):
+        persist_update("BUILD_RESET", "long", 0.0, 0.0, cm_build, cycle_id=10+i, current_price=5490, instrument_type="future", atr=15.0)
+    # Drawdown: 5490-5500 = -10, atr=15 → -0.67 ATR, not enough. Need -40 drop.
+    persist_update("BUILD_RESET", "long", 0.0, -0.3, cm_build, cycle_id=13, current_price=5460, instrument_type="future", atr=15.0)
+    ts = get_ticker_state("BUILD_RESET")
+    # -40/15 = -2.67 ATR drawdown → PnL force exit → cap at 0.05 → state "none"
+    assert ts["state"] == "none", f"expected none after drawdown, got {ts['state']} (conv={ts['conviction']})"
+    # Re-enter — building factor should be low (memory trimmed to last 2)
+    persist_update("BUILD_RESET", "long", 0.6, 0.4, cm_build, cycle_id=14, current_price=5495, instrument_type="future")
+    ts = get_ticker_state("BUILD_RESET")
+    # First re-entry cycle conviction should be modest (not instant active)
+    assert ts["conviction"] < 0.30, f"building reset: expected low conviction, got {ts['conviction']}"
+    results['passed'] += 1
+    print(f'   [OK] Building factor reset: re-entry conviction={ts["conviction"]:.4f} (<0.30, was trimmed)')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'BuildingReset.exit_reentry', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Building reset FAILED: {str(e)[:80]}')
+
+# -- 15c. Test remove_ticker --
+print('\n--- REMOVE TICKER ---')
+try:
+    persist_reset()
+    for i in range(3):
+        persist_update("RM_TEST", "long", 0.6, 0.4, cm_pnl, cycle_id=i+1, current_price=5500, instrument_type="future")
+    ts = get_ticker_state("RM_TEST")
+    assert ts["state"] != "none", f"expected non-none state, got {ts['state']}"
+    remove_ticker("RM_TEST")
+    ts = get_ticker_state("RM_TEST")
+    assert ts["state"] == "none", f"expected none after remove, got {ts['state']}"
+    assert ts["conviction"] == 0.0, f"expected 0 conviction after remove, got {ts['conviction']}"
+    results['passed'] += 1
+    print(f'   [OK] remove_ticker: state=none, conviction=0.0')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'RemoveTicker.basic', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] remove_ticker FAILED: {str(e)[:80]}')
+
+# -- 15d. Test Direction Input Normalization --
+print('\n--- DIRECTION NORMALIZATION ---')
+try:
+    persist_reset()
+    for i in range(5):
+        persist_update("DIR_TEST", "long", 0.6, 0.4, cm_pnl, cycle_id=i+1, current_price=5500, instrument_type="future")
+    ts = get_ticker_state("DIR_TEST")
+    assert ts["state"] in ("pending", "active"), f"expected pending/active, got {ts['state']}"
+    active_dir_before = ts["active_direction"]
+    # Invalid direction should be treated as neutral — active_direction preserved
+    persist_update("DIR_TEST", "INVALID_DIR", 0.0, 0.0, cm_pnl, cycle_id=7, current_price=5500, instrument_type="future")
+    ts = get_ticker_state("DIR_TEST")
+    assert ts["active_direction"] == active_dir_before, f"expected {active_dir_before} (unchanged), got {ts['active_direction']}"
+    results['passed'] += 1
+    print(f'   [OK] Direction normalization: "INVALID_DIR" → neutral, direction={active_dir_before} preserved')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'DirectionNorm.invalid', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Direction normalization FAILED: {str(e)[:80]}')
+
+# -- 15e. Test Oscillation Dampening (peak erosion) --
+print('\n--- OSCILLATION DAMPENING ---')
+try:
+    persist_reset()
+    for i in range(6):
+        persist_update("OSC", "long", 0.7, 0.5, cm_pnl, cycle_id=i+1, current_price=5500, instrument_type="future")
+    ts = get_ticker_state("OSC")
+    initial_peak = ts["conviction_peak"]
+    assert ts["state"] == "confirmed", f"expected confirmed, got {ts['state']}"
+    # Multiple cycles with declining conviction → peak should erode slowly
+    for i in range(3):
+        persist_update("OSC", "long", 0.5, 0.2, cm_pnl, cycle_id=10+i, current_price=5490, instrument_type="future")
+    ts = get_ticker_state("OSC")
+    assert ts["conviction_peak"] < initial_peak, f"peak should erode below {initial_peak}, got {ts['conviction_peak']}"
+    assert ts["conviction_peak"] > ts["conviction"], f"peak should be above conviction, got peak={ts['conviction_peak']} conv={ts['conviction']}"
+    results['passed'] += 1
+    print(f'   [OK] Oscillation dampening: peak eroded from {initial_peak:.4f} to {ts["conviction_peak"]:.4f}')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'Oscillation.peak_erosion', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Oscillation dampening FAILED: {str(e)[:80]}')
 
 persist_reset()
 

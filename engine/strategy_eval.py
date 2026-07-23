@@ -190,7 +190,7 @@ def evaluate_tickers(
                 )
 
         # ── Account-based circuit breaker ──
-        if gate_result.get("passed", False) and account_data:
+        if gate_result.get("passed", False) and account_data is not None:
             blocked, block_reason = check_signal_blockers(
                 ticker, direction, instr_type, account_data, positions_data,
             )

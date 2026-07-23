@@ -12,7 +12,8 @@ class TimeOfDayMomentum(BaseV3Strategy):
         candles_1m = context.get("candles_1m", [])
         ohlcv = context.get("ohlcv", [])
         depth = context.get("order_book_imbalance", {})
-        vwap = context.get("intraday_vwap", 0)
+        vwap_data = context.get("intraday_vwap", {})
+        vwap = vwap_data.get("vwap", 0) if isinstance(vwap_data, dict) else vwap_data
         current_price = context.get("current_price", 0)
 
         session = session_data.get("session", "rth")

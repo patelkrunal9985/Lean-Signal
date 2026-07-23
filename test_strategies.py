@@ -1022,6 +1022,66 @@ except Exception as e:
     results['errors'].append({'strategy': 'Oscillation.peak_erosion', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
     print(f' [FAIL] Oscillation dampening FAILED: {str(e)[:80]}')
 
+# -- 15f. Test PnL Guardian with short thesis (entry_dir, not direction) --
+print('\n--- PNL GUARDIAN SHORT THESIS ---')
+try:
+    persist_reset()
+    for i in range(10):
+        persist_update("PNL_SHORT", "short", 0.7, -0.5, cm_pnl, cycle_id=i+1, current_price=5500, instrument_type="future", atr=15.0)
+    ts = get_ticker_state("PNL_SHORT")
+    assert ts["state"] in ("active", "confirmed"), f"short thesis: expected active/confirmed, got {ts['state']}"
+    # Short thesis: price drops $40 (-2.67 ATR) = profit for short
+    # Should trigger profit floor (2.0 ATR → 0.20 floor)
+    persist_update("PNL_SHORT", "short", 0.5, -0.3, cm_pnl, cycle_id=11, current_price=5460, instrument_type="future", atr=15.0)
+    ts = get_ticker_state("PNL_SHORT")
+    assert ts["conviction"] >= 0.20, f"short profit: expected >=0.20 (2.67 ATR profit), got {ts['conviction']}"
+    print(f'   [OK] PnL Guardian short thesis: $40 profit @ 2.67 ATR → floor={ts["conviction"]:.4f} (>=0.20)')
+    results['passed'] += 1
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'PnLGuardian.short_thesis', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] PnL short thesis FAILED: {str(e)[:80]}')
+
+try:
+    # Short thesis: price rises $40 (+2.67 ATR) = loss for short
+    # Should trigger drawdown cap (2.5 ATR exit → 0.05 cap)
+    persist_reset()
+    for i in range(6):
+        persist_update("PNL_SHORT_LOSS", "short", 0.7, -0.5, cm_pnl, cycle_id=i+1, current_price=5500, instrument_type="future", atr=15.0)
+    ts = get_ticker_state("PNL_SHORT_LOSS")
+    pre_conv = ts["conviction"]
+    persist_update("PNL_SHORT_LOSS", "short", 0.0, -0.2, cm_pnl, cycle_id=7, current_price=5540, instrument_type="future", atr=15.0)
+    ts = get_ticker_state("PNL_SHORT_LOSS")
+    assert ts["conviction"] <= 0.05, f"short loss: expected <=0.05, got {ts['conviction']}"
+    print(f'   [OK] PnL Guardian short loss: $40 loss @ 2.67 ATR → cap={ts["conviction"]:.4f} (<=0.05)')
+    results['passed'] += 1
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'PnLGuardian.short_loss', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] PnL short loss FAILED: {str(e)[:80]}')
+
+try:
+    # Short thesis profit with direction=long (current cycle diverges from thesis)
+    # This tests the critical bug: PnL Guardian must use entry_dir ("short"),
+    # not current direction ("long"). Price down = profit on short thesis.
+    persist_reset()
+    for i in range(6):
+        persist_update("PNL_DIVERGE", "short", 0.7, -0.5, cm_pnl, cycle_id=i+1, current_price=5500, instrument_type="future", atr=15.0)
+    ts = get_ticker_state("PNL_DIVERGE")
+    # Current cycle says "long" but thesis is "short". Price drops $40 = profit for short thesis.
+    # With old code (direction=="short"), direction="long" would not negate atr_dist.
+    # atr_dist = (5460-5500)/15 = -2.67. For short entry: entry_dir="short" → negate → +2.67.
+    # Profit check: 2.67 > 2.0 floor_th → floor 0.20
+    persist_update("PNL_DIVERGE", "long", 0.3, 0.2, cm_pnl, cycle_id=7, current_price=5460, instrument_type="future", atr=15.0)
+    ts = get_ticker_state("PNL_DIVERGE")
+    assert ts["conviction"] >= 0.20, f"short thesis long direction: expected >=0.20 (2.67 ATR profit on short thesis), got {ts['conviction']}"
+    print(f'   [OK] PnL Guardian direction divergence: short thesis, long cycle, profit → floor={ts["conviction"]:.4f} (>=0.20)')
+    results['passed'] += 1
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'PnLGuardian.direction_divergence', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] PnL direction divergence FAILED: {str(e)[:80]}')
+
 persist_reset()
 
 # -- 15. Test Signal Health Score --

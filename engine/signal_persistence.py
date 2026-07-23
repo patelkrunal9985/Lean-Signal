@@ -145,7 +145,7 @@ _state_entry_price: dict[str, float] = {}         # ticker → price when curren
 # ── Thesis Validation ──
 _conviction_score: dict[str, float] = {}          # ticker → current conviction 0.0-1.0
 _conviction_peak: dict[str, float] = {}           # ticker → peak conviction since last reset
-_conviction_weakening_counter: dict[str, int] = {} # ticker → cycles conviction has been dropping
+
 _thesis_strategies: dict[str, list[dict]] = {}    # ticker → snapshot of strategy votes at entry
 _entry_cycle: dict[str, int] = {}                 # ticker → cycle_id when thesis was entered
 _entry_regime: dict[str, str] = {}                # ticker → primary regime at entry time
@@ -153,7 +153,6 @@ _entry_regime: dict[str, str] = {}                # ticker → primary regime at
 # ── Signal Health & Warning tracking ──
 _last_strong_cycle: dict[str, int] = {}             # ticker → last cycle_id where net_score > 0.4
 _last_top_contributors: dict[str, list[str]] = {}   # ticker → [top 3 strategy names from last cycle]
-_prev_strategy_count: dict[str, int] = {}            # ticker → active strategy count from last cycle
 
 # ── Dynamic strategy authority tracking (True EWMA) ──
 # Tracks each strategy's prediction accuracy using an exponentially-weighted
@@ -389,7 +388,7 @@ def _compute_conviction(
             if direction == "neutral":
                 edge = 0.3
             elif direction == entry_dir:
-                edge = 0.5 + min(net_score * 0.4, 0.5)
+                edge = 0.5 + min(abs(net_score) * 0.4, 0.5)
             else:
                 edge = 0.3
 
@@ -446,7 +445,7 @@ def _compute_conviction(
                 floor_th = _get_pnl_profit_floor_atr() / 100.0
                 mid_th = _get_pnl_profit_mid_atr() / 100.0
                 exit_th = _get_pnl_force_exit_atr() / 100.0
-            if direction == "short":
+            if entry_dir == "short":
                 atr_dist = -atr_dist
             if atr_dist > confirm_th:
                 conviction = max(conviction, 0.80)
@@ -491,7 +490,6 @@ def _compute_conviction(
     old_peak = _conviction_peak.get(ticker, 0.0)
     if conviction >= old_peak:
         _conviction_peak[ticker] = conviction
-        _conviction_weakening_counter[ticker] = 0
     else:
         erosion = 0.02
         _conviction_peak[ticker] = max(conviction, old_peak - erosion)
@@ -580,7 +578,6 @@ def update(
     global _signal_memory, _signal_state, _state_since
     global _active_direction, _flip_history, _last_flip_cycle
     global _state_entry_price, _conviction_score, _conviction_peak
-    global _conviction_weakening_counter
 
     with _lock:
         # ── Direction input normalization ──
@@ -648,7 +645,6 @@ def update(
                     _entry_cycle[ticker] = cycle_id
                     _entry_regime[ticker] = regime
                     _conviction_peak[ticker] = conviction
-                    _conviction_weakening_counter[ticker] = 0
                     logger.info(
                         "%s: THESIS ENTRY — state=%s dir=%s conviction=%.3f",
                         ticker, new_state, direction, conviction,
@@ -665,7 +661,6 @@ def update(
                 _entry_cycle.pop(ticker, None)
                 _entry_regime.pop(ticker, None)
                 _conviction_peak.pop(ticker, None)
-                _conviction_weakening_counter.pop(ticker, None)
                 # Keep last 2 memory snapshots for trend continuity on re-entry
                 if len(_signal_memory.get(ticker, [])) > 2:
                     _signal_memory[ticker] = _signal_memory[ticker][-2:]
@@ -1025,11 +1020,8 @@ def get_signal_health_score(ticker: str) -> dict:
             net_momentum = 0.5  # Neutral if not enough data
 
         # ── Factor 2: Strategy Retention (25%) ──
-        # Read from memory snapshot (prev cycle) instead of _prev_strategy_count
-        # which was being overwritten every cycle and always matched curr_votes.
         curr_votes = current.get("active_votes", 0)
         prev_votes_count = prev.get("active_votes", 0) if prev else curr_votes
-        # _prev_strategy_count is tracked separately for other uses
         if prev_votes_count > 0:
             retention = min(curr_votes / max(prev_votes_count, 1), 1.0)
         else:
@@ -1104,8 +1096,6 @@ def get_signal_health_score(ticker: str) -> dict:
         if net_momentum < 0.35:
             warnings.append("net_score_fading")
         if retention_score < 0.5:
-            # Use actual dropped count from snapshot comparison (was previously broken —
-            # _prev_strategy_count always matched curr_votes so this never fired)
             if _dropped > 0:
                 warnings.append(f"{_dropped}_strategies_dropped")
         if tightness < 0.4:
@@ -1360,10 +1350,8 @@ def reset():
         _strategy_pending.clear()
         _last_strong_cycle.clear()
         _last_top_contributors.clear()
-        _prev_strategy_count.clear()
         _conviction_score.clear()
         _conviction_peak.clear()
-        _conviction_weakening_counter.clear()
         _thesis_strategies.clear()
         _entry_cycle.clear()
         _entry_regime.clear()
@@ -1382,10 +1370,8 @@ def remove_ticker(ticker: str):
         _take_profit_events.pop(ticker, None)
         _last_strong_cycle.pop(ticker, None)
         _last_top_contributors.pop(ticker, None)
-        _prev_strategy_count.pop(ticker, None)
         _conviction_score.pop(ticker, None)
         _conviction_peak.pop(ticker, None)
-        _conviction_weakening_counter.pop(ticker, None)
         _thesis_strategies.pop(ticker, None)
         _entry_cycle.pop(ticker, None)
         _entry_regime.pop(ticker, None)

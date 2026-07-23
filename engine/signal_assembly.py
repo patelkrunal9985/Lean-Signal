@@ -107,14 +107,14 @@ def compute_verdict(signal: dict, health: dict | None, signal_states: dict | Non
         return "EXIT" if state in ("active", "confirmed", "weakening") else "AVOID"
 
     if state == "weakening":
-        weakening_level = _VERDICT_STATE_BASE.get(state, 0)
+        if health_label in ("fragile", "terminal"):
+            return "EXIT"
+        if not gate_passed:
+            return "EXIT"
+        weakening_level = 1  # Base: REDUCE territory
         if counter_trend:
             weakening_level -= 1
         if age_decay < 0.7:
-            weakening_level -= 1
-        if not gate_passed:
-            weakening_level -= 2
-        if health_label == "fragile":
             weakening_level -= 1
         if weakening_level <= 0:
             return "EXIT"
@@ -364,8 +364,10 @@ def assemble_cycle_result(
 
             # ── Freshness check: skip if not scanned in 5+ cycles ──
             last_snap = ts.get("current_signal") or {}
-            last_cycle = last_snap.get("cycle_id", 0)
+            last_cycle = last_snap.get("cycle_id", 0) if isinstance(last_snap, dict) else 0
             if last_cycle > 0 and cycle_id - last_cycle > 5:
+                continue
+            if not last_snap:  # v1 disk format, no memory snapshot
                 continue
 
             # ── Hard cap: max 30 persistent slots ──

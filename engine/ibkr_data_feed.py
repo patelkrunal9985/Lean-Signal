@@ -1373,6 +1373,19 @@ def fetch_live_option_prices(ticker: str, expiration: str, strikes: list[float],
     return result
 
 
+def clear_live_prices():
+    """Force-clear all cached live prices and subscriptions.
+
+    Call this when data goes stale (e.g. after IBKR disconnect/reconnect)
+    so fresh ticks start from a clean slate instead of overwriting old data.
+    """
+    global _live_prices, _subscribed_tickers
+    with _live_prices_lock:
+        _live_prices.clear()
+        _subscribed_tickers.clear()
+    logger.warning("Live price cache cleared (force-reset)")
+
+
 def get_live_price(ticker: str) -> Optional[dict]:
     """Thread-safe read from the live price cache."""
     ticker = ticker.upper().strip()

@@ -48,6 +48,23 @@ def main():
                 except OSError:
                     pass
 
+    # Clear stale state files so new server starts with a clean slate
+    data_dir = PROJECT_ROOT / "data"
+    for stale_file in ["cycle_history.json", "signal_state.json", "tick_state"]:
+        target = data_dir / stale_file
+        try:
+            if target.is_dir():
+                import shutil
+                shutil.rmtree(target, ignore_errors=True)
+                logger = print
+                logger(f"Cleared stale state: {stale_file}/")
+            elif target.exists():
+                target.unlink()
+                logger = print
+                logger(f"Cleared stale state: {stale_file}")
+        except Exception:
+            pass
+
     # Start the new server
     server_py = PROJECT_ROOT / "server.py"
     subprocess.Popen(

@@ -40,6 +40,7 @@ _cycle_history = []
 _auto_run_enabled = False
 _auto_run_thread = None
 _stop_auto_run = threading.Event()
+_stale_consecutive = 0  # consecutive cycles with stale prices
 
 
 def _load_history():
@@ -118,6 +119,36 @@ def run_cycle() -> dict:
             _save_history()
             logger.warning("Cycle skipped: IBKR not connected")
             return result
+
+        # ── Stale data guard ──
+        global _stale_consecutive
+        try:
+            from engine.ibkr_data_feed import get_all_live_prices, clear_live_prices
+            prices = get_all_live_prices()
+            fresh_count = sum(1 for p in prices.values() if p.get("age_seconds", 999) < 300)
+            stale_count = len(prices) - fresh_count
+            if len(prices) >= 4 and stale_count >= len(prices) // 2:
+                _stale_consecutive += 1
+                if _stale_consecutive >= 3:
+                    logger.error(
+                        "All prices stale for %d consecutive cycles (stale=%d/%d). "
+                        "Resetting data feed...",
+                        _stale_consecutive, stale_count, len(prices),
+                    )
+                    clear_live_prices()
+                    from engine.tick_engine import reset as reset_tick_engine
+                    reset_tick_engine()
+                    _stale_consecutive = 0
+                    result = _error_result(cycle_id, "stale_data_reset")
+                    _last_cycle_result = result
+                    _cycle_history.insert(0, result)
+                    _save_history()
+                    logger.info("Stale data reset complete — next cycle will start fresh")
+                    return result
+            else:
+                _stale_consecutive = 0
+        except Exception as e:
+            logger.debug("Stale data check failed: %s", e)
 
         # ── Market-open history reset ──
         now_et = now_ny()
@@ -233,26 +264,49 @@ def stop_auto_run():
 
 
 def init():
-    _load_history()
+    global _stale_consecutive, _cycle_history, _cycle_count
+    _stale_consecutive = 0
+    _cycle_count = 0
 
-    # ── Load tick state checkpoint for today's session ──
-    # This ensures cumulative delta survives server restart within the same trading day.
-    from engine.tick_engine import load_checkpoint, reset as reset_tick_engine
-    if not load_checkpoint():
-        logger.info("No tick checkpoint for today — starting fresh session")
-        reset_tick_engine()
+    # ── Always start with a clean tick state ──
+    # Loading a stale checkpoint from a prior session corrupts cumulative delta
+    # and tick buffers, causing strategies to see phantom data.
+    from engine.tick_engine import reset as reset_tick_engine
+    reset_tick_engine()
 
-    from engine.ibkr_data_feed import get_streamer, IBKRStreamer
+    # ── Clear stale cycle history — prevents dashboard showing 49MB of old data ──
+    _cycle_history.clear()
+    _save_history()
+
+    # ── Clear stale signal persistence ──
+    try:
+        state_file = DATA_DIR / "signal_state.json"
+        if state_file.exists():
+            state_file.unlink()
+            logger.info("Cleared stale signal_state.json")
+    except Exception as e:
+        logger.debug("Could not clear signal_state.json: %s", e)
+
+    from engine.ibkr_data_feed import clear_live_prices, get_streamer, IBKRStreamer
     from utils.config import IBKR_HOST, IBKR_PORT, IBKR_CLIENT_ID
-    streamer = get_streamer()
-    if streamer is None:
-        streamer = IBKRStreamer(
-            host=IBKR_HOST, port=IBKR_PORT, client_id=IBKR_CLIENT_ID
-        )
-        from engine.ibkr_data_feed import set_streamer
-        set_streamer(streamer)
-        streamer.start()
-        logger.info("IBKR streamer started")
+
+    # Force-stop any existing streamer to avoid stale connections
+    old_streamer = get_streamer()
+    if old_streamer is not None:
+        try:
+            old_streamer.stop()
+        except Exception:
+            pass
+
+    clear_live_prices()
+    streamer = IBKRStreamer(
+        host=IBKR_HOST, port=IBKR_PORT, client_id=IBKR_CLIENT_ID
+    )
+    from engine.ibkr_data_feed import set_streamer
+    set_streamer(streamer)
+    streamer.start()
+    logger.info("IBKR streamer started (fresh)")
+
     from engine.ibkr_connector import start_monitoring
     start_monitoring(interval=10)
     from engine.daytype_model import init as init_daytype

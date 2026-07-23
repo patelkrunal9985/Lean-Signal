@@ -57,12 +57,13 @@ def _autosave():
                 "thesis_strategies": dict(_thesis_strategies),
                 "entry_cycle": dict(_entry_cycle),
                 "entry_regime": dict(_entry_regime),
+                "entry_direction": dict(_entry_direction),
                 # Save last 2 snapshots per ticker (enough for health score after restart)
                 "signal_memory": {
                     t: mem[-2:] if len(mem) >= 2 else mem
                     for t, mem in _signal_memory.items()
                 },
-                "version": 2,
+                "version": 3,
                 "saved_at": time.time(),
             }
         with open(_STATE_FILE, "w") as f:
@@ -96,6 +97,7 @@ def _autoload():
                     ("conviction_peak", _conviction_peak),
                     ("entry_cycle", _entry_cycle),
                     ("entry_regime", _entry_regime),
+                    ("entry_direction", _entry_direction),
                 ]:
                     if d in data and isinstance(data[d], dict):
                         target.update(data[d])
@@ -149,6 +151,7 @@ _conviction_peak: dict[str, float] = {}           # ticker → peak conviction s
 _thesis_strategies: dict[str, list[dict]] = {}    # ticker → snapshot of strategy votes at entry
 _entry_cycle: dict[str, int] = {}                 # ticker → cycle_id when thesis was entered
 _entry_regime: dict[str, str] = {}                # ticker → primary regime at entry time
+_entry_direction: dict[str, str] = {}             # ticker → direction at thesis entry (immutable)
 
 # ── Signal Health & Warning tracking ──
 _last_strong_cycle: dict[str, int] = {}             # ticker → last cycle_id where net_score > 0.4
@@ -359,7 +362,7 @@ def _compute_conviction(
         # ── Active thesis: validate using edge, time, regime, PnL, velocity ──
         entry_strategies = _thesis_strategies.get(ticker, [])
         curr_votes = strategy_votes or []
-        entry_dir = _active_direction.get(ticker, "long")
+        entry_dir = _entry_direction.get(ticker, _active_direction.get(ticker, "long"))
         elapsed = max(cycle_id - _entry_cycle.get(ticker, cycle_id), 0)
 
         # Edge remaining
@@ -464,7 +467,7 @@ def _compute_conviction(
             diversity = min(len(families) / 3.0, 1.0)
 
         cycles_seen = len(_signal_memory.get(ticker, []))
-        building_factor = min((cycles_seen + 2) / 5.0, 1.0)
+        building_factor = min((cycles_seen + 2) / 4.0, 1.0)
 
         # ── Velocity boost: if price surging in same direction as new thesis ──
         velocity_supports = False
@@ -475,7 +478,7 @@ def _compute_conviction(
                 v_boost = min(velocity_atr * 0.25, max_boost)
                 building_factor = min(building_factor + v_boost, 1.0)
 
-        base = net_mag * 0.8 * building_factor
+        base = net_mag * building_factor
         if direction == prev_direction and prev_direction not in (None, "neutral"):
             base = max(base, prev_conviction * 0.95)
         elif direction == "neutral":
@@ -644,6 +647,7 @@ def update(
                     _thesis_strategies[ticker] = list(strategy_votes or [])
                     _entry_cycle[ticker] = cycle_id
                     _entry_regime[ticker] = regime
+                    _entry_direction[ticker] = direction
                     _conviction_peak[ticker] = conviction
                     logger.info(
                         "%s: THESIS ENTRY — state=%s dir=%s conviction=%.3f",
@@ -660,10 +664,10 @@ def update(
                 _thesis_strategies.pop(ticker, None)
                 _entry_cycle.pop(ticker, None)
                 _entry_regime.pop(ticker, None)
+                _entry_direction.pop(ticker, None)
                 _conviction_peak.pop(ticker, None)
-                # Keep last 2 memory snapshots for trend continuity on re-entry
-                if len(_signal_memory.get(ticker, [])) > 2:
-                    _signal_memory[ticker] = _signal_memory[ticker][-2:]
+                # Clear memory so re-entry builds fresh conviction
+                _signal_memory[ticker] = []
 
                 logger.info(
                     "%s: THESIS EXIT — prev_state=%s prev_dir=%s",
@@ -814,6 +818,7 @@ def get_ticker_state(ticker: str) -> dict:
             "has_thesis": _entry_cycle.get(ticker) is not None,
             "entry_cycle": _entry_cycle.get(ticker, 0),
             "entry_regime": _entry_regime.get(ticker, ""),
+            "entry_direction": _entry_direction.get(ticker, ""),
         }
 
 
@@ -1355,6 +1360,7 @@ def reset():
         _thesis_strategies.clear()
         _entry_cycle.clear()
         _entry_regime.clear()
+        _entry_direction.clear()
 
 
 def remove_ticker(ticker: str):
@@ -1375,6 +1381,7 @@ def remove_ticker(ticker: str):
         _thesis_strategies.pop(ticker, None)
         _entry_cycle.pop(ticker, None)
         _entry_regime.pop(ticker, None)
+        _entry_direction.pop(ticker, None)
 
 
 # ── Restore state from disk on import ──

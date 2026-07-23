@@ -35,11 +35,6 @@
 
   <main>
     <div id="tab-signals" class="tab-content active">
-      <div class="sub-tabs">
-        <button class="sub-tab active" data-subtab="stock" onclick="switchSubTab('signals', 'stock')">Stock Signals</button>
-        <button class="sub-tab" data-subtab="future" onclick="switchSubTab('signals', 'future')">Futures Signals</button>
-        <button class="sub-tab" data-subtab="option" onclick="switchSubTab('signals', 'option')">Options Signals</button>
-      </div>
       <div id="signal-summary" class="summary-bar">
         <span id="total-scanned">Scanned: 0</span>
         <span id="total-signals">Signals: 0</span>
@@ -47,9 +42,18 @@
         <span id="data-quality-indicator" class="dq-indicator" title="Data quality: IBKR connected, live tickers, strategies loaded">DQ: --</span>
         <span id="summary-bar-extra" style="margin-left:auto;display:flex;gap:8px;align-items:center"></span>
       </div>
-      <div id="signals-stock" class="signals-group active"></div>
-      <div id="signals-future" class="signals-group"></div>
-      <div id="signals-option" class="signals-group"></div>
+
+      <!-- Active Positions Strip -->
+      <div id="active-positions-strip" class="active-positions-strip" style="display:none">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;padding:0 4px">
+          <span style="font-size:12px;font-weight:600;color:var(--text-muted)">ACTIVE POSITIONS</span>
+          <span id="active-count" class="status-badge connected"></span>
+        </div>
+        <div id="active-positions-cards" style="display:flex;gap:10px;overflow-x:auto;padding:4px 0"></div>
+      </div>
+
+      <!-- All Tickers Grid -->
+      <div class="ticker-grid" id="ticker-grid"></div>
     </div>
 
     <div id="tab-history" class="tab-content">

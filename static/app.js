@@ -489,295 +489,270 @@ function _updateStickyEvents(signals, flips, flipPotentials) {
     }
   }
 }
+}
 
-function renderSignals(cycle) {
-  // STATE: Error
-  if (cycle.status === 'error') {
+/* ═══════════════════════════════════════════════════════════════
+   Fixed Grid Dashboard — Signal Rendering
+   ═══════════════════════════════════════════════════════════════ */
+
+// Fixed ticker order — filtered (no mini contracts)
+var _GRID_TICKERS = [
+  'SPY', 'QQQ',
+  'ES=F', 'NQ=F', 'YM=F', 'RTY=F', 'GC=F', 'CL=F', 'VX=F',
+  'SPY_OPT', 'QQQ_OPT'
+];
+
+// Track if grid has been created
+var _gridInitialized = false;
+
+// Cell data cache for in-place updates
+var _cellCache = {};
+
+function _getDirectionArrow(dir) {
+  return dir === 'long' ? '▲' : dir === 'short' ? '▼' : '–';
+}
+
+function _getDirClass(dir) {
+  return dir === 'long' ? 'long' : dir === 'short' ? 'short' : 'neutral';
+}
+
+// ── Create a single ticker cell (runs once per ticker) ──
+function _createTickerCell(ticker) {
+  var cell = document.createElement('div');
+  cell.id = 'cell-' + ticker.replace(/=/g, '-').replace(/_/g, '-');
+  cell.className = 'ticker-cell state-none';
+  cell.setAttribute('data-ticker', ticker);
+
+  // Determine type for styling
+  var isOption = ticker.indexOf('_OPT') >= 0;
+  var isFuture = ticker.indexOf('=F') >= 0;
+  var typeLabel = isOption ? 'opt' : isFuture ? 'fut' : 'stk';
+
+  cell.innerHTML =
+    '<div class="tc-header">' +
+      '<span class="tc-ticker">' + ticker.replace('=F','').replace('_OPT','') + '</span>' +
+      '<span class="tc-dir neutral">–</span>' +
+    '</div>' +
+    '<div class="tc-body">' +
+      '<span class="tc-conf">0%</span>' +
+      '<span class="tc-state none">none</span>' +
+    '</div>' +
+    '<div class="tc-meta">' +
+      '<span class="tc-price">$—</span>' +
+      '<span class="tc-type">' + typeLabel + '</span>' +
+    '</div>';
+
+  // Click handler for popup
+  cell.onclick = function() {
+    var last = _status.last_cycle;
+    if (last && last.signals) {
+      var allSigs = [];
+      ['stock','future','option'].forEach(function(type) {
+        (last.signals[type] || []).forEach(function(s) { allSigs.push(s); });
+      });
+      var sig = allSigs.find(function(s) { return s.ticker === ticker; });
+      if (sig) showSignalPopup(sig, last);
+    }
+  };
+
+  return cell;
+}
+
+// ── Initialize the grid (first load only) ──
+function _initTickerGrid() {
+  var grid = document.getElementById('ticker-grid');
+  if (!grid) return;
+
+  grid.innerHTML = '';
+  _GRID_TICKERS.forEach(function(t) {
+    var cell = _createTickerCell(t);
+    grid.appendChild(cell);
+    _cellCache[t] = {
+      element: cell,
+      state: 'none',
+      direction: 'neutral',
+      confidence: 0,
+      price: 0
+    };
+  });
+  _gridInitialized = true;
+}
+
+// ── Update a single cell in-place ──
+function _updateCell(ticker, state, direction, confidence, price, verdict, strategies) {
+  var cache = _cellCache[ticker];
+  if (!cache) return;
+
+  var cell = cache.element;
+  if (!cell) return;
+
+  // Update state class
+  var newStateClass = 'state-' + state;
+  cell.className = 'ticker-cell ' + newStateClass;
+
+  // Update direction
+  var dirEl = cell.querySelector('.tc-dir');
+  if (dirEl) {
+    dirEl.textContent = _getDirectionArrow(direction);
+    dirEl.className = 'tc-dir ' + _getDirClass(direction);
+  }
+
+  // Update confidence
+  var confEl = cell.querySelector('.tc-conf');
+  if (confEl) confEl.textContent = (confidence * 100).toFixed(0) + '%';
+
+  // Update state badge
+  var stateEl = cell.querySelector('.tc-state');
+  if (stateEl) {
+    stateEl.textContent = state.toUpperCase();
+    stateEl.className = 'tc-state ' + state;
+  }
+
+  // Update price
+  var priceEl = cell.querySelector('.tc-price');
+  if (priceEl && price > 0) priceEl.textContent = '$' + price.toFixed(2);
+
+  // Update cache
+  cache.state = state;
+  cache.direction = direction;
+  cache.confidence = confidence;
+  cache.price = price;
+}
+
+// ── Render Active Positions Strip (top) ──
+function _renderActivePositions() {
+  var strip = document.getElementById('active-positions-strip');
+  var container = document.getElementById('active-positions-cards');
+  if (!strip || !container) return;
+
+  // Get all tickers with active/confirmed/weakening state
+  var states = _status.signal_states || {};
+  var byTicker = states.by_ticker || {};
+  var last = _status.last_cycle;
+  var allSigs = [];
+  if (last && last.signals) {
     ['stock','future','option'].forEach(function(type) {
-      var container = document.getElementById('signals-' + type);
-      if (container) container.innerHTML = '<div class="error-state">❌ Cycle failed: ' + (cycle.reason || 'unknown') + '</div>';
+      (last.signals[type] || []).forEach(function(s) { allSigs.push(s); });
     });
+  }
+
+  var activeTickers = [];
+  for (var t in byTicker) {
+    var st = byTicker[t];
+    if (st && (st.state === 'active' || st.state === 'confirmed' || st.state === 'weakening')) {
+      var sig = allSigs.find(function(s) { return s.ticker === t; });
+      activeTickers.push({ ticker: t, state: st, signal: sig });
+    }
+  }
+
+  if (activeTickers.length === 0) {
+    strip.style.display = 'none';
     return;
   }
 
-  var groups = cycle.signals || {};
-  var flips = cycle.flips || {};
-  var flipPotentials = cycle.flips_potential || {};
-  var signalStates = cycle.signal_states || {};
+  strip.style.display = 'block';
+  document.getElementById('active-count').textContent = '(' + activeTickers.length + ')';
+  document.getElementById('active-count').className = 'status-badge ' + (activeTickers.some(function(a) { return a.state.state === 'confirmed'; }) ? 'connected' : 'running');
 
-  // ── Update sticky event persistence ──
-  var allSignals = [];
-  ['stock', 'future', 'option'].forEach(function(type) {
-    var sigs = groups[type] || [];
-    sigs.forEach(function(s) {
-      // Derive weakening state for sticky TP tracking
-      var ss = (signalStates && signalStates.by_ticker) ? signalStates.by_ticker[s.ticker] : null;
-      s.weakening = (ss && ss.state === 'weakening');
-      allSignals.push(s);
-    });
-  });
-  _updateStickyEvents(allSignals, flips, flipPotentials);
+  // Render cards
+  container.innerHTML = '';
+  activeTickers.forEach(function(item) {
+    var ticker = item.ticker;
+    var st = item.state;
+    var sig = item.signal;
 
-  ['stock', 'future', 'option'].forEach(function(type) {
-    var container = document.getElementById('signals-' + type);
-    if (!container) return;
+    var card = document.createElement('div');
+    card.className = 'active-position-card';
+    card.onclick = function() {
+      if (sig) showSignalPopup(sig, last);
+    };
 
-    var signals = groups[type] || [];
+    var dir = sig ? sig.direction : 'neutral';
+    var dirArrow = _getDirectionArrow(dir);
+    var dirLabel = dir === 'long' ? 'LONG' : dir === 'short' ? 'SHORT' : 'NEUTRAL';
+    var conf = sig ? sig.confidence : (st.max_conviction || 0);
 
-    // STATE: Empty
-    if (signals.length === 0) {
-      var emptyMsg = (type === 'option') ? '📭 No option signals — check chain health or wait for confluence'
-        : (type === 'future') ? '📭 No futures signals — market conditions below threshold'
-        : '📭 No stock signals — no tickers meeting criteria';
-      container.innerHTML = '<div class="empty-state">' + emptyMsg + '</div>';
-      return;
-    }
+    var entryPx = st.state_entry_price || (sig ? sig.entry_price : 0);
+    var sl = sig ? sig.stop_loss : 0;
+    var tp = sig ? sig.take_profit : 0;
 
-    // STATE: Data
-    container.innerHTML = '';
-    signals.forEach(function(s) {
-      var card = createSignalCard(s, cycle, flips, flipPotentials, signalStates);
-      container.appendChild(card);
-    });
-  });
-}
-
-function createSignalCard(signal, cycle, flips, flipPotentials, signalStates) {
-  var card = document.createElement('div');
-  card.className = 'signal-card';
-  var dirClass = signal.direction === 'long' ? 'long' : signal.direction === 'short' ? 'short' : 'neutral';
-  var dirArrow = signal.direction === 'long' ? '▲' : signal.direction === 'short' ? '▼' : '–';    // ── Signal state badge (persistence) — O(1) lookup via by_ticker ──
-    var signalStateHtml = '';
-    var isWeakening = false;
-    var thisState = (signalStates && signalStates.by_ticker) ? signalStates.by_ticker[signal.ticker] : null;
-    if (thisState && thisState.state && thisState.state !== 'none') {
-        var dur = stateAge(thisState.state_since);
-        var durLabel = dur ? ' for ' + dur : '';
-        var stateClass = thisState.state;
-        signalStateHtml = '<span class="state-badge ' + stateClass + '">' + thisState.state.toUpperCase() + ' x' + (thisState.consecutive_same || 1) + durLabel + '</span>';
-        if (thisState.state === 'weakening') isWeakening = true;
-        // Age decay display
-        if (thisState.age_decay && thisState.age_decay < 1.0) {
-          signalStateHtml += ' <span class="age-decay-badge">decaying (' + thisState.age_decay.toFixed(2) + ')</span>';
-        }
-        // ── Signal generation time & entry price (active/confirmed states) ──
-        if (thisState.state_since > 0) {
-          var genTime = formatSignalTime(thisState.state_since);
-          var entryPx = thisState.state_entry_price || signal.entry_price || 0;
-          var priceStr = entryPx > 0 ? ' @ $' + entryPx.toFixed(2) : '';
-          signalStateHtml += ' <span class="generated-badge" title="Signal generated: ' + genTime + priceStr + '">📅 ' + genTime + priceStr + '</span>';
-        }
-      }
-
-  // ── Entry/Exit levels ──
-  var entryPrice = signal.entry_price || signal.current_price || 0;
-  var sl = signal.stop_loss || 0;
-  var tp = signal.take_profit || 0;
-  var rr = signal.risk_reward || 0;
-  var levelsHtml = '';
-  if (sl > 0 && tp > 0) {
-    levelsHtml =
-      '<div class="row3">' +
-        '<span class="level-label">Entry</span><span class="level-val">$' + entryPrice.toFixed(2) + '</span>' +
-        '<span class="level-label">SL</span><span class="level-val sl">$' + sl.toFixed(2) + '</span>' +
-        '<span class="level-label">TP</span><span class="level-val tp">$' + tp.toFixed(2) + '</span>' +
-        '<span class="level-label">R:R</span><span class="level-val rr">' + rr.toFixed(1) + '</span>' +
-      '</div>';
-  }
-
-  // ── Option premium levels ──
-  var optPrem = signal.option_entry_premium || 0;
-  if (optPrem > 0 && signal.instrument_type === 'option') {
-    var recStrike = signal.recommended_strike || 0;
-    var recOtm = signal.recommended_otm || '';
-    var recType = signal.recommended_option_type || '';
-    var estWin = signal.estimated_win_rate ? (signal.estimated_win_rate * 100).toFixed(0) + '%' : '--';
-    var strikeLine = '';
-    if (recStrike > 0) {
-      strikeLine =
-        '<span class="level-label">' + recOtm + ' ' + recType + '</span>' +
-        '<span class="level-val tp">$' + recStrike.toFixed(0) + '</span>' +
-        '<span class="level-label">Est Win</span><span class="level-val rr">' + estWin + '</span>';
-    }
-    var posLine = (signal.instrument_type === 'option' && signal.direction !== 'neutral')
-      ? '<span class="level-label">Size</span><span class="level-val">1 contract</span>' : '';
-    var todLabel = signal.time_window || '';
-    var vwapLabel = signal.vwap_position || '';
-    var metaLine = '';
-    if (todLabel || vwapLabel) {
-      metaLine =
-        (todLabel ? '<span class="level-label">' + todLabel.replace(/_/g, ' ') + '</span>' : '') +
-        (vwapLabel ? '<span class="level-val">VWAP: ' + vwapLabel + '</span>' : '');
-    }
-    levelsHtml +=
-      (strikeLine ? '<div class="row3 option-strike">' + strikeLine + '</div>' : '') +
-      '<div class="row3 option-premium">' +
-        '<span class="level-label">Prem Entry</span><span class="level-val">$' + optPrem.toFixed(2) + '</span>' +
-        '<span class="level-label">Prem SL</span><span class="level-val sl">$' + (signal.option_sl_premium || 0).toFixed(2) + '</span>' +
-        '<span class="level-label">Prem TP</span><span class="level-val tp">$' + (signal.option_tp_premium || 0).toFixed(2) + '</span>' +
+    card.innerHTML =
+      '<div class="ap-header">' +
+        '<span class="ap-ticker">' + ticker.replace('=F','').replace('_OPT','') + ' <span class="direction-badge ' + dir + '">' + dirArrow + ' ' + dirLabel + '</span></span>' +
+        '<span class="ap-verdict ' + st.state + '">' + st.state.toUpperCase() + '</span>' +
       '</div>' +
-      (posLine ? '<div class="row3 option-size">' + posLine + '</div>' : '') +
-      (metaLine ? '<div class="row3 option-meta">' + metaLine + '</div>' : '');
-  }
-
-  // ── Mini dashboard for options ──
-  var miniDash = signal.market_dashboard || {};
-  var miniDashHtml = '';
-  if (Object.keys(miniDash).length > 0 && signal.instrument_type === 'option') {
-    var breadthLabel = miniDash.breadth_state || '—';
-    var breadthClass = breadthLabel === 'bullish' || breadthLabel === 'slightly_bullish' ? 'accent'
-      : breadthLabel === 'bearish' || breadthLabel === 'slightly_bearish' ? 'danger' : '';
-    var thrustIcon = miniDash.breadth_thrust ? ' ⚡' : '';
-    miniDashHtml =
-      '<div class="row-mini">' +
-        '<span>IV <strong>' + (miniDash.iv || 0).toFixed(1) + '%</strong></span>' +
-        '<span>P/C <strong>' + (miniDash.pc_ratio != null ? miniDash.pc_ratio : '—') + '</strong></span>' +
-        '<span>VIX <strong>' + (miniDash.vix_spot != null ? miniDash.vix_spot : '—') + '</strong></span>' +
-        '<span>Breadth <strong class="' + breadthClass + '">' + breadthLabel + thrustIcon + '</strong></span>' +
-        '<span>DTE <strong>' + (miniDash.dte != null ? miniDash.dte : '—') + '</strong></span>' +
-      '</div>';
-  }
-
-  // ── Flip badge (from persistence engine + sticky persistence) ──
-  var flipInfo = flips[signal.ticker] || null;
-  var flipPotInfo = (!flipInfo) ? (flipPotentials[signal.ticker] || null) : null;
-  var stickyFlip = _stickyFlips[signal.ticker] || null;
-  var flipRow = '';
-  if (flipInfo) {
-    var score = flipInfo.score || 0;
-    var flipClass = score >= 0.8 ? 'flip-badge major' : 'flip-badge';
-    flipRow = '<div class="row-flip"><span class="' + flipClass + '">↻ FLIP ' + (flipInfo.from || '').toUpperCase() + ' → ' + (flipInfo.to || '').toUpperCase() + ' score=' + score.toFixed(2) + '</span></div>';
-  } else if (flipPotInfo) {
-    var needed = flipPotInfo.needs_cycles || 1;
-    flipRow = '<div class="row-flip"><span class="flip-badge potential">↻ WATCHING: needs ' + needed + ' more cycle' + (needed > 1 ? 's' : '') + ' to confirm</span></div>';
-  } else if (stickyFlip) {
-    var stickyClass = stickyFlip.potential ? 'flip-badge potential' : (stickyFlip.score >= 0.8 ? 'flip-badge major' : 'flip-badge');
-    var stickyLabel = stickyFlip.from ? (stickyFlip.from.toUpperCase() + ' → ' + stickyFlip.to.toUpperCase()) : 'recent flip';
-    flipRow = '<div class="row-flip"><span class="' + stickyClass + ' sticky">↻ FLIP ' + stickyLabel + ' (' + stickyFlip.cyclesLeft + ' cycles ago)</span></div>';
-  }
-
-  // TAKE PROFIT banner (current + sticky persistence)
-  var tpBannerHtml = '';
-  var stickyTp = _stickyTps[signal.ticker] || null;
-  if (isWeakening) {
-    tpBannerHtml = '<div class="take-profit-banner">⚠️ TAKE PROFIT — Signal Weakening</div>';
-  } else if (stickyTp && stickyTp.cyclesLeft > 0) {
-    tpBannerHtml = '<div class="take-profit-banner sticky">⚠️ TAKE PROFIT — Signal Weakened (' + stickyTp.cyclesLeft + ' cycles ago)</div>';
-  }
-
-  // ── Persistent slot badge (ticker kept visible across cycles) ──
-  var slotBadgeHtml = '';
-  var gateStatusHtml = '';
-  if (signal.persistent_slot) {
-    // Show update info: gate result + current cycle direction
-    var currentDir = signal.current_direction || 'neutral';
-    var currentDirArrow = currentDir === 'long' ? '▲' : currentDir === 'short' ? '▼' : '–';
-    var currentDirLabel = currentDir === 'long' ? 'BULL' : currentDir === 'short' ? 'BEAR' : 'NEUTRAL';
-    var gateLabel = signal.gate_passed ? 'PASSED' : 'REJECTED';
-    var gateCls = signal.gate_passed ? 'gate-passed' : 'gate-rejected';
-    var gateReason = signal.gate_reason && signal.gate_reason !== 'not_scanned' ? ' — ' + signal.gate_reason.replace(/_/g, ' ') : '';
-    var priceStr = signal.current_price > 0 ? ' $' + signal.current_price.toFixed(2) : '';
-    slotBadgeHtml = '<div class="persistent-slot-badge">' +
-      '<span>♻ Cycle update:</span>' +
-      ' <span class="current-dir-badge ' + currentDir + '">' + currentDirArrow + ' ' + currentDirLabel + '</span>' +
-      ' <span class="gate-status-badge ' + gateCls + '">Gate: ' + gateLabel + gateReason + '</span>' +
-      (priceStr ? ' <span class="persistent-price">Price:' + priceStr + '</span>' : '') +
-    '</div>';
-  }
-
-  // ── Build card ──
-    // Conviction meter + tier badge
-    var convTier = (signal.consensus_meta && signal.consensus_meta.consensus_conviction_tier) || 'bronze';
-    var convPct = signal.confidence * 100;
-    var meterWidth = Math.max(convPct, 5);
-    var tierBadge = '<span class="tier-badge ' + convTier + '">' + convTier.toUpperCase() + '</span>';
-    var convictionHtml =
-      '<div class="conviction-meter">' +
-        tierBadge +
-        '<span class="meter-pct ' + convTier + '">' + convPct.toFixed(1) + '%</span>' +
-        '<div class="meter-bar ' + convTier + '" style="width:' + meterWidth + '%"></div>' +
+      '<div class="ap-row">' +
+        '<span>Conv: <strong>' + (conf * 100).toFixed(0) + '%</strong></span>' +
+        (entryPx ? '<span class="ap-entry">Entry: <strong>$' + entryPx.toFixed(2) + '</strong></span>' : '') +
+        (sl ? '<span class="ap-sl">SL: <strong>$' + sl.toFixed(2) + '</strong></span>' : '') +
+        (tp ? '<span class="ap-tp">TP: <strong>$' + tp.toFixed(2) + '</strong></span>' : '') +
       '</div>';
 
-    // ── Signal Health Score bar (parallel quality metric) ──
-    var healthScores = cycle.health_scores || {};
-    var health = healthScores[signal.ticker];
-    var healthHtml = '';
-    var fragileHtml = '';
-    var warningHtml = '';
-    if (health && health.health !== undefined) {
-      var healthPct = health.health;
-      var healthLabel = health.label || 'caution';
-      var healthLabelDisplay = healthLabel.toUpperCase();
-      var healthColors = { robust: 'var(--accent)', caution: 'var(--warning)', fragile: 'var(--danger)', terminal: '#666' };
-      var hc = healthColors[healthLabel] || 'var(--text-muted)';
-      healthHtml =
-        '<div class="health-bar-row">' +
-          '<span class="health-label-badge ' + healthLabel + '">' + healthLabelDisplay + '</span>' +
-          '<div class="health-bar-track"><div class="health-bar-fill ' + healthLabel + '" style="width:' + healthPct + '%;background:' + hc + '"></div></div>' +
-          '<span class="health-pct ' + healthLabel + '">' + healthPct + '</span>' +
-        '</div>';
-
-      // Fragile signal badge: CONFIRMED but health < 40 — O(1) lookup
-      var signalState = (signalStates && signalStates.by_ticker && signalStates.by_ticker[signal.ticker])
-        ? signalStates.by_ticker[signal.ticker].state : '';
-      if (healthLabel === 'fragile' || healthLabel === 'terminal') {
-        if (signalState === 'confirmed' || signalState === 'active') {
-          fragileHtml = '<span class="fragile-badge">⚠️ FRAGILE — Avoid Entry</span>';
-        }
-      }
-
-      // Warnings — categorized by Health Score factor
-      var warnings = health.warnings || [];
-      if (warnings.length > 0) {
-        var warnItems = [];
-        warnings.forEach(function(w) {
-          if (w === 'net_score_fading') warnItems.push({cat: 'Net Score', label: 'Fading', cls: 'warn-momentum'});
-          else if (w.indexOf('strategies_dropped') >= 0) warnItems.push({cat: 'Strategies', label: w.split('_')[0] + ' dropped', cls: 'warn-retention'});
-          else if (w === 'confidence_scattered') warnItems.push({cat: 'Tightness', label: 'Scattered', cls: 'warn-tightness'});
-          else if (w === 'single_family_dominant') warnItems.push({cat: 'Concentration', label: '1-family', cls: 'warn-diversity'});
-          else if (w === 'near_threshold') warnItems.push({cat: 'Margin', label: 'Near neutral', cls: 'warn-margin'});
-          else if (w === 'key_families_exiting') warnItems.push({cat: 'Concentration', label: 'Key exit', cls: 'warn-diversity'});
-          else if (w.indexOf('stale_confirmation') >= 0) warnItems.push({cat: 'Age', label: 'Stale ' + w.split('_').pop() + 'cyc', cls: 'warn-staleness'});
-          else warnItems.push({cat: 'Health', label: w.replace(/_/g, ' '), cls: ''});
-        });
-        warningHtml = '<div class="health-warnings">' + warnItems.map(function(item) {
-          return '<span class="warn-chip ' + item.cls + '"><span class="warn-chip-cat">' + item.cat + ':</span>' + item.label + '</span>';
-        }).join('') + '</div>';
-      }
-    }
-
-  // ── Final Verdict (synthesizes all indicators) ──
-  var verdict = signal.verdict || 'NO ACTION';
-  var verdictClass = 'verdict-badge ' + verdict.toLowerCase().replace(/\s+/g, '-');
-  var verdictHtml = '<div class="verdict-row"><span class="' + verdictClass + '">' + verdict + '</span></div>';
-
-  // ── Assemble card HTML ──
-  card.innerHTML =
-    verdictHtml +
-    '<div class="row1">' +
-      '<div><span class="ticker-name">' + signal.ticker + '</span>' +
-        '<span class="instrument-badge">' + (signal.instrument_type || '') + '</span>' +
-        signalStateHtml + '</div>' +
-      '<span class="direction-badge ' + dirClass + '">' + dirArrow + ' ' + signal.direction.toUpperCase() + '</span>' +
-    '</div>' +
-    slotBadgeHtml +
-    convictionHtml +
-    healthHtml +
-    fragileHtml +
-    warningHtml +
-    '<div class="row2">' +
-      '<span>Confidence: <strong>' + (signal.confidence * 100).toFixed(1) + '%</strong></span>' +
-      '<span>Score: <strong>' + ((signal.composite_score || 0) * 100).toFixed(1) + '%</strong></span>' +
-      '<span>Strategies: <strong>' + (signal.agreeing_count || 0) + '/' + (signal.strategy_count || 0) + '</strong></span>' +
-      '<span>Regime: <span class="regime-badge ' + (signal.regime || 'unknown') + '">' + (signal.regime || '?').replace(/_/g, ' ') + '</span></span>' +
-    '</div>' +
-    levelsHtml + miniDashHtml + tpBannerHtml + flipRow;
-
-  // ── Click to popup ──
-  card.onclick = function() { showSignalPopup(signal, cycle); };
-  return card;
+    container.appendChild(card);
+  });
 }
 
+// ── Main render: called on each status update ──
+function renderSignals(cycle) {
+  // Initialize grid on first call
+  if (!_gridInitialized) _initTickerGrid();
+
+  // Get signal states (all tickers, not just those with signals)
+  var states = _status.signal_states || {};
+  var byTicker = states.by_ticker || {};
+
+  // Get signal data from this cycle (for those that passed gate)
+  var allSigs = [];
+  var groups = cycle.signals || {};
+  ['stock','future','option'].forEach(function(type) {
+    (groups[type] || []).forEach(function(s) { allSigs.push(s); });
+  }
+
+  // Get gate evaluations for per-ticker strategy data
+  var gateEvals = cycle.gate_evaluations || [];
+  var gateByTicker = {};
+  gateEvals.forEach(function(g) { gateByTicker[g.ticker] = g; });
+
+  // Get live prices
+  var prices = _livePrices || {};
+
+  // Update each grid cell
+  _GRID_TICKERS.forEach(function(ticker) {
+    var st = byTicker[ticker] || { state: 'none', direction: 'neutral', max_conviction: 0 };
+    var sig = allSigs.find(function(s) { return s.ticker === ticker; });
+    var gate = gateByTicker[ticker];
+    var priceData = prices[ticker];
+    var price = priceData ? priceData.price : 0;
+
+    // Determine state and direction
+    var state = st.state || 'none';
+    var direction = st.active_direction || (sig ? sig.direction : 'neutral');
+    var confidence = sig ? sig.confidence : (st.max_conviction || 0);
+
+    // If no signal but we have gate data, use gate info
+    if (!sig && gate) {
+      direction = gate.direction || 'neutral';
+      confidence = gate.consensus_confidence || 0;
+      if (!state || state === 'none') {
+        if (confidence > 0.25) state = 'watching';
+        else if (confidence > 0.15) state = 'pending';
+        else state = 'none';
+      }
+
+    _updateCell(ticker, state, direction, confidence, price, sig ? sig.verdict : 'NO ACTION', gate ? gate.strategy_votes : []);
+  });
+
+  // Update active positions strip
+  _renderActivePositions();
+
+  // Update summary counts
+  var totalSignals = allSigs.length;
+  document.getElementById('total-signals').textContent = 'Signals: ' + totalSignals;
+  document.getElementById('total-scanned').textContent = 'Scanned: ' + (cycle.tickers_scanned || _GRID_TICKERS.length);
+
+  var elapsed = cycle.elapsed_seconds || 0;
+  document.getElementById('cycle-elapsed').textContent = 'Last cycle: ' + elapsed.toFixed(1) + 's';
+}
 /* ═══════════════════════════════════════════════════════════════
    History Rendering
    ═══════════════════════════════════════════════════════════════ */

@@ -785,3 +785,109 @@ header {
   .cheatsheet-toc { gap: 4px; }
   .toc-link { padding: 3px 8px; font-size: 11px; }
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   Fixed Grid Dashboard — Active Positions + Ticker Grid
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── Active Positions Strip ── */
+.active-positions-strip {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 8px 0 12px;
+  margin-bottom: 8px;
+  scrollbar-width: thin;
+}
+.active-positions-strip::-webkit-scrollbar { height: 4px; }
+.active-positions-strip:empty { display: none; }
+
+.active-position-card {
+  flex: 0 0 auto;
+  min-width: 220px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.active-position-card:hover { border-color: var(--accent); box-shadow: var(--shadow); transform: translateY(-1px); }
+.active-position-card .ap-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+.active-position-card .ap-ticker { font-size: 15px; font-weight: 700; }
+.active-position-card .ap-verdict { font-size: 10px; }
+.active-position-card .ap-row { display: flex; gap: 10px; font-size: 11px; color: var(--text-muted); flex-wrap: wrap; }
+.active-position-card .ap-row strong { color: var(--text); }
+.active-position-card .ap-entry { color: var(--info); }
+.active-position-card .ap-sl { color: var(--danger); }
+.active-position-card .ap-tp { color: var(--accent); }
+.active-position-card .ap-rr { color: var(--warning); }
+
+/* ── Ticker Grid ── */
+.ticker-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+@media (max-width: 1100px) {
+  .ticker-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 700px) {
+  .ticker-grid { grid-template-columns: 1fr; }
+}
+
+.ticker-cell {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  min-height: 70px;
+  cursor: pointer;
+  transition: border-color 0.4s ease, background 0.4s ease, box-shadow 0.4s ease;
+}
+.ticker-cell:hover { box-shadow: var(--shadow); }
+.ticker-cell .tc-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px; }
+.ticker-cell .tc-ticker { font-size: 14px; font-weight: 700; }
+.ticker-cell .tc-dir { font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 7px; }
+.ticker-cell .tc-dir.long { background: var(--accent-dim); color: var(--accent); }
+.ticker-cell .tc-dir.short { background: var(--danger-dim); color: var(--danger); }
+.ticker-cell .tc-dir.neutral { background: var(--bg-hover); color: var(--text-muted); }
+.ticker-cell .tc-body { display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: var(--text-muted); }
+.ticker-cell .tc-conf { font-weight: 700; }
+.ticker-cell .tc-price { font-variant-numeric: tabular-nums; }
+.ticker-cell .tc-state { font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 6px; }
+.ticker-cell .tc-strat-count { font-size: 10px; color: var(--text-muted); }
+
+/* ── State-based cell colors ── */
+.ticker-cell.state-confirmed {
+  background: rgba(0, 200, 100, 0.15);
+  border: 2px solid #00c864;
+  box-shadow: 0 0 10px rgba(0, 200, 100, 0.12);
+}
+.ticker-cell.state-active {
+  background: rgba(0, 200, 100, 0.08);
+  border: 1px solid #00c864;
+}
+.ticker-cell.state-pending {
+  background: rgba(255, 170, 0, 0.12);
+  border: 1px solid #ffaa00;
+}
+.ticker-cell.state-watching {
+  background: rgba(255, 170, 0, 0.04);
+  border: 1px dashed #6b4d0a;
+}
+.ticker-cell.state-weakening {
+  background: rgba(255, 50, 50, 0.10);
+  border: 1px solid #ff3232;
+}
+.ticker-cell.state-none {
+  border: 1px dashed #2a2a2a;
+}
+
+/* ── State badges within cells ── */
+.tc-state.confirmed { background: var(--accent-dim); color: var(--accent); }
+.tc-state.active { background: #1a3a6e; color: var(--info); }
+.tc-state.pending { background: var(--warning-dim); color: var(--warning); }
+.tc-state.weakening { background: var(--danger-dim); color: var(--danger); }
+.tc-state.watching { background: var(--bg-hover); color: var(--text-muted); }
+.tc-state.none { background: transparent; color: #555; }

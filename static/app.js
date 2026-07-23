@@ -300,9 +300,11 @@ function updateUI() {
     mhEl.className = 'status-badge';
     document.getElementById('summary-bar-extra')?.prepend(mhEl);
   }
-  var marketOpen = _status.market_hours;
-  mhEl.textContent = marketOpen ? 'Market Open' : 'Market Closed';
-  mhEl.className = 'status-badge ' + (marketOpen ? 'connected' : 'disconnected');
+  var mh = _status.market_hours || {};
+  var label = mh.label || (mh.open ? 'Market Open' : 'Market Closed');
+  var isOpen = mh.open || mh.futures_open;
+  mhEl.textContent = label;
+  mhEl.className = 'status-badge ' + (isOpen ? 'connected' : 'disconnected');
 
   // ── Cycle state ──
   var cycleEl = document.getElementById('cycle-status');

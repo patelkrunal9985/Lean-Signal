@@ -140,7 +140,7 @@ class LeanSignalsHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         ip = self.client_address[0]
-        if not self.path.startswith("/static/") and _rate_limited(ip) and "/api/" not in self.path:
+        if not self.path.startswith("/static/") and self.path not in ("/", "/dashboard") and _rate_limited(ip) and "/api/" not in self.path:
             self._send_json({"error": "rate_limited"}, 429)
             return
 

@@ -611,6 +611,7 @@ function _initTickerGrid() {
 
 // ── Mapping verbatim verdict text to CSS class suffixes ──
 function _verdictClass(verdict) {
+  if (!verdict) return 'no-action';
   var v = verdict.toUpperCase();
   if (v.indexOf('STRONG BUY') >= 0) return 'strong-buy';
   if (v.indexOf('STRONG SELL') >= 0) return 'strong-sell';
@@ -635,7 +636,7 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
 
   // ── Verdict badge ──
   var ve = cell.querySelector('.verdict-badge');
-  var verdict = sig ? sig.verdict : 'NO ACTION';
+  var verdict = sig ? (sig.verdict || 'NO ACTION') : 'NO ACTION';
   if (ve) {
     ve.textContent = verdict;
     ve.className = 'verdict-badge ' + _verdictClass(verdict);
@@ -643,21 +644,23 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
 
   // ── Direction badge ──
   var de = cell.querySelector('.direction-badge');
+  var dirLabel = direction || 'neutral';
   if (de) {
-    de.textContent = _getDirectionArrow(direction) + ' ' + direction.toUpperCase();
-    de.className = 'direction-badge ' + _getDirClass(direction);
+    de.textContent = _getDirectionArrow(dirLabel) + ' ' + dirLabel.toUpperCase();
+    de.className = 'direction-badge ' + _getDirClass(dirLabel);
   }
 
   // ── State badge ──
   var se = cell.querySelector('.state-badge');
+  var stateLabel = state || 'none';
   if (se) {
-    se.textContent = state.toUpperCase();
-    se.className = 'state-badge ' + state;
+    se.textContent = stateLabel.toUpperCase();
+    se.className = 'state-badge ' + stateLabel;
   }
 
   // ── Conviction meter ──
   var meta = gate && gate.consensus_meta ? gate.consensus_meta : (sig && sig.consensus_meta ? sig.consensus_meta : null);
-  var tier = meta ? meta.consensus_conviction_tier : 'bronze';
+  var tier = (meta && meta.consensus_conviction_tier) ? meta.consensus_conviction_tier : 'bronze';
   var convPct = confidence * 100;
 
   var te = cell.querySelector('.tier-badge');

@@ -516,6 +516,28 @@ function _getDirClass(dir) {
   return dir === 'long' ? 'long' : dir === 'short' ? 'short' : 'neutral';
 }
 
+// ── Build synthetic signal from gate evaluation (no signal generated but gate data exists) ──
+function _buildSyntheticSignal(gate) {
+  var meta = gate.consensus_meta || {};
+  var dir = gate.direction || 'neutral';
+  var conf = gate.consensus_confidence || 0;
+  var verdict = 'NO ACTION';
+  if (dir !== 'neutral' && conf > 0) {
+    verdict = (conf > 0.6 ? 'STRONG ' : '') + (dir === 'long' ? 'BUY' : 'SELL');
+  }
+  var strategies = (gate.strategy_votes || []).filter(function(v) { return v.confidence > 0; }).map(function(v) {
+    return { name: v.name || v.strategy || '?', direction: v.direction || 'neutral', confidence: v.confidence || 0, reasoning: '' };
+  });
+  return {
+    ticker: gate.ticker, instrument_type: gate.instrument_type || 'stock', direction: dir,
+    verdict: verdict, confidence: conf, regime: gate.regime || 'unknown',
+    current_price: gate.current_price || 0, gate_passed: gate.gate_passed || false,
+    gate_reason: gate.gate_reason || '', consensus_meta: meta, strategies: strategies,
+    time_window: gate.time_window || '', vwap_position: gate.vwap_position || '',
+    entry_price: 0, stop_loss: 0, take_profit: 0, risk_reward: 0,
+  };
+}
+
 // ── Create a single ticker card (runs once per ticker) ──
 function _createTickerCell(ticker) {
   var cell = document.createElement('div');
@@ -567,14 +589,20 @@ function _createTickerCell(ticker) {
 
   cell.onclick = function() {
     var last = _status.last_cycle;
-    if (last && last.signals) {
-      var allSigs = [];
+    if (!last) return;
+    var allSigs = [];
+    if (last.signals) {
       ['stock','future','option'].forEach(function(type) {
         (last.signals[type] || []).forEach(function(s) { allSigs.push(s); });
       });
-      var sig = allSigs.find(function(s) { return s.ticker === ticker; });
-      if (sig) showSignalPopup(sig, last);
     }
+    var sig = allSigs.find(function(s) { return s.ticker === ticker; });
+    if (!sig) {
+      var gateEvals = last.gate_evaluations || [];
+      var gate = gateEvals.find(function(g) { return g.ticker === ticker; });
+      if (gate) sig = _buildSyntheticSignal(gate);
+    }
+    if (sig) showSignalPopup(sig, last);
   };
 
   return cell;

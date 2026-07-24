@@ -491,31 +491,32 @@ function _updateStickyEvents(signals, flips, flipPotentials) {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   Fixed Grid Dashboard — Signal Rendering
+   Card Grid Dashboard — Signal Rendering
    ═══════════════════════════════════════════════════════════════ */
 
-// Fixed ticker order — filtered (no mini contracts)
-var _GRID_TICKERS = [
-  'SPY', 'QQQ',
-  'ES=F', 'NQ=F', 'YM=F', 'RTY=F', 'GC=F', 'CL=F', 'VX=F',
-  'SPY_OPT', 'QQQ_OPT'
+// Row groupings for card layout
+var _ROW_DEFS = [
+  { tickers: ['ES=F', 'NQ=F', 'RTY=F', 'YM=F'] },
+  { tickers: ['CL=F', 'GC=F', 'VX=F'] },
+  { tickers: ['SPY_OPT', 'QQQ_OPT'] },
+  { tickers: ['SPY', 'QQQ'] }
 ];
 
-// Track if grid has been created
-var _gridInitialized = false;
+var _GRID_TICKERS = [];
+_ROW_DEFS.forEach(function(r) { r.tickers.forEach(function(t) { _GRID_TICKERS.push(t); }); });
 
-// Cell data cache for in-place updates
+var _gridInitialized = false;
 var _cellCache = {};
 
 function _getDirectionArrow(dir) {
-  return dir === 'long' ? '▲' : dir === 'short' ? '▼' : '–';
+  return dir === 'long' ? '\u25b2' : dir === 'short' ? '\u25bc' : '\u2013';
 }
 
 function _getDirClass(dir) {
   return dir === 'long' ? 'long' : dir === 'short' ? 'short' : 'neutral';
 }
 
-// ── Create a single ticker cell (runs once per ticker) ──
+// ── Create a single ticker card (runs once per ticker) ──
 function _createTickerCell(ticker) {
   var cell = document.createElement('div');
   cell.id = 'cell-' + ticker.replace(/=/g, '-').replace(/_/g, '-');
@@ -527,25 +528,41 @@ function _createTickerCell(ticker) {
   var typeLabel = isOption ? 'opt' : isFuture ? 'fut' : 'stk';
 
   cell.innerHTML =
-    '<div class="tc-top">' +
-      '<span class="tc-ticker">' + ticker.replace('=F','').replace('_OPT','') + '</span>' +
-      '<span class="tc-type">' + typeLabel + '</span>' +
-      '<span class="tc-dir neutral">\u2013</span>' +
-      '<span class="tc-conf">0%</span>' +
-      '<span class="tc-state none">none</span>' +
+    // Verdict badge (full width, colored)
+    '<div class="tc-verdict-row"><span class="verdict-badge no-action">NO ACTION</span></div>' +
+    // Row 1: ticker name, instrument badge, direction badge, state badge
+    '<div class="row1">' +
+      '<div>' +
+        '<span class="ticker-name">' + ticker.replace('=F','').replace('_OPT','') + '</span>' +
+        '<span class="instrument-badge">' + typeLabel + '</span>' +
+        '<span class="state-badge none">none</span>' +
+      '</div>' +
+      '<span class="direction-badge neutral">\u2013 NEUTRAL</span>' +
     '</div>' +
-    '<div class="tc-row2">' +
-      '<span class="tc-verdict">\u2014</span>' +
-      '<span class="tc-netscore">ns: \u2014</span>' +
-      '<span class="tc-tier"></span>' +
+    // Conviction meter: tier badge + percentage + meter bar
+    '<div class="conviction-meter">' +
+      '<span class="tier-badge bronze">BRONZE</span>' +
+      '<span class="meter-pct bronze">0.0%</span>' +
+      '<div class="meter-bar bronze" style="width:5%"></div>' +
     '</div>' +
-    '<div class="tc-levels">' +
-      '<span class="tc-levels-label">Entry SL TP R:R</span>' +
+    // Row 2: Score, Confidence, Strategies
+    '<div class="row2">' +
+      '<span>Score: <strong>--</strong></span>' +
+      '<span>Conf: <strong>--</strong></span>' +
+      '<span>Strats: <strong>0/0</strong></span>' +
     '</div>' +
-    '<div class="tc-bot">' +
-      '<span class="tc-gate">gate: \u2014</span>' +
-      '<span class="tc-strats">0 strats</span>' +
-      '<span class="tc-price">$\u2014</span>' +
+    // Row 3: Entry, SL, TP, R:R
+    '<div class="row3">' +
+      '<span class="level-label">Entry</span><span class="level-val">$--</span>' +
+      '<span class="level-label">SL</span><span class="level-val sl">$--</span>' +
+      '<span class="level-label">TP</span><span class="level-val tp">$--</span>' +
+      '<span class="level-label">R:R</span><span class="level-val rr">--</span>' +
+    '</div>' +
+    // Bottom: gate, ns, price
+    '<div class="tc-bottom">' +
+      '<span>gate: --</span>' +
+      '<span>ns: --</span>' +
+      '<span style="margin-left:auto;font-variant-numeric:tabular-nums">$--</span>' +
     '</div>';
 
   cell.onclick = function() {
@@ -563,119 +580,148 @@ function _createTickerCell(ticker) {
   return cell;
 }
 
-// ── Initialize the grid (first load only) ──
+// ── Initialize the grid with rows (first load only) ──
 function _initTickerGrid() {
   var grid = document.getElementById('ticker-grid');
   if (!grid) return;
-
   grid.innerHTML = '';
-  _GRID_TICKERS.forEach(function(t) {
-    var cell = _createTickerCell(t);
-    grid.appendChild(cell);
-    _cellCache[t] = {
-      element: cell,
-      state: 'none',
-      direction: 'neutral',
-      confidence: 0,
-      price: 0,
-      verdict: '',
-      gate: null,
-      sig: null
-    };
+
+  _ROW_DEFS.forEach(function(rowDef) {
+    var row = document.createElement('div');
+    row.className = 'ticker-row';
+    rowDef.tickers.forEach(function(t) {
+      var cell = _createTickerCell(t);
+      row.appendChild(cell);
+      _cellCache[t] = {
+        element: cell,
+        state: 'none',
+        direction: 'neutral',
+        confidence: 0,
+        price: 0,
+        verdict: '',
+        gate: null,
+        sig: null
+      };
+    });
+    grid.appendChild(row);
   });
+
   _gridInitialized = true;
 }
 
-// ── Update a single cell in-place ──
+// ── Mapping verbatim verdict text to CSS class suffixes ──
+function _verdictClass(verdict) {
+  var v = verdict.toUpperCase();
+  if (v.indexOf('STRONG BUY') >= 0) return 'strong-buy';
+  if (v.indexOf('STRONG SELL') >= 0) return 'strong-sell';
+  if (v === 'BUY') return 'buy';
+  if (v === 'SELL') return 'sell';
+  if (v === 'HOLD') return 'hold';
+  if (v === 'REDUCE') return 'reduce';
+  if (v === 'EXIT') return 'exit';
+  if (v === 'WAIT') return 'wait';
+  if (v === 'AVOID') return 'avoid';
+  return 'no-action';
+}
+
+// ── Update a single card in-place ──
 function _updateCell(ticker, state, direction, confidence, price, sig, gate, st) {
   var cache = _cellCache[ticker];
   if (!cache) return;
-
   var cell = cache.element;
   if (!cell) return;
 
-  // Update state class
   cell.className = 'ticker-cell state-' + state;
 
-  // ── Top row: ticker, type, direction, conf, state ──
-  var dirEl = cell.querySelector('.tc-dir');
-  if (dirEl) {
-    dirEl.textContent = _getDirectionArrow(direction);
-    dirEl.className = 'tc-dir ' + _getDirClass(direction);
-  }
-
-  var confEl = cell.querySelector('.tc-conf');
-  if (confEl) confEl.textContent = (confidence * 100).toFixed(0) + '%';
-
-  var stateEl = cell.querySelector('.tc-state');
-  if (stateEl) {
-    stateEl.textContent = state.toUpperCase();
-    stateEl.className = 'tc-state ' + state;
-  }
-
-  // ── Row 2: verdict, net score, tier ──
+  // ── Verdict badge ──
+  var ve = cell.querySelector('.verdict-badge');
   var verdict = sig ? sig.verdict : 'NO ACTION';
-  var verdictEl = cell.querySelector('.tc-verdict');
-  if (verdictEl) {
-    verdictEl.textContent = verdict;
-    verdictEl.className = 'tc-verdict ' + (verdict === 'STRONG BUY' || verdict === 'STRONG SELL' ? 'strong' : verdict === 'BUY' || verdict === 'SELL' ? 'action' : 'muted');
+  if (ve) {
+    ve.textContent = verdict;
+    ve.className = 'verdict-badge ' + _verdictClass(verdict);
   }
 
-  var nsEl = cell.querySelector('.tc-netscore');
-  if (nsEl) {
-    var meta = gate && gate.consensus_meta ? gate.consensus_meta : (sig && sig.consensus_meta ? sig.consensus_meta : null);
-    var score = meta ? meta.consensus_net_score : 0;
-    nsEl.textContent = 'ns: ' + (score >= 0 ? '+' : '') + score.toFixed(2);
-    nsEl.className = 'tc-netscore ' + (score > 0.1 ? 'positive' : score < -0.1 ? 'negative' : '');
+  // ── Direction badge ──
+  var de = cell.querySelector('.direction-badge');
+  if (de) {
+    de.textContent = _getDirectionArrow(direction) + ' ' + direction.toUpperCase();
+    de.className = 'direction-badge ' + _getDirClass(direction);
   }
 
-  var tierEl = cell.querySelector('.tc-tier');
-  if (tierEl) {
-    var tier = (gate && gate.consensus_meta && gate.consensus_meta.consensus_conviction_tier) || '';
-    tierEl.textContent = tier;
-    tierEl.className = 'tc-tier' + (tier ? ' tier-badge ' + tier : '');
+  // ── State badge ──
+  var se = cell.querySelector('.state-badge');
+  if (se) {
+    se.textContent = state.toUpperCase();
+    se.className = 'state-badge ' + state;
   }
 
-  // ── Levels row: Entry, SL, TP, R:R ──
-  var levelsEl = cell.querySelector('.tc-levels');
-  if (levelsEl) {
-    if (sig && sig.entry_price && sig.stop_loss && sig.take_profit) {
-      var rr = sig.risk_reward || (sig.take_profit - sig.entry_price) / (sig.entry_price - sig.stop_loss);
-      if (!isFinite(rr)) rr = 0;
-      levelsEl.innerHTML =
-        '<span class="tc-lv-entry">E:$' + sig.entry_price.toFixed(sig.entry_price < 100 ? 2 : 1) + '</span>' +
-        '<span class="tc-lv-sl">SL:$' + sig.stop_loss.toFixed(sig.stop_loss < 100 ? 2 : 1) + '</span>' +
-        '<span class="tc-lv-tp">TP:$' + sig.take_profit.toFixed(sig.take_profit < 100 ? 2 : 1) + '</span>' +
-        '<span class="tc-lv-rr">R:' + rr.toFixed(1) + '</span>';
-    } else {
-      levelsEl.innerHTML = '<span class="tc-levels-label">\u2014 Entry \u2014</span>';
-    }
-  }
+  // ── Conviction meter ──
+  var meta = gate && gate.consensus_meta ? gate.consensus_meta : (sig && sig.consensus_meta ? sig.consensus_meta : null);
+  var tier = meta ? meta.consensus_conviction_tier : 'bronze';
+  var convPct = confidence * 100;
 
-  // ── Bot row: gate, strats, price ──
-  var priceEl = cell.querySelector('.tc-price');
-  if (priceEl && price > 0) priceEl.textContent = '$' + price.toFixed(2);
+  var te = cell.querySelector('.tier-badge');
+  if (te) { te.textContent = tier.toUpperCase(); te.className = 'tier-badge ' + tier; }
 
-  var gateEl = cell.querySelector('.tc-gate');
-  if (gateEl) {
-    if (gate) {
-      gateEl.textContent = gate.gate_passed ? 'gate: passed' : 'gate: ' + (gate.gate_reason || 'fail').replace(/_/g, ' ').slice(0, 20);
-      gateEl.className = 'tc-gate ' + (gate.gate_passed ? 'passed' : 'rejected');
-    } else {
-      gateEl.textContent = 'gate: \u2014';
-      gateEl.className = 'tc-gate';
-    }
-  }
+  var pe = cell.querySelector('.meter-pct');
+  if (pe) { pe.textContent = convPct.toFixed(1) + '%'; pe.className = 'meter-pct ' + tier; }
 
-  var stratsEl = cell.querySelector('.tc-strats');
-  if (stratsEl) {
+  var be = cell.querySelector('.meter-bar');
+  if (be) { be.style.width = Math.max(convPct, 5) + '%'; be.className = 'meter-bar ' + tier; }
+
+  // ── Row 2: Score, Conf, Strats ──
+  var r2 = cell.querySelector('.row2');
+  if (r2) {
     var votes = gate ? gate.strategy_votes : (sig ? (sig.strategy_votes || []) : []);
     var total = votes ? votes.length : 0;
     var active = votes ? votes.filter(function(v) { return v.confidence > 0.3; }).length : 0;
-    stratsEl.textContent = active + '/' + total + ' strat' + (total !== 1 ? 's' : '');
+    var scoreStr = sig ? ((sig.composite_score || 0) * 100).toFixed(1) + '%' : '--';
+    var confStr = (confidence * 100).toFixed(1) + '%';
+    r2.innerHTML =
+      '<span>Score: <strong>' + scoreStr + '</strong></span>' +
+      '<span>Conf: <strong>' + confStr + '</strong></span>' +
+      '<span>Strats: <strong>' + active + '/' + total + '</strong></span>';
   }
 
-  // Update cache
+  // ── Row 3: Entry, SL, TP, R:R ──
+  var r3 = cell.querySelector('.row3');
+  if (r3) {
+    if (sig && sig.entry_price && sig.stop_loss && sig.take_profit) {
+      var ep = sig.entry_price;
+      var sl = sig.stop_loss;
+      var tp = sig.take_profit;
+      var rr = sig.risk_reward || (tp - ep) / (ep - sl);
+      if (!isFinite(rr)) rr = 0;
+      r3.innerHTML =
+        '<span class="level-label">Entry</span><span class="level-val">$' + ep.toFixed(2) + '</span>' +
+        '<span class="level-label">SL</span><span class="level-val sl">$' + sl.toFixed(2) + '</span>' +
+        '<span class="level-label">TP</span><span class="level-val tp">$' + tp.toFixed(2) + '</span>' +
+        '<span class="level-label">R:R</span><span class="level-val rr">' + rr.toFixed(1) + '</span>';
+    } else {
+      r3.innerHTML =
+        '<span class="level-label">Entry</span><span class="level-val">$--</span>' +
+        '<span class="level-label">SL</span><span class="level-val sl">$--</span>' +
+        '<span class="level-label">TP</span><span class="level-val tp">$--</span>' +
+        '<span class="level-label">R:R</span><span class="level-val rr">--</span>';
+    }
+  }
+
+  // ── Bottom: gate, ns, price ──
+  var bot = cell.querySelector('.tc-bottom');
+  if (bot) {
+    var ns = meta ? meta.consensus_net_score : 0;
+    var nsStr = 'ns: ' + (ns >= 0 ? '+' : '') + ns.toFixed(2);
+    var gateStr = 'gate: --';
+    if (gate) {
+      gateStr = gate.gate_passed ? 'gate: passed' : 'gate: ' + (gate.gate_reason || 'fail').replace(/_/g, ' ').slice(0, 20);
+    }
+    var pxStr = price > 0 ? '$' + price.toFixed(2) : '$--';
+    bot.innerHTML =
+      '<span class="' + (gate && gate.gate_passed ? 'tc-gate-pass' : '') + '">' + gateStr + '</span>' +
+      '<span class="' + (ns > 0.1 ? 'tc-ns-pos' : ns < -0.1 ? 'tc-ns-neg' : '') + '">' + nsStr + '</span>' +
+      '<span style="margin-left:auto;font-variant-numeric:tabular-nums">' + pxStr + '</span>';
+  }
+
   cache.state = state;
   cache.direction = direction;
   cache.confidence = confidence;

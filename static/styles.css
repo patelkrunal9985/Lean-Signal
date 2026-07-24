@@ -592,18 +592,18 @@ header {
   letter-spacing: 0.5px;
   text-transform: uppercase;
 }
-.verdict-badge.strong-long {
+.verdict-badge.strong-buy, .verdict-badge.strong-long {
   background: #0d3d1a; color: #2ea043; border: 1px solid var(--accent);
   box-shadow: 0 0 8px rgba(46, 160, 67, 0.3);
 }
-.verdict-badge.strong-short {
+.verdict-badge.strong-sell, .verdict-badge.strong-short {
   background: #3d0d0d; color: #f85149; border: 1px solid var(--danger);
   box-shadow: 0 0 8px rgba(248, 81, 73, 0.3);
 }
-.verdict-badge.long {
+.verdict-badge.buy, .verdict-badge.long {
   background: var(--accent-dim); color: var(--accent); border: 1px solid var(--accent);
 }
-.verdict-badge.short {
+.verdict-badge.sell, .verdict-badge.short {
   background: var(--danger-dim); color: var(--danger); border: 1px solid var(--danger);
 }
 .verdict-badge.hold {
@@ -823,76 +823,81 @@ header {
 .active-position-card .ap-tp { color: var(--accent); }
 .active-position-card .ap-rr { color: var(--warning); }
 
-/* ── Ticker Grid ── */
+/* ── Ticker Card Grid (row-based) ── */
 .ticker-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
-}
-@media (max-width: 1100px) {
-  .ticker-grid { grid-template-columns: repeat(2, 1fr); }
-}
-@media (max-width: 700px) {
-  .ticker-grid { grid-template-columns: 1fr; }
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 4px;
 }
 
+.ticker-row {
+  display: flex;
+  gap: 10px;
+}
+.ticker-row:first-child .ticker-cell { min-width: 0; flex: 1 1 0; }
+
+/* ── Ticker Card (old signal-card style) ── */
 .ticker-cell {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 8px 10px;
-  min-height: 100px;
+  padding: 10px 12px;
   cursor: pointer;
-  transition: border-color 0.4s ease, background 0.4s ease, box-shadow 0.4s ease;
+  transition: all 0.15s ease;
+  min-width: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
+  flex: 1;
 }
-.ticker-cell:hover { box-shadow: var(--shadow); }
+.ticker-cell:hover { border-color: var(--accent); box-shadow: var(--shadow); transform: translateY(-1px); }
 
-/* Top row: ticker, type, direction, conf, state */
-.ticker-cell .tc-top { display: flex; align-items: center; gap: 5px; }
-.ticker-cell .tc-ticker { font-size: 13px; font-weight: 700; min-width: 36px; }
-.ticker-cell .tc-type { font-size: 9px; padding: 0 4px; border-radius: 4px; background: var(--bg-hover); color: var(--text-muted); }
-.ticker-cell .tc-dir { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 7px; }
-.ticker-cell .tc-dir.long { background: var(--accent-dim); color: var(--accent); }
-.ticker-cell .tc-dir.short { background: var(--danger-dim); color: var(--danger); }
-.ticker-cell .tc-dir.neutral { background: var(--bg-hover); color: var(--text-muted); }
-.ticker-cell .tc-conf { font-size: 13px; font-weight: 700; margin-left: auto; }
-.ticker-cell .tc-state { font-size: 9px; font-weight: 600; padding: 1px 5px; border-radius: 5px; }
+/* ── Card internal rows ── */
+.ticker-cell .tc-verdict-row {
+  margin-bottom: 2px;
+}
+.ticker-cell .row1 {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 3px;
+  gap: 4px;
+  flex-wrap: nowrap;
+}
+.ticker-cell .row2 {
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+  flex-wrap: wrap;
+}
+.ticker-cell .row3 {
+  display: flex;
+  gap: 6px;
+  font-size: 10px;
+  color: var(--text-muted);
+  flex-wrap: wrap;
+}
+.ticker-cell .tc-bottom {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 2px;
+  padding-top: 3px;
+  border-top: 1px solid var(--border);
+}
 
-/* Row 2: verdict, net score, tier */
-.ticker-cell .tc-row2 { display: flex; align-items: center; gap: 8px; font-size: 10px; }
-.ticker-cell .tc-verdict { font-weight: 600; }
-.ticker-cell .tc-verdict.strong { color: var(--accent); }
-.ticker-cell .tc-verdict.action { color: var(--info); }
-.ticker-cell .tc-verdict.muted { color: var(--text-muted); }
-.ticker-cell .tc-netscore { font-variant-numeric: tabular-nums; margin-left: auto; }
-.ticker-cell .tc-netscore.positive { color: var(--accent); }
-.ticker-cell .tc-netscore.negative { color: var(--danger); }
-.ticker-cell .tc-tier { font-size: 9px; text-transform: uppercase; }
-.tier-badge.bronze { color: #cd7f32; }
-.tier-badge.silver { color: #c0c0c0; }
-.tier-badge.gold { color: #ffd700; }
-.tier-badge.platinum { color: #e5e4e2; }
+/* ── Card-specific extras ── */
+.tc-gate-pass { color: var(--accent); }
+.tc-ns-pos { color: var(--accent); }
+.tc-ns-neg { color: var(--danger); }
 
-/* Levels row: Entry, SL, TP, R:R */
-.ticker-cell .tc-levels { display: flex; align-items: center; gap: 10px; font-size: 10px; }
-.ticker-cell .tc-levels-label { color: var(--text-muted); font-size: 9px; }
-.ticker-cell .tc-lv-entry { color: var(--text); }
-.ticker-cell .tc-lv-sl { color: var(--danger); }
-.ticker-cell .tc-lv-tp { color: var(--accent); }
-.ticker-cell .tc-lv-rr { color: var(--warning); font-weight: 600; margin-left: auto; }
-
-/* Bot row: gate, strats, price */
-.ticker-cell .tc-bot { display: flex; align-items: center; gap: 8px; font-size: 10px; color: var(--text-muted); }
-.ticker-cell .tc-gate { font-size: 9px; }
-.ticker-cell .tc-gate.passed { color: var(--accent); }
-.ticker-cell .tc-gate.rejected { color: var(--warning); }
-.ticker-cell .tc-strats { }
-.ticker-cell .tc-price { font-variant-numeric: tabular-nums; margin-left: auto; }
-
-/* ── State-based cell colors ── */
+/* ── State-based card colors ── */
 .ticker-cell.state-confirmed {
   background: rgba(0, 200, 100, 0.15);
   border: 2px solid #00c864;
@@ -918,10 +923,4 @@ header {
   border: 1px dashed #2a2a2a;
 }
 
-/* ── State badges within cells ── */
-.tc-state.confirmed { background: var(--accent-dim); color: var(--accent); }
-.tc-state.active { background: #1a3a6e; color: var(--info); }
-.tc-state.pending { background: var(--warning-dim); color: var(--warning); }
-.tc-state.weakening { background: var(--danger-dim); color: var(--danger); }
-.tc-state.watching { background: var(--bg-hover); color: var(--text-muted); }
-.tc-state.none { background: transparent; color: #555; }
+/* ── No state badge override needed — reuses .state-badge from above ── */

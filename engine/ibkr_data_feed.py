@@ -34,6 +34,10 @@ _subscribed_tickers: set = set()
 # and by fetch_live_option_prices for on-demand snapshots.
 _live_option_prices: dict = {}
 
+# P3.2: Streamer heartbeat — updated on every tick, checked by runner
+_last_tick_time: float = 0.0
+_last_tick_lock = threading.Lock()
+
 # ── Contract Validation Cache (prevents repeated 321 errors) ──
 # Valid contracts cached for 24h, invalid cached for 1h
 _contract_cache: dict = {}           # cache_key -> qualified_contract
@@ -633,6 +637,9 @@ class IBKRStreamer:
                     if not _skip:
                         with _live_prices_lock:
                             _live_prices[key] = live
+                        # P3.2: Update streamer heartbeat
+                        with _last_tick_lock:
+                            _last_tick_time = time.time()
             except Exception as e:
                 logger.debug(f"IBKR _on_pending_tickers error: {e}")
 
@@ -1383,7 +1390,16 @@ def clear_live_prices():
     with _live_prices_lock:
         _live_prices.clear()
         _subscribed_tickers.clear()
+    with _last_tick_lock:
+        global _last_tick_time
+        _last_tick_time = 0.0
     logger.warning("Live price cache cleared (force-reset)")
+
+
+def get_last_tick_time() -> float:
+    """P3.2: Return timestamp of last tick received."""
+    with _last_tick_lock:
+        return _last_tick_time
 
 
 def get_live_price(ticker: str) -> Optional[dict]:

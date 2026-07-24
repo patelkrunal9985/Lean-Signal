@@ -28,6 +28,14 @@ import json
 
 logger = get_logger("engine.signal_persistence")
 
+# Correlation groups for cross-signal conviction discount (P2.2)
+CORRELATION_GROUPS: dict[str, list[str]] = {
+    "indices": ["ES=F", "NQ=F", "RTY=F", "YM=F"],
+    "commodities": ["CL=F", "GC=F"],
+    "options": ["SPY_OPT", "QQQ_OPT"],
+    "equities": ["SPY", "QQQ"],
+}
+
 _lock = threading.RLock()  # RLock: get_all_states() calls get_ticker_state() which needs re-entrant lock
 
 # ── Disk persistence ──
@@ -58,12 +66,13 @@ def _autosave():
                 "entry_cycle": dict(_entry_cycle),
                 "entry_regime": dict(_entry_regime),
                 "entry_direction": dict(_entry_direction),
+                "direction_cycles": dict(_direction_cycles),
                 # Save last 2 snapshots per ticker (enough for health score after restart)
                 "signal_memory": {
                     t: mem[-2:] if len(mem) >= 2 else mem
                     for t, mem in _signal_memory.items()
                 },
-                "version": 3,
+                "version": 4,
                 "saved_at": time.time(),
             }
         with open(_STATE_FILE, "w") as f:
@@ -103,6 +112,10 @@ def _autoload():
                         target.update(data[d])
                 if "thesis_strategies" in data and isinstance(data["thesis_strategies"], dict):
                     _thesis_strategies.update(data["thesis_strategies"])
+            # v4: restore direction_cycles
+            if version >= 4:
+                if "direction_cycles" in data and isinstance(data["direction_cycles"], dict):
+                    _direction_cycles.update(data["direction_cycles"])
             # Restore signal memory snapshots
             if "signal_memory" in data and isinstance(data["signal_memory"], dict):
                 for t, mem_snapshots in data["signal_memory"].items():
@@ -152,6 +165,7 @@ _thesis_strategies: dict[str, list[dict]] = {}    # ticker → snapshot of strat
 _entry_cycle: dict[str, int] = {}                 # ticker → cycle_id when thesis was entered
 _entry_regime: dict[str, str] = {}                # ticker → primary regime at entry time
 _entry_direction: dict[str, str] = {}             # ticker → direction at thesis entry (immutable)
+_direction_cycles: dict[str, int] = {}            # ticker → consecutive cycles with same direction (P0.1)
 
 # ── Signal Health & Warning tracking ──
 _last_strong_cycle: dict[str, int] = {}             # ticker → last cycle_id where net_score > 0.4
@@ -228,8 +242,12 @@ def _get_velocity_penalty_atr() -> float:
     """ATR/cycle threshold for heavy conviction penalty (0.55x)."""
     return float(get_setting("velocity_penalty_atr", 0.4))
 
-def _get_velocity_building_max() -> float:
+def _get_velocity_building_max(instr_type: str = "") -> float:
     """Max conviction cap when velocity supports the new thesis direction."""
+    if instr_type:
+        val = get_setting(f"{instr_type}_velocity_building_max", None)
+        if val is not None:
+            return float(val)
     return float(get_setting("velocity_building_max", 0.70))
 
 def _get_age_decay_start() -> float:
@@ -244,6 +262,79 @@ def _get_age_decay_floor() -> float:
 def _get_flip_score_threshold() -> float:
     return float(get_setting("flip_score_threshold", 0.60))
 
+
+def _get_signal_budget_max(instr_type: str = "") -> int:
+    """P1.2: Max concurrent active signals before blocking new entries."""
+    if instr_type:
+        val = get_setting(f"{instr_type}_signal_budget_max", None)
+        if val is not None:
+            return int(val)
+    return int(get_setting("signal_budget_max", 6))
+
+def _count_active_signals() -> int:
+    """P1.2: Count tickers in thesis states (pending/active/confirmed/weakening)."""
+    count = 0
+    for state in _signal_state.values():
+        if state in ("pending", "active", "confirmed", "weakening"):
+            count += 1
+    return count
+
+def _get_tod_bonus(instr_type: str = "") -> float:
+    """P1.1: Time-of-day building ramp offset (-0.05 to +0.10).
+    Additive to building factor: faster near close, slower at open.
+    Supports per-instrument overrides (e.g. future_tod_bonus)."""
+    try:
+        if instr_type:
+            override = get_setting(f"{instr_type}_tod_bonus", None)
+            if override is not None:
+                return float(override)
+        from engine.time_of_day import get_time_window
+        window = get_time_window()
+        bonuses = {
+            "opening_drive": -0.05,
+            "morning_session": 0.0,
+            "midday_lull": 0.0,
+            "power_hour": 0.05,
+            "closing_pin": 0.10,
+            "pre_market": 0.0,
+            "after_hours": 0.0,
+            "closed": 0.0,
+        }
+        return bonuses.get(window, 0.0)
+    except Exception:
+        return 0.0
+
+def _get_correlation_discount(ticker: str, direction: str) -> float:
+    """P2.2: Apply 0.7x discount when correlated tickers fire same direction."""
+    if direction not in ("long", "short"):
+        return 1.0
+    group = None
+    for gname, members in CORRELATION_GROUPS.items():
+        if ticker in members:
+            group = gname
+            break
+    if not group:
+        return 1.0
+    same = 0
+    for member in CORRELATION_GROUPS[group]:
+        if member == ticker:
+            continue
+        mdir = _active_direction.get(member, "neutral")
+        if mdir == direction:
+            same += 1
+    if same >= 1:
+        return 0.70
+    return 1.0
+
+def _get_volume_boost(strategy_votes: list | None = None) -> float:
+    """P2.1: Volume confirmation boost (1.0-1.3x)."""
+    if not strategy_votes:
+        return 1.0
+    vol_factors = [s.get("volume_factor", 1.0) for s in strategy_votes if s.get("volume_factor", 1.0) > 1.0]
+    if vol_factors:
+        avg = sum(vol_factors) / len(vol_factors)
+        return min(avg, 1.3)
+    return 1.0
 
 def _get_prev_direction(ticker: str) -> str | None:
     """Get the direction from the most recent cycle snapshot for this ticker."""
@@ -340,6 +431,7 @@ def _compute_conviction(
     cycle_id: int,
     regime: str = "",
     atr: float = 0.0,
+    instrument_type: str = "",
 ) -> float:
     """Compute conviction 0.0-1.0 from edge remaining + building + PnL + velocity."""
     prev_state = _signal_state.get(ticker, "none")
@@ -347,7 +439,7 @@ def _compute_conviction(
     prev_conviction = _conviction_score.get(ticker, 0.0)
     entry_price = _state_entry_price.get(ticker, 0)
 
-    # ── Velocity detection (ATR/cycle) ──
+    # ── Multi-timeframe velocity (1c/3c/5c horizons) ──
     velocity_atr = 0.0
     price_dir = 0.0
     if atr > 0 and current_price > 0:
@@ -356,7 +448,20 @@ def _compute_conviction(
             prev_price = mem[-1].get("price", 0)
             if prev_price > 0:
                 price_dir = current_price - prev_price
-                velocity_atr = abs(price_dir) / max(atr, 0.01)
+                vel_1c = abs(price_dir) / max(atr, 0.01)
+            else:
+                vel_1c = 0.0
+            vel_3c = 0.0
+            vel_5c = 0.0
+            if len(mem) >= 3:
+                p3 = mem[-3].get("price", 0)
+                if p3 > 0:
+                    vel_3c = abs(current_price - p3) / max(atr, 0.01) / 3.0
+            if len(mem) >= 5:
+                p5 = mem[-5].get("price", 0)
+                if p5 > 0:
+                    vel_5c = abs(current_price - p5) / max(atr, 0.01) / 5.0
+            velocity_atr = max(vel_1c, vel_3c, vel_5c)
 
     if has_thesis and _entry_cycle.get(ticker) is not None:
         # ── Active thesis: validate using edge, time, regime, PnL, velocity ──
@@ -450,7 +555,9 @@ def _compute_conviction(
                 exit_th = _get_pnl_force_exit_atr() / 100.0
             if entry_dir == "short":
                 atr_dist = -atr_dist
-            if atr_dist > confirm_th:
+            # P0.2: Require pre-PnL conviction >= 0.25 for force-confirm
+            pre_pnl_conviction = conviction
+            if atr_dist > confirm_th and pre_pnl_conviction >= 0.25:
                 conviction = max(conviction, 0.80)
             elif atr_dist > floor_th:
                 conviction = max(conviction, 0.20)
@@ -466,8 +573,11 @@ def _compute_conviction(
             families = set(s.get("family", "") for s in strategy_votes if s.get("family"))
             diversity = min(len(families) / 3.0, 1.0)
 
-        cycles_seen = len(_signal_memory.get(ticker, []))
-        building_factor = min((cycles_seen + 2) / 4.0, 1.0)
+        # P0.1: Direction-specific cycles (0 on first call, matching old len(memory))
+        cycles_seen = _direction_cycles.get(ticker, 0)
+        # P1.1: Time-of-day building ramp offset (additive, not multiplicative)
+        tod_bonus = _get_tod_bonus(instrument_type)
+        building_factor = min((cycles_seen + 2) / 4.0 + tod_bonus, 1.0)
 
         # ── Velocity boost: if price surging in same direction as new thesis ──
         velocity_supports = False
@@ -478,7 +588,20 @@ def _compute_conviction(
                 v_boost = min(velocity_atr * 0.25, max_boost)
                 building_factor = min(building_factor + v_boost, 1.0)
 
-        base = net_mag * building_factor
+        # P2.1: Volume confirmation boost
+        volume_boost = _get_volume_boost(strategy_votes)
+        # P2.2: Correlation discount (over-concentration penalty)
+        corr_factor = _get_correlation_discount(ticker, direction)
+        # P3.1: Diversity penalty scaled by strategy quality
+        # High confidence → reduce penalty; low confidence → keep full penalty
+        if strategy_votes:
+            confs = [s.get("confidence", s.get("weight", 0.5)) for s in strategy_votes if s.get("confidence", 0) > 0]
+            avg_conf = sum(confs) / len(confs) if confs else 0.5
+        else:
+            avg_conf = 0.5
+        diversity_penalty = diversity + (1.0 - diversity) * avg_conf
+
+        base = net_mag * building_factor * volume_boost * corr_factor * diversity_penalty
         if direction == prev_direction and prev_direction not in (None, "neutral"):
             base = max(base, prev_conviction * 0.95)
         elif direction == "neutral":
@@ -486,8 +609,8 @@ def _compute_conviction(
         elif prev_direction not in (None, "neutral"):
             base = prev_conviction * 0.5
 
-        max_conv = _get_velocity_building_max() if velocity_supports else 0.40
-        conviction = min(base * diversity, max_conv)
+        max_conv = _get_velocity_building_max(instrument_type) if velocity_supports else 0.40
+        conviction = min(base, max_conv)
 
     conviction = max(0.0, min(1.0, conviction))
     old_peak = _conviction_peak.get(ticker, 0.0)
@@ -581,12 +704,22 @@ def update(
     global _signal_memory, _signal_state, _state_since
     global _active_direction, _flip_history, _last_flip_cycle
     global _state_entry_price, _conviction_score, _conviction_peak
+    global _direction_cycles
 
     with _lock:
         # ── Direction input normalization ──
         direction = direction.strip().lower() if direction else "neutral"
         if direction not in ("long", "short", "neutral"):
             direction = "neutral"
+
+        # ── Track consecutive same-direction cycles for building ramp (P0.1) ──
+        _last_dir = _get_prev_direction(ticker)
+        # increments when direction matches last cycle, resets otherwise
+        # (starts at 0 for first cycle, matching old len(memory) behavior)
+        if direction == _last_dir and direction in ("long", "short"):
+            _direction_cycles[ticker] = _direction_cycles.get(ticker, 0) + 1
+        else:
+            _direction_cycles[ticker] = 0
 
         # ── Determine previous direction ──
         current_state = _signal_state.get(ticker, "none")
@@ -601,6 +734,7 @@ def update(
         conviction = _compute_conviction(
             ticker, direction, net_score, strategy_votes,
             prev_direction, current_price, cycle_id, regime, atr,
+            instrument_type,
         )
 
         # ── Update memory ──
@@ -631,6 +765,11 @@ def update(
 
         # ── Compute new state from conviction ──
         new_state, significant = _compute_state(ticker, conviction, direction)
+        # P1.2: Signal budget cap — don't escalate to thesis if over budget
+        if new_state in ("pending", "active", "confirmed") and _signal_state.get(ticker, "none") not in ("pending", "active", "confirmed", "weakening"):
+            if _count_active_signals() >= _get_signal_budget_max(instrument_type):
+                new_state = "watching"
+                significant = False
         snapshot["state"] = new_state
 
         old_state = _signal_state.get(ticker, "none")
@@ -666,6 +805,7 @@ def update(
                 _entry_regime.pop(ticker, None)
                 _entry_direction.pop(ticker, None)
                 _conviction_peak.pop(ticker, None)
+                _direction_cycles.pop(ticker, None)
                 # Clear memory so re-entry builds fresh conviction
                 _signal_memory[ticker] = []
 

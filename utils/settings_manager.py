@@ -75,6 +75,15 @@ _DEFAULTS: dict[str, Any] = {
     "velocity_spike_atr": 0.8,      # ATR/cycle → instant conviction crash (0.30x)
     "velocity_penalty_atr": 0.4,    # ATR/cycle → heavy penalty (0.55x)
     "velocity_building_max": 0.70,  # Max conviction cap when velocity supports new thesis
+    # ── Signal Budget (P1.2) ──
+    "signal_budget_max": 6,         # Max concurrent active signals before blocking new entries
+    # ── Per-instrument overrides (P2.3) ──
+    "future_signal_budget_max": 8,  # Futures get higher budget
+    "option_signal_budget_max": 4,  # Options get lower budget
+    "stock_signal_budget_max": 6,   # Stocks default
+    "future_velocity_building_max": 0.75,
+    "option_velocity_building_max": 0.60,
+    "stock_velocity_building_max": 0.70,
     # Verdict scoring thresholds (level at which each verdict fires)
     "verdict_exit_threshold": -1,   # level ≤ this → EXIT
     "verdict_reduce_threshold": 0,  # level ≤ this → REDUCE

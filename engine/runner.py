@@ -153,15 +153,18 @@ def run_cycle() -> dict:
         except Exception as e:
             logger.debug("Stale data check failed: %s", e)
 
-        # ── Market-open history reset ──
-        now_et = now_ny()
-        market_open_minutes = 9 * 60 + 30
-        current_et_minutes = now_et.hour * 60 + now_et.minute
-        if current_et_minutes >= market_open_minutes and _cycle_history:
-            last_ts = _cycle_history[0].get("timestamp", "")
-            if last_ts and _is_new_trading_day(last_ts, now_et):
-                _cycle_history.clear()
-                logger.info("New trading day after market open: cleared previous day's history")
+        # ── Market-open history reset (use market_summary instead of hardcoded 9:30) ──
+        try:
+            from kronos.countries.usa.market_hours import market_summary
+            ms = market_summary()
+            now_et = now_ny()
+            if ms.get("is_open", False) and _cycle_history:
+                last_ts = _cycle_history[0].get("timestamp", "")
+                if last_ts and _is_new_trading_day(last_ts, now_et):
+                    _cycle_history.clear()
+                    logger.info("Market open: cleared previous cycle history")
+        except Exception:
+            pass
 
         reset_non_pinned()
         seed_fixed_options()

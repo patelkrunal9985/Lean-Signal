@@ -260,6 +260,34 @@ def evaluate_tickers(
             except Exception:
                 logger.debug("Entry/exit levels failed for %s: %s", ticker, traceback.format_exc())
 
+        # ── Late-entry protection: if price has already moved most of the way to SL/TP, penalize ──
+        # This prevents entering when the trade is half-completed.
+        # Check: if distance-to-TP < 50% of distance-to-SL, the good move has already happened.
+        if levels and direction != "neutral":
+            ep = levels.get("entry_price", 0)
+            sl = levels.get("stop_loss", 0)
+            tp = levels.get("take_profit", 0)
+            if ep > 0 and sl > 0 and tp > 0 and abs(ep - sl) > 0.01:
+                dist_to_sl = abs(ep - sl)
+                dist_to_tp = abs(tp - ep)
+                # Check if most of the move has already happened (price near TP already)
+                current = data.get("current_price", 0)
+                if current > 0:
+                    remaining_to_tp = abs(tp - current)
+                    pct_complete = 1.0 - (remaining_to_tp / max(dist_to_tp, 0.001))
+                    if pct_complete > 0.50:
+                        # Signal is >50% completed — penalize confidence heavily
+                        logger.info(
+                            "%s: late entry — %.0f%% of move already complete (SL=%.2f, entry=%.2f, current=%.2f, TP=%.2f). Penalizing.",
+                            ticker, pct_complete * 100, sl, ep, current, tp,
+                        )
+                        conf *= (1.0 - pct_complete * 0.8)  # Aggressive decay
+                        # Add warning to gate result
+                        if levels.get("proximity_warning"):
+                            levels["proximity_warning"] = f"late_entry_{pct_complete:.0%}complete_" + levels["proximity_warning"]
+                        else:
+                            levels["proximity_warning"] = f"late_entry_{pct_complete:.0%}complete"
+
         # ── Strike selection (options only) ──
         strike_rec: dict = {}
         if instr_type == "option" and direction != "neutral" and gate_result.get("passed", False):

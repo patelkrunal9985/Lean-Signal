@@ -62,9 +62,9 @@ CONVICTION_GATE = {
     "gate_min_strategies_agree_option": 3,
     "gate_strategy_confidence_min": 0.12,
     "gate_strategy_confidence_min_option": 0.20,
-    "gate_min_confidence_stock": 0.25,
-    "gate_min_confidence_future": 0.12,
-    "gate_min_confidence_option": 0.20,
+    "gate_min_confidence_stock": 0.35,
+    "gate_min_confidence_future": 0.20,
+    "gate_min_confidence_option": 0.25,
     "gate_bonus_4plus_strategies": 1.10,
     "gate_bonus_6plus_strategies": 1.20,
 }
@@ -389,6 +389,55 @@ class SignalQualityGate:
             confidence_mult *= 0.85  # Mild discount for single opposing signal
         # Store correlation info for transparency
         correlation_info = corr_reason if corr_reason else "none"
+
+        # ── Key level alignment check: block if entry is AT opposing key level ──
+        # Long signal at resistance or short signal at support → high risk of rejection
+        if ticker_data.get("current_price", 0) > 0:
+            try:
+                from engine.level_engine import aggregate_key_levels
+                ohlcv = ticker_data.get("ohlcv", [])
+                if ohlcv and len(ohlcv) >= 5:
+                    lvls = aggregate_key_levels(
+                        ticker, ticker_data, ticker_data["current_price"],
+                        alignment["direction"], instr_type,
+                    )
+                    at_level_type = lvls.get("at_level")
+                    if at_level_type:
+                        is_long = alignment["direction"] == "long"
+                        is_short = alignment["direction"] == "short"
+                        # Check if we're at a resistance while trying to go long
+                        if is_long and lvls.get("nearest_resistance"):
+                            dist_to_res = (lvls["nearest_resistance"] - ticker_data["current_price"]) / max(ticker_data["current_price"], 0.01)
+                            if dist_to_res < 0.001:
+                                return {
+                                    "passed": False, "ticker": ticker,
+                                    "direction": alignment["direction"],
+                                    "confidence": conviction["confidence"] * confidence_mult,
+                                    "reason": f"at_resistance_block_long_{at_level_type}",
+                                }
+                        # Check if we're at a support while trying to go short
+                        if is_short and lvls.get("nearest_support"):
+                            dist_to_sup = (ticker_data["current_price"] - lvls["nearest_support"]) / max(ticker_data["current_price"], 0.01)
+                            if dist_to_sup < 0.001:
+                                return {
+                                    "passed": False, "ticker": ticker,
+                                    "direction": alignment["direction"],
+                                    "confidence": conviction["confidence"] * confidence_mult,
+                                    "reason": f"at_support_block_short_{at_level_type}",
+                                }
+                        # Near opposing level: penalize confidence
+                        if is_long and lvls.get("nearest_resistance"):
+                            near_dist = (lvls["nearest_resistance"] - ticker_data["current_price"]) / max(ticker_data["current_price"], 0.01)
+                            if near_dist < 0.005:
+                                confidence_mult *= 0.60  # Near resistance while long = high risk
+                                logger.info("%s: near resistance (%.2f%%) while long — confidence ×0.60", ticker, near_dist * 100)
+                        if is_short and lvls.get("nearest_support"):
+                            near_dist = (ticker_data["current_price"] - lvls["nearest_support"]) / max(ticker_data["current_price"], 0.01)
+                            if near_dist < 0.005:
+                                confidence_mult *= 0.60
+                                logger.info("%s: near support (%.2f%%) while short — confidence ×0.60", ticker, near_dist * 100)
+            except Exception:
+                pass
 
         return {
             "passed": True,

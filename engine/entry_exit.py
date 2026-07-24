@@ -246,12 +246,19 @@ def compute_futures_levels(ticker: str, data: dict, direction: str,
     rr = _clamp_rr(abs(tp - entry) / max(abs(sl - entry), 0.01))
     entry_rounded = _round_to_tick(ticker, entry)
 
-    # ── Level engine: suggested entry + proximity ──
+    # ── Level engine: override SL/TP with nearest meaningful support/resistance ──
+    # This replaces the raw ATR-based SL with a level-aware stop that sits
+    # BEYOND the nearest support (for longs) or resistance (for shorts),
+    # preventing stop-outs at noise levels while keeping risk defined.
     suggested_entry = entry_rounded
     suggested_entry_type = "market"
     nearest_support = None
     nearest_resistance = None
     proximity_warning = None
+    level_sl = None
+    level_tp = None
+    sl_method_used = "atr+depth" + ("+gamma_flip" if gamma_flip > 0 else "")
+    tp_method_used = "atr+sma" + ("+gamma_wall" if gamma_walls else "")
     try:
         from engine.level_engine import aggregate_key_levels
         levels = aggregate_key_levels(ticker, data, entry, direction, "future")
@@ -261,12 +268,42 @@ def compute_futures_levels(ticker: str, data: dict, direction: str,
         nearest_support = levels.get("nearest_support")
         nearest_resistance = levels.get("nearest_resistance")
         proximity_warning = levels.get("proximity_warning")
+        # Level-aware SL: place stop BEYOND nearest support (longs) / resistance (shorts)
+        if direction == "long" and nearest_support:
+            atr_sl = entry - atr * FUTURE_SL_ATR_MULT if atr > 0 else entry * 0.997
+            # Use the tighter of: nearest support vs ATR-based SL
+            # Stop goes BELOW support, not at it
+            level_based_sl = nearest_support - max(atr * 0.15, 0.05)
+            sl = max(level_based_sl, atr_sl)  # Wider stop = more room
+            if level_based_sl > atr_sl:
+                sl_method_used = "level_support"
+        if direction == "short" and nearest_resistance:
+            atr_sl = entry + atr * FUTURE_SL_ATR_MULT if atr > 0 else entry * 1.003
+            level_based_sl = nearest_resistance + max(atr * 0.15, 0.05)
+            sl = min(level_based_sl, atr_sl)
+            if level_based_sl < atr_sl:
+                sl_method_used = "level_resistance"
+        # Level-aware TP: target next confluence zone or gamma wall
+        if direction == "long" and levels.get("resistance_levels"):
+            nearest_res = levels["resistance_levels"][0]
+            if nearest_res["price"] > entry:
+                level_tp = nearest_res["price"]
+                tp = min(tp, level_tp)  # Don't exceed the nearest resistance
+                tp_method_used = "level_first_resistance"
+        if direction == "short" and levels.get("support_levels"):
+            nearest_sup = levels["support_levels"][0]
+            if nearest_sup["price"] < entry:
+                level_tp = nearest_sup["price"]
+                tp = max(tp, level_tp)
+                tp_method_used = "level_first_support"
+        # Recompute R:R with level-adjusted SL/TP
+        rr = _clamp_rr(abs(tp - entry) / max(abs(sl - entry), 0.01))
     except Exception as e:
         logger.debug("Level engine unavailable for %s: %s", ticker, e)
 
     logger.debug(
-        "Futures %s: entry=%.2f sl=%.2f tp=%.2f rr=%.1f atr=%.2f gamma_flip=%.2f suggested=%s",
-        ticker, entry_rounded, sl, tp, rr, atr, gamma_flip,
+        "Futures %s: entry=%.2f sl=%.2f tp=%.2f rr=%.1f atr=%.2f gamma_flip=%.2f sl_method=%s suggested=%s",
+        ticker, entry_rounded, sl, tp, rr, atr, gamma_flip, sl_method_used,
         f"{suggested_entry}({suggested_entry_type})" if suggested_entry != entry_rounded else "market",
     )
 
@@ -280,8 +317,8 @@ def compute_futures_levels(ticker: str, data: dict, direction: str,
         "nearest_support": round(nearest_support, 4) if nearest_support else None,
         "nearest_resistance": round(nearest_resistance, 4) if nearest_resistance else None,
         "proximity_warning": proximity_warning,
-        "sl_method": "atr+depth" + ("+gamma_flip" if gamma_flip > 0 else ""),
-        "tp_method": "atr+sma" + ("+gamma_wall" if gamma_walls else ""),
+        "sl_method": sl_method_used,
+        "tp_method": tp_method_used,
     }
 
 
@@ -378,12 +415,14 @@ def compute_stock_levels(ticker: str, data: dict, direction: str,
 
     rr = _clamp_rr(abs(tp - entry) / max(abs(sl - entry), 0.01))
 
-    # ── Level engine: suggested entry + proximity ──
+    # ── Level engine: override SL/TP with nearest meaningful support/resistance ──
     suggested_entry = entry
     suggested_entry_type = "market"
     nearest_support = None
     nearest_resistance = None
     proximity_warning = None
+    sl_method_used = "sma+swing+atr+depth"
+    tp_method_used = "sma+swing+atr"
     try:
         from engine.level_engine import aggregate_key_levels
         levels = aggregate_key_levels(ticker, data, entry, direction, "stock")
@@ -393,12 +432,40 @@ def compute_stock_levels(ticker: str, data: dict, direction: str,
         nearest_support = levels.get("nearest_support")
         nearest_resistance = levels.get("nearest_resistance")
         proximity_warning = levels.get("proximity_warning")
+        # Level-aware SL: stop BEYOND nearest support/resistance
+        if direction == "long" and nearest_support:
+            level_sl = nearest_support - max(atr * 0.15, 0.02)
+            if level_sl > sl:
+                sl = level_sl
+                sl_method_used = "level_support"
+        if direction == "short" and nearest_resistance:
+            level_sl = nearest_resistance + max(atr * 0.15, 0.02)
+            if level_sl < sl:
+                sl = level_sl
+                sl_method_used = "level_resistance"
+        # Level-aware TP: target next key level
+        if direction == "long" and levels.get("resistance_levels"):
+            nearest_res = levels["resistance_levels"][0]
+            if nearest_res["price"] > entry:
+                level_tp = nearest_res["price"]
+                if level_tp < tp:
+                    tp = level_tp
+                    tp_method_used = "level_first_resistance"
+        if direction == "short" and levels.get("support_levels"):
+            nearest_sup = levels["support_levels"][0]
+            if nearest_sup["price"] < entry:
+                level_tp = nearest_sup["price"]
+                if level_tp > tp:
+                    tp = level_tp
+                    tp_method_used = "level_first_support"
+        # Recompute R:R with level-adjusted SL/TP
+        rr = _clamp_rr(abs(tp - entry) / max(abs(sl - entry), 0.01))
     except Exception as e:
         logger.debug("Level engine unavailable for %s: %s", ticker, e)
 
     logger.debug(
-        "Stock %s: entry=%.2f sl=%.2f tp=%.2f rr=%.1f atr=%.2f suggested=%s",
-        ticker, entry, sl, tp, rr, atr,
+        "Stock %s: entry=%.2f sl=%.2f tp=%.2f rr=%.1f atr=%.2f sl_method=%s suggested=%s",
+        ticker, entry, sl, tp, rr, atr, sl_method_used,
         f"{suggested_entry}({suggested_entry_type})" if suggested_entry != entry else "market",
     )
 
@@ -412,8 +479,8 @@ def compute_stock_levels(ticker: str, data: dict, direction: str,
         "nearest_support": round(nearest_support, 2) if nearest_support else None,
         "nearest_resistance": round(nearest_resistance, 2) if nearest_resistance else None,
         "proximity_warning": proximity_warning,
-        "sl_method": "sma+swing+atr+depth",
-        "tp_method": "sma+swing+atr",
+        "sl_method": sl_method_used,
+        "tp_method": tp_method_used,
     }
 
 
@@ -540,31 +607,51 @@ def compute_option_levels(ticker: str, data: dict, direction: str,
         if risk_per_contract > 0:
             premium_rr = _clamp_rr(reward_per_contract / risk_per_contract)
 
-    # ── Level engine: suggested entry + proximity ──
+    # ── Level engine: override SL/TP with nearest gamma/support/resistance data ──
+    sl_method_used = "gamma_flip+atr(dte_scaled)"
+    tp_method_used = "gamma_wall+atr(dte_scaled)"
     suggested_entry = entry
     suggested_entry_type = "market"
     nearest_support = None
     nearest_resistance = None
     proximity_warning = None
     try:
+        # Use cached key_levels if available (computed once in data_prep)
         from engine.level_engine import aggregate_key_levels
-        levels = aggregate_key_levels(ticker, data, entry, direction, "option")
+        cached = data.get("key_levels")
+        if cached:
+            levels = cached
+        else:
+            levels = aggregate_key_levels(ticker, data, entry, direction, "option")
         if levels.get("suggested_entry") and levels["suggested_entry"] != entry:
             suggested_entry = levels["suggested_entry"]
             suggested_entry_type = levels.get("suggested_entry_type", "level")
         nearest_support = levels.get("nearest_support")
         nearest_resistance = levels.get("nearest_resistance")
         proximity_warning = levels.get("proximity_warning")
+        # Level-aware SL: gamma flip is already primary, but use near support/resistance as fallback
+        if direction == "long" and nearest_support:
+            level_sl = nearest_support - max(atr * dte_scale * 0.1, 0.02)
+            if level_sl > sl:
+                sl = level_sl
+                sl_method_used = "level_support"
+        if direction == "short" and nearest_resistance:
+            level_sl = nearest_resistance + max(atr * dte_scale * 0.1, 0.02)
+            if level_sl < sl:
+                sl = level_sl
+                sl_method_used = "level_resistance"
+        # Recompute R:R with level-adjusted SL
+        rr = _clamp_rr(abs(tp - entry) / max(abs(sl - entry), 0.01))
     except Exception as e:
         logger.debug("Level engine unavailable for %s: %s", ticker, e)
 
     logger.debug(
         "Option %s: entry=%.2f sl=%.2f tp=%.2f rr=%.1f "
         "opt_prem=%.2f opt_sl=%.2f opt_tp=%.2f prem_rr=%.1f "
-        "gamma_flip=%.2f dte=%.0f dte_scale=%.2f suggested=%s",
+        "gamma_flip=%.2f dte=%.0f dte_scale=%.2f sl_method=%s suggested=%s",
         ticker, entry, sl, tp, rr,
         option_entry_premium, option_sl_premium, option_tp_premium,
-        premium_rr, gamma_flip, dte, dte_scale,
+        premium_rr, gamma_flip, dte, dte_scale, sl_method_used,
         f"{suggested_entry}({suggested_entry_type})" if suggested_entry != entry else "market",
     )
 
@@ -582,8 +669,8 @@ def compute_option_levels(ticker: str, data: dict, direction: str,
         "option_sl_premium": round(option_sl_premium, 2),
         "option_tp_premium": round(option_tp_premium, 2),
         "premium_risk_reward": round(premium_rr, 2),
-        "sl_method": "gamma_flip+atr(dte_scaled)",
-        "tp_method": "gamma_wall+atr(dte_scaled)",
+        "sl_method": sl_method_used,
+        "tp_method": tp_method_used,
         "gamma_flip_level": gamma_flip,
         "dte": dte,
     }

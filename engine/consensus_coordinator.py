@@ -129,6 +129,18 @@ CONSENSUS_THRESHOLD = 0.20
 CONSENSUS_THRESHOLD_OPTION = 0.40
 COUNTER_TREND_CONSENSUS_THRESHOLD = 0.50
 
+# ── Quality Gate: Minimum confidence floor for individual votes ──
+# Votes below this threshold are excluded from consensus computation entirely.
+# Prevents noise strategies (2-10% confidence) from diluting strong signals.
+MIN_VOTE_CONFIDENCE = 0.10
+
+# ── Quality Gate: High-confidence agreement requirement ──
+# A directional signal requires at least this many strategies with confidence
+# above the threshold to all agree on the SAME direction.
+# Prevents marginal signals where no strategy is truly committed.
+HIGH_CONFIDENCE_THRESHOLD = 0.60
+MIN_HIGH_CONFIDENCE_STRATEGIES = 2
+
 # Minimum total weight required for a signal to pass.
 # Prevents a single low-weight vote (e.g., reversion at 0.15 × 0.25 = 0.0375)
 # from producing net = ±1.0.
@@ -444,7 +456,7 @@ def compute_consensus(
     for r in v2_results:
         direction = r.get("direction", "neutral")
         confidence = r.get("confidence", 0)
-        if confidence <= 0 or direction == "neutral":
+        if confidence < MIN_VOTE_CONFIDENCE or direction == "neutral":
             neutral_count += 1
             continue
         sname = r.get("strategy", r.get("name", "unknown"))
@@ -476,7 +488,7 @@ def compute_consensus(
     for r in v3_results:
         direction = r.get("direction", "neutral")
         confidence = r.get("confidence", 0)
-        if confidence <= 0 or direction == "neutral":
+        if confidence < MIN_VOTE_CONFIDENCE or direction == "neutral":
             neutral_count += 1
             continue
         sname = r.get("strategy", r.get("name", "unknown"))
@@ -576,6 +588,33 @@ def compute_consensus(
         direction = "short"
     else:
         direction = "neutral"
+
+    # ── Quality Gate: High-confidence agreement check ──
+    # Require at least MIN_HIGH_CONFIDENCE_STRATEGIES strategies with
+    # confidence >= HIGH_CONFIDENCE_THRESHOLD to agree on the consensus
+    # direction before it's considered a genuine signal. This prevents
+    # marginal net scores from producing directional signals when no
+    # single strategy is truly committed.
+    original_net = net
+    if direction != "neutral":
+        high_conf_long = sum(
+            1 for v in all_votes
+            if v["direction"] == "long" and v["confidence"] >= HIGH_CONFIDENCE_THRESHOLD
+        )
+        high_conf_short = sum(
+            1 for v in all_votes
+            if v["direction"] == "short" and v["confidence"] >= HIGH_CONFIDENCE_THRESHOLD
+        )
+        high_conf_agree = high_conf_long if direction == "long" else high_conf_short
+        if high_conf_agree < MIN_HIGH_CONFIDENCE_STRATEGIES:
+            direction = "neutral"
+            net = 0.0
+            meta["consensus_quality_blocked"] = True
+            meta["consensus_quality_reason"] = (
+                f"only_{high_conf_agree}_high_conf_strategies"
+                f"_need_{MIN_HIGH_CONFIDENCE_STRATEGIES}"
+            )
+            meta["consensus_net_score"] = round(original_net, 4)  # Keep real net for display
 
     # ── MTF alignment check ──
     mtf_direction = None

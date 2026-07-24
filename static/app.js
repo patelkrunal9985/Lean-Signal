@@ -780,7 +780,9 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
   var stateLabel = state || 'none';
   if (se) {
     var cycleAge = '';
-    if (st && st.entry_cycle != null && st.current_signal && st.current_signal.cycle_id != null) {
+    // Only show cycle count if thesis was actually entered (entry_cycle > 0).
+    // Avoids misleading "NONE x92" when entry_cycle defaults to 0.
+    if (st && st.entry_cycle > 0 && st.current_signal && st.current_signal.cycle_id != null) {
       var age = st.current_signal.cycle_id - st.entry_cycle;
       if (age > 0) cycleAge = ' x' + age;
     } else if (st && st.total_cycles != null) {

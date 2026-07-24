@@ -751,6 +751,7 @@ header {
   font-size: 11px;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .sr-col .sr-dist.sr-good { color: var(--accent); }
 .sr-col .sr-dist.sr-bad { color: var(--danger); }
@@ -967,6 +968,88 @@ header {
 }
 .ticker-cell:hover { border-color: var(--accent); box-shadow: var(--shadow-lg); }
 
+/* ── Grid area: stats (score, conf, strats) ── */
+.ticker-cell .grid-stats {
+  grid-area: stats;
+  display: flex;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-muted);
+  min-height: 22px;
+  align-items: center;
+}
+.ticker-cell .grid-stats > span {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* ── Grid area: levels (entry, SL, TP, R:R) ── */
+.ticker-cell .grid-levels {
+  grid-area: levels;
+  display: flex;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--text-muted);
+  min-height: 22px;
+  align-items: center;
+}
+.ticker-cell .grid-levels .level-pair {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* ── Grid area: PnL row ── */
+.ticker-cell .grid-pnl {
+  grid-area: pnl;
+  min-height: 24px;
+  display: flex;
+  align-items: center;
+}
+.ticker-cell .grid-pnl .row-pnl {
+  width: 100%;
+}
+.ticker-cell .grid-pnl .row-pnl > span {
+  white-space: nowrap;
+}
+/* ── Grid area: bottom bar ── */
+.ticker-cell .grid-bottom {
+  grid-area: bottom;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  min-height: 22px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+.ticker-cell .grid-bottom > span {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* ── Grid area: support/resistance ── */
+.ticker-cell .grid-sr {
+  grid-area: sr;
+  min-height: 24px;
+}
+.ticker-cell .grid-sr .row-sr {
+  width: 100%;
+}
+.ticker-cell .grid-sr .sr-col {
+  flex: 1;
+  min-width: 0;
+}
+.ticker-cell .grid-sr .sr-val {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 /* ── Grid area: verdict row ── */
 .ticker-cell .grid-verdict {
   grid-area: verdict;
@@ -974,6 +1057,25 @@ header {
   align-items: center;
   gap: 6px;
   min-height: 28px;
+}
+.ticker-cell .grid-verdict .verdict-badge {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.ticker-cell .grid-verdict .flip-tp-badge {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.ticker-cell .grid-verdict .actionability {
+  white-space: nowrap;
+}
+/* ── Grid area: conviction meter ── */
+.ticker-cell .grid-conv {
+  grid-area: conv;
+  min-height: 28px;
+}
+.ticker-cell .grid-conv .conviction-meter {
+  width: 100%;
 }
 /* ── Grid area: header (ticker name + badges | direction) ── */
 .ticker-cell .grid-header {
@@ -984,37 +1086,8 @@ header {
   gap: 8px;
   min-height: 32px;
 }
-/* ── Grid area: conviction meter ── */
-.ticker-cell .grid-conv {
-  grid-area: conv;
-  min-height: 28px;
-}
-/* ── Grid area: PnL row ── */
-.ticker-cell .grid-pnl {
-  grid-area: pnl;
-  min-height: 24px;
-  display: flex;
-  align-items: center;
-}
-/* ── Grid area: stats (score, conf, strats) ── */
-.ticker-cell .grid-stats {
-  grid-area: stats;
-  display: flex;
-  gap: 12px;
-  font-size: 13px;
-  color: var(--text-muted);
-  min-height: 22px;
-  align-items: center;
-}
-/* ── Grid area: levels (entry, SL, TP, R:R) ── */
-.ticker-cell .grid-levels {
-  grid-area: levels;
-  display: flex;
-  gap: 8px;
-  font-size: 13px;
-  color: var(--text-muted);
-  min-height: 22px;
-  align-items: center;
+.ticker-cell .grid-header .direction-badge {
+  flex-shrink: 0;
 }
 /* ── Grid area: limit entry ── */
 .ticker-cell .grid-limit {
@@ -1027,30 +1100,19 @@ header {
   padding-top: 4px;
   border-top: 1px dashed rgba(124, 58, 237, 0.2);
 }
-.ticker-cell .grid-limit .limit-label { color: #7c3aed; font-weight: 600; }
+.ticker-cell .grid-limit > span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ticker-cell .grid-limit .limit-label { color: #7c3aed; font-weight: 600; flex-shrink: 0; }
 .ticker-cell .limit-type {
   font-size: 11px;
   color: var(--text-muted);
   background: rgba(124, 58, 237, 0.08);
   padding: 1px 6px;
   border-radius: 4px;
-}
-/* ── Grid area: support/resistance ── */
-.ticker-cell .grid-sr {
-  grid-area: sr;
-  min-height: 24px;
-}
-/* ── Grid area: bottom bar ── */
-.ticker-cell .grid-bottom {
-  grid-area: bottom;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 11px;
-  color: var(--text-muted);
-  min-height: 22px;
-  padding-top: 4px;
-  border-top: 1px solid var(--border);
+  white-space: nowrap;
 }
 
 /* ── Regime badge (on card row1) ── */

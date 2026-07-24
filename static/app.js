@@ -644,12 +644,13 @@ function _createTickerCell(ticker) {
       '<span>Conf: <strong>--</strong></span>' +
       '<span>Strats: <strong>0/0</strong></span>' +
     '</div>' +
-    // Grid area: levels (entry, SL, TP, R:R)
+    // Grid area: levels (entry, SL, TP, R:R + ATR) — each pair in a fixed container
     '<div class="grid-levels">' +
-      '<span class="level-label">Entry</span><span class="level-val">$--</span>' +
-      '<span class="level-label">SL</span><span class="level-val sl">$--</span>' +
-      '<span class="level-label">TP</span><span class="level-val tp">$--</span>' +
-      '<span class="level-label">R:R</span><span class="level-val rr">--</span>' +
+      '<span class="level-pair"><span class="level-label">Entry</span><span class="level-val">$--</span></span>' +
+      '<span class="level-pair"><span class="level-label">SL</span><span class="level-val sl">$--</span></span>' +
+      '<span class="level-pair"><span class="level-label">TP</span><span class="level-val tp">$--</span></span>' +
+      '<span class="level-pair"><span class="level-label">R:R</span><span class="level-val rr">--</span></span>' +
+      '<span class="level-pair"><span class="level-label">ATR</span><span class="level-val">$--</span></span>' +
     '</div>' +
     // Grid area: limit entry (always reserved)
     '<div class="grid-limit">' +
@@ -984,16 +985,16 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
       var rr = effectiveSig.risk_reward || (tp - ep) / (ep - sl);
       if (!isFinite(rr)) rr = 0;
       var slAtr = ratr > 0 ? ' (' + (Math.abs(ep - sl) / ratr).toFixed(1) + '\u00D7)' : '';
-      r3.innerHTML = '<span class="level-label">Entry</span><span class="level-val">$' + ep.toFixed(2) + '</span>' +
-        '<span class="level-label">SL</span><span class="level-val sl">$' + sl.toFixed(2) + slAtr + '</span>' +
-        '<span class="level-label">TP</span><span class="level-val tp">$' + tp.toFixed(2) + '</span>' +
-        '<span class="level-label">R:R</span><span class="level-val rr">' + rr.toFixed(1) + '</span>';
+      r3.innerHTML = '<span class="level-pair"><span class="level-label">Entry</span><span class="level-val">$' + ep.toFixed(2) + '</span></span>' +
+        '<span class="level-pair"><span class="level-label">SL</span><span class="level-val sl">$' + sl.toFixed(2) + slAtr + '</span></span>' +
+        '<span class="level-pair"><span class="level-label">TP</span><span class="level-val tp">$' + tp.toFixed(2) + '</span></span>' +
+        '<span class="level-pair"><span class="level-label">R:R</span><span class="level-val rr">' + rr.toFixed(1) + '</span></span>';
     } else {
-      r3.innerHTML = '<span class="level-label">Entry</span><span class="level-val">$--</span>' +
-        '<span class="level-label">SL</span><span class="level-val sl">$--</span>' +
-        '<span class="level-label">TP</span><span class="level-val tp">$--</span>' +
-        '<span class="level-label">R:R</span><span class="level-val rr">--</span>' +
-        (atrCtx ? '<span class="level-label">ATR</span><span class="level-val">' + atrCtx.trim() + '</span>' : '');
+      r3.innerHTML = '<span class="level-pair"><span class="level-label">Entry</span><span class="level-val">$--</span></span>' +
+        '<span class="level-pair"><span class="level-label">SL</span><span class="level-val sl">$--</span></span>' +
+        '<span class="level-pair"><span class="level-label">TP</span><span class="level-val tp">$--</span></span>' +
+        '<span class="level-pair"><span class="level-label">R:R</span><span class="level-val rr">--</span></span>' +
+        '<span class="level-pair"><span class="level-label">ATR</span><span class="level-val">' + (atrCtx ? atrCtx.trim() : '$--') + '</span></span>';
     }
   }
 

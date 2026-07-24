@@ -103,7 +103,7 @@ _last_slot_warning: float = 0.0  # rate-limit warnings to once per 60s
 FIXED_STOCKS = frozenset({"SPY", "QQQ", "SPX", "NDX"})
 FIXED_FUTURES = frozenset({
     "ES=F", "NQ=F", "YM=F", "RTY=F",
-    "MES=F", "MNQ=F", "MYM=F", "M2K=F", "MGC=F", "MCL=F",
+    "MGC=F", "MCL=F",
     "GC=F", "CL=F", "VX=F",
 })
 

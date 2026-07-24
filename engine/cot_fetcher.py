@@ -17,17 +17,13 @@ logger = get_logger("engine.skills.cot_fetcher")
 _TICKER_TO_CFTC = {
     # CME (deacmesf.htm): E-mini S&P / NASDAQ / Russell + MICROS + crypto
     "ES=F":  "E-MINI S&P 500",
-    "MES=F": "MICRO E-MINI S&P 500",
     "NQ=F":  "NASDAQ MINI",
-    "MNQ=F": "MICRO E-MINI NASDAQ-100",
     "RTY=F": "RUSSELL E-MINI",
-    "M2K=F": "MICRO E-MINI RUSSELL 2000",
     # COMEX (deacmxsf.htm): precious metals
     "GC=F":  "GOLD - COMMODITY EXCHANGE",
     "MGC=F": "MICRO GOLD - COMMODITY EXCHANGE",
     # CBOT (deacbtsf.htm): DJIA (full + micro)
     "YM=F":  "DJIA",
-    "MYM=F": "MICRO DJIA",
     # NYMEX (deanymesf.htm): WTI crude (full + micro), natgas, etc.
     "CL=F":  "WTI-PHYSICAL",
     "MCL=F": "WTI-PHYSICAL",   # CFTC rolls micro WTI under parent WTI-PHYSICAL until micro OI grows
@@ -47,11 +43,11 @@ _TICKER_TO_CFTC = {
 # the primary first, then falls back to every other exchange's URL so that
 # CFTC URL reshuffles don't silently miss data.
 _TICKER_PRIMARY_EXCHANGE: dict[str, str] = {
-    "ES=F": "CME",   "MES=F": "CME",
-    "NQ=F": "CME",   "MNQ=F": "CME",
-    "RTY=F": "CME",  "M2K=F": "CME",
+    "ES=F": "CME",
+    "NQ=F": "CME",
+    "RTY=F": "CME",
     "GC=F": "COMEX", "MGC=F": "COMEX",
-    "YM=F": "CBOT",  "MYM=F": "CBOT",
+    "YM=F": "CBOT",
     "CL=F": "NYMEX", "MCL=F": "NYMEX", "NG=F": "NYMEX",
     "VX=F": "CBOE",
 }

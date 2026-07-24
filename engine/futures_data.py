@@ -330,7 +330,6 @@ def compute_tick_clusters(tick_buffer: list) -> dict:
 
 _RTH_OPEN_TIMES = {
     "ES=F": "09:30", "NQ=F": "09:30", "YM=F": "09:30", "RTY=F": "09:30",
-    "MES=F": "09:30", "MNQ=F": "09:30", "MYM=F": "09:30", "M2K=F": "09:30",
     "GC=F": "08:20", "MGC=F": "08:20", "SI=F": "08:25",
     "CL=F": "09:00", "MCL=F": "09:00", "HO=F": "09:00", "RB=F": "09:00",
     "NG=F": "09:00",

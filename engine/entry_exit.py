@@ -24,10 +24,10 @@ logger = get_logger("engine.entry_exit")
 
 # -- Futures tick sizes for price rounding --
 FUTURES_TICK_SIZES: dict[str, float] = {
-    "ES=F": 0.25, "MES=F": 0.25,
-    "NQ=F": 0.25, "MNQ=F": 0.25,
-    "YM=F": 1.0,  "MYM=F": 1.0,
-    "RTY=F": 0.10, "M2K=F": 0.10,
+    "ES=F": 0.25,
+    "NQ=F": 0.25,
+    "YM=F": 1.0,
+    "RTY=F": 0.10,
     "GC=F": 0.10, "MGC=F": 0.10,
     "SI=F": 0.005,
     "CL=F": 0.01, "MCL=F": 0.01,

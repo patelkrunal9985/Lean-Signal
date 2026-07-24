@@ -18,7 +18,7 @@ FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY", "")
 FIXED_STOCKS = ["SPY", "QQQ"]  # SPX/NDX removed: indices are not tradeable, IBKR doesn't stream index data
 FIXED_FUTURES = [
     "ES=F", "NQ=F", "YM=F", "RTY=F",
-    "MES=F", "MNQ=F", "MYM=F", "M2K=F", "MGC=F", "MCL=F",
+    "MGC=F", "MCL=F",
     "GC=F", "CL=F", "VX=F",
 ]
 

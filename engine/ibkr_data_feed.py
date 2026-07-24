@@ -50,7 +50,7 @@ _INVALID_CACHE_TTL = 3600            # 1h
 # Micro futures have smaller contract sizes (1/10th or 1/2 of regular).
 # They need tighter sanity gates to catch IBKR tick glitches like
 # the MYM 400-point bump bug (1% deviation passes 15% gate unnoticed).
-_MICRO_FUTURE_SYMBOLS = {"MES", "MNQ", "MYM", "M2K", "MCL", "MGC"}
+_MICRO_FUTURE_SYMBOLS = {"MCL", "MGC"}
 
 
 def _is_micro_future(ticker_or_key: str) -> bool:
@@ -651,7 +651,7 @@ class IBKRStreamer:
             # Futures month codes: FGHJKMNQUVXZ
             # Last 2 chars are month code + year digit, but can vary
             # Use the registry base symbols for matching
-            for base in sorted(["ES", "NQ", "YM", "RTY", "MES", "MNQ", "MYM", "M2K", "MCL", "MGC", "VX", "GC", "SI", "HG"], key=len, reverse=True):
+            for base in sorted(["ES", "NQ", "YM", "RTY", "MCL", "MGC", "VX", "GC", "SI", "HG"], key=len, reverse=True):
                 if symbol.startswith(base):
                     return base
         return symbol
@@ -659,7 +659,7 @@ class IBKRStreamer:
     def _reverse_map(self, ibkr_symbol: str) -> Optional[str]:
         """Map IBKR base symbol back to yahoo-style ticker."""
         rev = {"ES": "ES=F", "NQ": "NQ=F", "YM": "YM=F", "RTY": "RTY=F",
-               "MES": "MES=F", "MNQ": "MNQ=F", "MYM": "MYM=F",        "M2K": "M2K=F",
+
                "MCL": "MCL=F", "MGC": "MGC=F",
                "VX": "VX=F",
                "GC": "GC=F",
@@ -670,8 +670,7 @@ class IBKRStreamer:
     # Per-future contract month cycles (not all follow quarterly)
     _FUTURE_CONTRACT_CYCLES = {
         "ES": [3, 6, 9, 12], "NQ": [3, 6, 9, 12], "YM": [3, 6, 9, 12],
-        "RTY": [3, 6, 9, 12], "MES": [3, 6, 9, 12], "MNQ": [3, 6, 9, 12],
-        "MYM": [3, 6, 9, 12], "M2K": [3, 6, 9, 12],
+        "RTY": [3, 6, 9, 12],
         "GC": [2, 4, 6, 8, 10, 12], "MGC": [2, 4, 6, 8, 10, 12],
         "SI": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
         "HG": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
@@ -752,10 +751,7 @@ class IBKRStreamer:
             "NQ=F": ("NQ", "CME"),
             "YM=F": ("YM", "CBOT"),
             "RTY=F": ("RTY", "CME"),
-            "MES=F": ("MES", "CME"),
-            "MNQ=F": ("MNQ", "CME"),
-            "MYM=F": ("MYM", "CBOT"),
-            "M2K=F": ("M2K", "CME"),
+
             "MCL=F": ("MCL", "NYMEX"),
             "MGC=F": ("MGC", "COMEX"),
             "VX=F": ("VX", "CFE"),

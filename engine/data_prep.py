@@ -331,10 +331,9 @@ def prepare_all_data(
 
     # ── Phase 5b: Gamma level injection into futures contexts ──
     # Gamma levels are computed from SPY options (track ES) and QQQ options (track NQ).
-    # Inject SPY gamma into ES=F/MES=F, QQQ gamma into NQ=F/MNQ=F.
     _gamma_source_map = {
-        "ES=F": "SPY", "MES=F": "SPY",
-        "NQ=F": "QQQ", "MNQ=F": "QQQ",
+        "ES=F": "SPY",
+        "NQ=F": "QQQ",
     }
     for key, data in ticker_data_map.items():
         expected_underlying = _gamma_source_map.get(key)

@@ -892,6 +892,34 @@ header {
   border-top: 1px solid var(--border);
 }
 
+/* ── Regime badge (on card row1) ── */
+.regime-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 700;
+  margin-left: 4px;
+  letter-spacing: 0.3px;
+  background: var(--bg-hover);
+  color: var(--text-muted);
+}
+.regime-badge.aligned { background: rgba(0, 200, 100, 0.2); color: #00c864; }
+.regime-badge.counter { background: rgba(255, 50, 50, 0.2); color: #ff5050; }
+.regime-badge.neutral { background: var(--bg-hover); color: var(--text-muted); }
+
+/* ── Trend indicator (next to conviction meter) ── */
+.trend-indicator {
+  font-size: 14px;
+  font-weight: 700;
+  min-width: 16px;
+  text-align: center;
+  color: var(--text-muted);
+}
+.trend-indicator.improving { color: #00c864; }
+.trend-indicator.deteriorating { color: #ff5050; }
+.trend-indicator.flat { color: #ffaa00; }
+
 /* ── Card-specific extras ── */
 .tc-gate-pass { color: var(--accent); }
 .tc-ns-pos { color: var(--accent); }

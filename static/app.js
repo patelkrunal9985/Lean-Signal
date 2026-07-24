@@ -551,20 +551,22 @@ function _createTickerCell(ticker) {
   cell.innerHTML =
     // Verdict badge (full width, colored)
     '<div class="tc-verdict-row"><span class="verdict-badge no-action">NO ACTION</span></div>' +
-    // Row 1: ticker name, instrument badge, direction badge, state badge
+    // Row 1: ticker name, instrument badge, state badge (with cycle count), regime badge, direction badge
     '<div class="row1">' +
       '<div>' +
         '<span class="ticker-name">' + ticker.replace('=F','').replace('_OPT','') + '</span>' +
         '<span class="instrument-badge">' + typeLabel + '</span>' +
         '<span class="state-badge none">none</span>' +
+        '<span class="regime-badge">--</span>' +
       '</div>' +
       '<span class="direction-badge neutral">\u2013 NEUTRAL</span>' +
     '</div>' +
-    // Conviction meter: tier badge + percentage + meter bar
+    // Conviction meter: tier badge + percentage + meter bar + trend indicator
     '<div class="conviction-meter">' +
       '<span class="tier-badge bronze">BRONZE</span>' +
       '<span class="meter-pct bronze">0.0%</span>' +
       '<div class="meter-bar bronze" style="width:5%"></div>' +
+      '<span class="trend-indicator">\u2013</span>' +
     '</div>' +
     // Row 2: Score, Confidence, Strategies
     '<div class="row2">' +
@@ -677,11 +679,36 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
     de.className = 'direction-badge ' + _getDirClass(dirLabel);
   }
 
-  // ── State badge ──
+  // ── Regime badge with alignment color ──
+  var re = cell.querySelector('.regime-badge');
+  if (re) {
+    var regime = (sig && sig.regime) || (gate && gate.regime) || (meta && meta.consensus_regime) || '';
+    if (regime && regime !== 'unknown') {
+      var isUptrend = regime.indexOf('uptrend') >= 0;
+      var isDowntrend = regime.indexOf('downtrend') >= 0;
+      var isRanging = regime === 'ranging' || regime === 'high_volatility';
+      var isLong = dirLabel === 'long';
+      var aligned = (isLong && isUptrend) || (!isLong && dirLabel === 'short' && isDowntrend);
+      var label = isUptrend ? '\u2191UPTR' : isDowntrend ? '\u2193DNTR' : isRanging ? '\u2192RNG' : regime.slice(0, 4).toUpperCase();
+      re.textContent = label;
+      re.className = 'regime-badge ' + (aligned ? 'aligned' : (isRanging ? 'neutral' : 'counter'));
+    } else {
+      re.textContent = '--';
+      re.className = 'regime-badge';
+    }
+  }
+
+  // ── State badge with cycle count ──
   var se = cell.querySelector('.state-badge');
   var stateLabel = state || 'none';
   if (se) {
-    se.textContent = stateLabel.toUpperCase();
+    // Compute cycle count: how many cycles since entry
+    var cycleAge = '';
+    if (st && st.entry_cycle != null && st.current_signal && st.current_signal.cycle_id != null) {
+      var age = st.current_signal.cycle_id - st.entry_cycle;
+      if (age > 0) cycleAge = ' x' + age;
+    }
+    se.textContent = stateLabel.toUpperCase() + cycleAge;
     se.className = 'state-badge ' + stateLabel;
   }
 
@@ -699,6 +726,25 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
   var be = cell.querySelector('.meter-bar');
   if (be) { be.style.width = Math.max(convPct, 5) + '%'; be.className = 'meter-bar ' + tier; }
 
+  // ── Trend indicator (improving / flat / fading) ──
+  var ti = cell.querySelector('.trend-indicator');
+  if (ti) {
+    var trend = st ? st.trend : null;
+    if (trend === 'improving') {
+      ti.textContent = '\u2191';
+      ti.className = 'trend-indicator improving';
+    } else if (trend === 'deteriorating') {
+      ti.textContent = '\u2193';
+      ti.className = 'trend-indicator deteriorating';
+    } else if (trend === 'flat') {
+      ti.textContent = '\u2192';
+      ti.className = 'trend-indicator flat';
+    } else {
+      ti.textContent = '\u2013';
+      ti.className = 'trend-indicator';
+    }
+  }
+
   // ── Row 2: Score, Conf, Strats ──
   var r2 = cell.querySelector('.row2');
   if (r2) {
@@ -713,18 +759,20 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
       '<span>Strats: <strong>' + active + '/' + total + '</strong></span>';
   }
 
-  // ── Row 3: Entry, SL, TP, R:R ──
+  // ── Row 3: Entry, SL (ATR context), TP, R:R ──
   var r3 = cell.querySelector('.row3');
   if (r3) {
+    var atr = gate ? (gate.atr || 0) : 0;
     if (sig && sig.entry_price && sig.stop_loss && sig.take_profit) {
       var ep = sig.entry_price;
       var sl = sig.stop_loss;
       var tp = sig.take_profit;
       var rr = sig.risk_reward || (tp - ep) / (ep - sl);
       if (!isFinite(rr)) rr = 0;
+      var slAtr = atr > 0 ? ' (' + (Math.abs(ep - sl) / atr).toFixed(1) + '\u00D7)' : '';
       r3.innerHTML =
         '<span class="level-label">Entry</span><span class="level-val">$' + ep.toFixed(2) + '</span>' +
-        '<span class="level-label">SL</span><span class="level-val sl">$' + sl.toFixed(2) + '</span>' +
+        '<span class="level-label">SL</span><span class="level-val sl">$' + sl.toFixed(2) + slAtr + '</span>' +
         '<span class="level-label">TP</span><span class="level-val tp">$' + tp.toFixed(2) + '</span>' +
         '<span class="level-label">R:R</span><span class="level-val rr">' + rr.toFixed(1) + '</span>';
     } else {
@@ -736,9 +784,11 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
     }
   }
 
-  // ── Bottom: gate, ns, price ──
+  // ── Bottom: ATR, gate, ns, price ──
   var bot = cell.querySelector('.tc-bottom');
   if (bot) {
+    var atr = gate ? (gate.atr || 0) : 0;
+    var atrStr = atr > 0 ? 'ATR $' + atr.toFixed(2) : '';
     var ns = meta ? meta.consensus_net_score : 0;
     var nsStr = 'ns: ' + (ns >= 0 ? '+' : '') + ns.toFixed(2);
     var gateStr = 'gate: --';
@@ -747,6 +797,7 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
     }
     var pxStr = price > 0 ? '$' + price.toFixed(2) : '$--';
     bot.innerHTML =
+      (atrStr ? '<span>' + atrStr + '</span>' : '') +
       '<span class="' + (gate && gate.gate_passed ? 'tc-gate-pass' : '') + '">' + gateStr + '</span>' +
       '<span class="' + (ns > 0.1 ? 'tc-ns-pos' : ns < -0.1 ? 'tc-ns-neg' : '') + '">' + nsStr + '</span>' +
       '<span style="margin-left:auto;font-variant-numeric:tabular-nums">' + pxStr + '</span>';

@@ -203,7 +203,13 @@ def _check_volume_liquidity(ticker: str, ticker_data: dict, instr_type: str) -> 
             if vol < min_vol:
                 return False, f"volume_too_low_{vol}_lt_{min_vol}"
     elif instr_type == "option":
-        opt_vol = indicators.get("option_contract_volume", 0)
+        # Check indicators first, then ticker_data directly.
+        # option_metrics.py populates option_contract_volume at the top
+        # level of the context dict (not always nested inside 'indicators').
+        opt_vol = (
+            indicators.get("option_contract_volume", 0)
+            or ticker_data.get("option_contract_volume", 0)
+        )
         if opt_vol < min_vol:
             return False, f"option_volume_too_low_{opt_vol}_lt_{min_vol}"
     elif instr_type == "stock":

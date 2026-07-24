@@ -106,6 +106,8 @@ def compute_option_metrics(ticker: str, underlying_price: float, ticker_data_map
     option_chain = {"calls": [], "puts": [], "oi_source": "ibkr", "expiry": nearest_exp}
     total_call_vol = 0
     total_put_vol = 0
+    total_call_oi = 0
+    total_put_oi = 0
     total_call_prem = 0.0
     total_put_prem = 0.0
 
@@ -146,10 +148,12 @@ def compute_option_metrics(ticker: str, underlying_price: float, ticker_data_map
             if right == "c":
                 option_chain["calls"].append(entry)
                 total_call_vol += volume
+                total_call_oi += oi
                 total_call_prem += prem * oi if oi > 0 else 0
             else:
                 option_chain["puts"].append(entry)
                 total_put_vol += volume
+                total_put_oi += oi
                 total_put_prem += prem * oi if oi > 0 else 0
 
     option_chain["calls"].sort(key=lambda x: x["strike"])
@@ -397,11 +401,15 @@ def compute_option_metrics(ticker: str, underlying_price: float, ticker_data_map
         otm_call_iv = option_chain["calls"][-1].get("impliedVolatility", 0) or 0
         skew_term_1m = otm_put_iv - otm_call_iv
 
+    # ── Aggregate option volume + OI for gate liquidity checks ──
+    total_option_volume = total_call_vol + total_put_vol
+    total_option_oi = total_call_oi + total_put_oi
+
     logger.info(
         "compute_option_metrics(%s): done — pc_ratio=%.3f, atm_iv=%.1f%%, gamma_flip=%.2f, charm=%s "
-        "[data: %d contracts, vol=%d, oi=%d, iv=%d, greeks=%d, bidask=%d]",
+        "[data: %d contracts, chain_vol=%d, chain_oi=%d, iv=%d, greeks=%d, bidask=%d]",
         ticker, pc_ratio, atm_iv, gamma_flip, charm_direction,
-        total_contracts, with_volume, with_oi, with_iv, with_greeks, with_bidask,
+        total_contracts, total_option_volume, total_option_oi, with_iv, with_greeks, with_bidask,
     )
     result = {
         "ticker": f"{ticker}_OPT",
@@ -410,6 +418,12 @@ def compute_option_metrics(ticker: str, underlying_price: float, ticker_data_map
         "underlying_price": underlying_price,
         "option_chain": option_chain,
         "underlying_data": underlying_data,
+        "option_contract_volume": total_option_volume,
+        "option_chain_oi": total_option_oi,
+        "indicators": {
+            "option_contract_volume": total_option_volume,
+            "option_chain_oi": total_option_oi,
+        },
         "pc_ratio": pc_ratio,
         "pc_ratio_5day_avg": pc_ratio_5day_avg,
         "pc_ratio_source": "ibkr",

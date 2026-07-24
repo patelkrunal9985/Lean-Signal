@@ -128,7 +128,7 @@ COUNTER_TREND_PENALTY = 0.25
 # Base threshold: requires meaningful directional tilt
 # Options get stricter threshold (0.40) — 0DTE gamma whipsaw demands strong confluence
 CONSENSUS_THRESHOLD = 0.20
-CONSENSUS_THRESHOLD_OPTION = 0.40
+CONSENSUS_THRESHOLD_OPTION = 0.25
 COUNTER_TREND_CONSENSUS_THRESHOLD = 0.50
 
 # ── Quality Gate: Minimum confidence floor for individual votes ──
@@ -272,10 +272,10 @@ WEAK_SIGNAL_WEIGHT_STRONG = 0.50  # Above this, no dampening
 # DTE-aware threshold configuration for options
 # 0DTE -> 0.25, 1-2DTE -> 0.30, 3-5DTE -> 0.35, 6+DTE -> 0.40
 DTE_THRESHOLD_MAP: list[tuple[int, float]] = [
-    (0, 0.25),
-    (2, 0.30),
-    (5, 0.35),
-    (999, 0.40),
+    (0, 0.15),
+    (2, 0.18),
+    (5, 0.22),
+    (999, 0.25),
 ]
 
 # ── Conviction Tiers ──

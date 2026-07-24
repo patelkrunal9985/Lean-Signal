@@ -7,8 +7,12 @@ Per-instrument-type logic:
   Options  -> Gamma flip levels + single-leg ATM premium + gamma walls
 
 Output for every signal:
-  { entry_price, stop_loss, take_profit,
-    option_entry_premium, option_sl_premium, option_tp_premium }
+  { entry_price, stop_loss, take_profit, suggested_entry,
+    option_entry_premium, option_sl_premium, option_tp_premium,
+    nearest_support, nearest_resistance, proximity_warning }
+
+Level awareness is powered by engine/level_engine.py (Fibonacci,
+prior HL, gamma flip/walls, VP, SMA, confluence zones).
 """
 from __future__ import annotations
 import math
@@ -242,9 +246,28 @@ def compute_futures_levels(ticker: str, data: dict, direction: str,
     rr = _clamp_rr(abs(tp - entry) / max(abs(sl - entry), 0.01))
     entry_rounded = _round_to_tick(ticker, entry)
 
+    # ── Level engine: suggested entry + proximity ──
+    suggested_entry = entry_rounded
+    suggested_entry_type = "market"
+    nearest_support = None
+    nearest_resistance = None
+    proximity_warning = None
+    try:
+        from engine.level_engine import aggregate_key_levels
+        levels = aggregate_key_levels(ticker, data, entry, direction, "future")
+        if levels.get("suggested_entry") and levels["suggested_entry"] != entry_rounded:
+            suggested_entry = levels["suggested_entry"]
+            suggested_entry_type = levels.get("suggested_entry_type", "level")
+        nearest_support = levels.get("nearest_support")
+        nearest_resistance = levels.get("nearest_resistance")
+        proximity_warning = levels.get("proximity_warning")
+    except Exception as e:
+        logger.debug("Level engine unavailable for %s: %s", ticker, e)
+
     logger.debug(
-        "Futures %s: entry=%.2f sl=%.2f tp=%.2f rr=%.1f atr=%.2f gamma_flip=%.2f",
+        "Futures %s: entry=%.2f sl=%.2f tp=%.2f rr=%.1f atr=%.2f gamma_flip=%.2f suggested=%s",
         ticker, entry_rounded, sl, tp, rr, atr, gamma_flip,
+        f"{suggested_entry}({suggested_entry_type})" if suggested_entry != entry_rounded else "market",
     )
 
     return {
@@ -252,6 +275,11 @@ def compute_futures_levels(ticker: str, data: dict, direction: str,
         "stop_loss": round(sl, 4),
         "take_profit": round(tp, 4),
         "risk_reward": round(rr, 2),
+        "suggested_entry": round(suggested_entry, 4),
+        "suggested_entry_type": suggested_entry_type,
+        "nearest_support": round(nearest_support, 4) if nearest_support else None,
+        "nearest_resistance": round(nearest_resistance, 4) if nearest_resistance else None,
+        "proximity_warning": proximity_warning,
         "sl_method": "atr+depth" + ("+gamma_flip" if gamma_flip > 0 else ""),
         "tp_method": "atr+sma" + ("+gamma_wall" if gamma_walls else ""),
     }
@@ -350,9 +378,28 @@ def compute_stock_levels(ticker: str, data: dict, direction: str,
 
     rr = _clamp_rr(abs(tp - entry) / max(abs(sl - entry), 0.01))
 
+    # ── Level engine: suggested entry + proximity ──
+    suggested_entry = entry
+    suggested_entry_type = "market"
+    nearest_support = None
+    nearest_resistance = None
+    proximity_warning = None
+    try:
+        from engine.level_engine import aggregate_key_levels
+        levels = aggregate_key_levels(ticker, data, entry, direction, "stock")
+        if levels.get("suggested_entry") and levels["suggested_entry"] != entry:
+            suggested_entry = levels["suggested_entry"]
+            suggested_entry_type = levels.get("suggested_entry_type", "level")
+        nearest_support = levels.get("nearest_support")
+        nearest_resistance = levels.get("nearest_resistance")
+        proximity_warning = levels.get("proximity_warning")
+    except Exception as e:
+        logger.debug("Level engine unavailable for %s: %s", ticker, e)
+
     logger.debug(
-        "Stock %s: entry=%.2f sl=%.2f tp=%.2f rr=%.1f atr=%.2f",
+        "Stock %s: entry=%.2f sl=%.2f tp=%.2f rr=%.1f atr=%.2f suggested=%s",
         ticker, entry, sl, tp, rr, atr,
+        f"{suggested_entry}({suggested_entry_type})" if suggested_entry != entry else "market",
     )
 
     return {
@@ -360,6 +407,11 @@ def compute_stock_levels(ticker: str, data: dict, direction: str,
         "stop_loss": round(sl, 2),
         "take_profit": round(tp, 2),
         "risk_reward": round(rr, 2),
+        "suggested_entry": round(suggested_entry, 2),
+        "suggested_entry_type": suggested_entry_type,
+        "nearest_support": round(nearest_support, 2) if nearest_support else None,
+        "nearest_resistance": round(nearest_resistance, 2) if nearest_resistance else None,
+        "proximity_warning": proximity_warning,
         "sl_method": "sma+swing+atr+depth",
         "tp_method": "sma+swing+atr",
     }
@@ -488,13 +540,32 @@ def compute_option_levels(ticker: str, data: dict, direction: str,
         if risk_per_contract > 0:
             premium_rr = _clamp_rr(reward_per_contract / risk_per_contract)
 
+    # ── Level engine: suggested entry + proximity ──
+    suggested_entry = entry
+    suggested_entry_type = "market"
+    nearest_support = None
+    nearest_resistance = None
+    proximity_warning = None
+    try:
+        from engine.level_engine import aggregate_key_levels
+        levels = aggregate_key_levels(ticker, data, entry, direction, "option")
+        if levels.get("suggested_entry") and levels["suggested_entry"] != entry:
+            suggested_entry = levels["suggested_entry"]
+            suggested_entry_type = levels.get("suggested_entry_type", "level")
+        nearest_support = levels.get("nearest_support")
+        nearest_resistance = levels.get("nearest_resistance")
+        proximity_warning = levels.get("proximity_warning")
+    except Exception as e:
+        logger.debug("Level engine unavailable for %s: %s", ticker, e)
+
     logger.debug(
         "Option %s: entry=%.2f sl=%.2f tp=%.2f rr=%.1f "
         "opt_prem=%.2f opt_sl=%.2f opt_tp=%.2f prem_rr=%.1f "
-        "gamma_flip=%.2f dte=%.0f dte_scale=%.2f",
+        "gamma_flip=%.2f dte=%.0f dte_scale=%.2f suggested=%s",
         ticker, entry, sl, tp, rr,
         option_entry_premium, option_sl_premium, option_tp_premium,
         premium_rr, gamma_flip, dte, dte_scale,
+        f"{suggested_entry}({suggested_entry_type})" if suggested_entry != entry else "market",
     )
 
     return {
@@ -502,6 +573,11 @@ def compute_option_levels(ticker: str, data: dict, direction: str,
         "stop_loss": round(sl, 2),
         "take_profit": round(tp, 2),
         "risk_reward": round(rr, 2),
+        "suggested_entry": round(suggested_entry, 2),
+        "suggested_entry_type": suggested_entry_type,
+        "nearest_support": round(nearest_support, 2) if nearest_support else None,
+        "nearest_resistance": round(nearest_resistance, 2) if nearest_resistance else None,
+        "proximity_warning": proximity_warning,
         "option_entry_premium": round(option_entry_premium, 2),
         "option_sl_premium": round(option_sl_premium, 2),
         "option_tp_premium": round(option_tp_premium, 2),

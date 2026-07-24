@@ -87,6 +87,8 @@ STRATEGY_FAMILY_MAP: dict[str, str] = {
     "credit_spread_detector": "options_micro",
     "iron_condor_detector": "options_micro",
     "expiry_day_gamma": "options_micro",
+    # ── SR Rejection strategies (Phase 2) ──
+    "sr_rejection": "technical",
 }
 
 
@@ -163,6 +165,8 @@ def _import_all():
     from engine.v3.options.credit_spread_detector import CreditSpreadDetector
     from engine.v3.options.iron_condor_detector import IronCondorDetector
     from engine.v3.options.expiry_day_gamma import ExpiryDayGamma
+    from engine.v3.stock.sr_rejection import SRRejectionStock
+    from engine.v3.futures.sr_rejection import SRRejectionFutures
     all_strategies = [
         PremarketGapper(), SectorRotation(), ShortSqueeze(), InsiderFlow(),
         EarningsMomentum(), DarkPoolProxy(), PairsTrading(), OrderImbalance(), COTSentiment(),
@@ -183,6 +187,7 @@ def _import_all():
         VannaCharmFlow(), PriorHLMagnetism(), OIChangeRate(),
         VolSmileCurvature(), DeltaGammaImbalance(), BreadthConfirmation(),
         IVRankPercentile(), CreditSpreadDetector(), IronCondorDetector(), ExpiryDayGamma(),
+        SRRejectionStock(), SRRejectionFutures(),
     ]
     for s in all_strategies:
         s.family = STRATEGY_FAMILY_MAP.get(s.name, "technical")

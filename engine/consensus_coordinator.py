@@ -125,9 +125,11 @@ REGIME_TREND_DIR: dict[str, str | None] = {
 }
 
 COUNTER_TREND_PENALTY = 0.25
-# Base threshold: requires meaningful directional tilt
-# Options get stricter threshold (0.40) — 0DTE gamma whipsaw demands strong confluence
+# Base threshold: requires meaningful directional tilt.
+# Futures (0.12): fewer active strategies (5-7), lower total weight.
+# Options (0.18): DTE-aware sliding 0.10-0.18, higher clustering penalty threshold.
 CONSENSUS_THRESHOLD = 0.20
+CONSENSUS_THRESHOLD_FUTURE = 0.12
 CONSENSUS_THRESHOLD_OPTION = 0.18
 COUNTER_TREND_CONSENSUS_THRESHOLD = 0.50
 
@@ -142,6 +144,9 @@ MIN_VOTE_CONFIDENCE = 0.10
 # Prevents marginal signals where no strategy is truly committed.
 HIGH_CONFIDENCE_THRESHOLD = 0.60
 MIN_HIGH_CONFIDENCE_STRATEGIES = 2
+# Futures have fewer active strategies (5-7) and rarely hit 2+ at >=0.60.
+# Lower the requirement to 1 to avoid blocking valid confluence.
+MIN_HIGH_CONFIDENCE_STRATEGIES_FUTURE = 1
 
 # Minimum total weight required for a signal to pass.
 # Prevents a single low-weight vote (e.g., reversion at 0.15 × 0.25 = 0.0375)
@@ -579,12 +584,16 @@ def compute_consensus(
     # ── Determine direction with adaptive threshold ──
     # DTE-aware threshold sliding: tighter threshold for 0DTE (more reactive),
     # wider threshold for longer-dated options (need more conviction).
+    # Futures get a lower threshold (0.12) because they have fewer active
+    # strategies (5-7 vs 14+ for options) producing lower total weight.
     if instr_type == "option" and dte is not None:
         threshold = CONSENSUS_THRESHOLD_OPTION
         for max_dte, dte_threshold in DTE_THRESHOLD_MAP:
             if dte <= max_dte:
                 threshold = dte_threshold
                 break
+    elif instr_type == "future":
+        threshold = CONSENSUS_THRESHOLD_FUTURE
     else:
         threshold = CONSENSUS_THRESHOLD
     meta["consensus_threshold"] = threshold
@@ -606,6 +615,12 @@ def compute_consensus(
     # direction before it's considered a genuine signal. This prevents
     # marginal net scores from producing directional signals when no
     # single strategy is truly committed.
+    # Futures get a lower requirement (1 vs 2) because they have fewer
+    # active strategies (5-7 vs 10-14 for options/stocks).
+    min_high_conf = (
+        MIN_HIGH_CONFIDENCE_STRATEGIES_FUTURE if instr_type == "future"
+        else MIN_HIGH_CONFIDENCE_STRATEGIES
+    )
     original_net = net
     if direction != "neutral":
         high_conf_long = sum(
@@ -617,13 +632,13 @@ def compute_consensus(
             if v["direction"] == "short" and v["confidence"] >= HIGH_CONFIDENCE_THRESHOLD
         )
         high_conf_agree = high_conf_long if direction == "long" else high_conf_short
-        if high_conf_agree < MIN_HIGH_CONFIDENCE_STRATEGIES:
+        if high_conf_agree < min_high_conf:
             direction = "neutral"
             net = 0.0
             meta["consensus_quality_blocked"] = True
             meta["consensus_quality_reason"] = (
                 f"only_{high_conf_agree}_high_conf_strategies"
-                f"_need_{MIN_HIGH_CONFIDENCE_STRATEGIES}"
+                f"_need_{min_high_conf}"
             )
             meta["consensus_net_score"] = round(original_net, 4)  # Keep real net for display
 

@@ -649,26 +649,30 @@ class SignalQualityGate:
             vw_mom = indicators.get("vw_momentum_signal", 0)
 
             # Check 1: Strong SMA20 trend → block counter-trade
+            # Futures get wider thresholds (5% block / 2.5% penalize) because
+            # they move more intraday — 3% on ES is a normal swing, not a trend.
+            _block_pct = 0.05 if instr_type == "future" else 0.03
+            _penalize_pct = 0.025 if instr_type == "future" else 0.015
             if sma20 > 0 and current_price > 0:
                 price_vs_sma20 = (current_price - sma20) / sma20
-                if price_vs_sma20 > 0.03 and signal_dir == "short":
+                if price_vs_sma20 > _block_pct and signal_dir == "short":
                     return {
                         "passed": False,
                         "reason": f"price_+{price_vs_sma20:.1%}_above_sma20_blocks_short",
                     }
-                if price_vs_sma20 < -0.03 and signal_dir == "long":
+                if price_vs_sma20 < -_block_pct and signal_dir == "long":
                     return {
                         "passed": False,
                         "reason": f"price_{price_vs_sma20:.1%}_below_sma20_blocks_long",
                     }
 
                 # Check 2: Moderate SMA20 trend → penalize counter-trade
-                if price_vs_sma20 > 0.015 and signal_dir == "short":
+                if price_vs_sma20 > _penalize_pct and signal_dir == "short":
                     confidence_mult *= 0.50
                     trend_reasons.append(
                         f"price_+{price_vs_sma20:.1%}_above_sma20"
                     )
-                if price_vs_sma20 < -0.015 and signal_dir == "long":
+                if price_vs_sma20 < -_penalize_pct and signal_dir == "long":
                     confidence_mult *= 0.50
                     trend_reasons.append(
                         f"price_{price_vs_sma20:.1%}_below_sma20"

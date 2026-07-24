@@ -636,7 +636,20 @@ function _createTickerCell(ticker) {
       '<span class="level-val limit">$--</span>' +
       '<span class="limit-type"></span>' +
     '</div>' +
-    // Bottom: ATR, gate, ns, price, proximity warning
+    // SR Row: nearest support & resistance with distance %
+    '<div class="row-sr">' +
+      '<span class="sr-col support-col">' +
+        '<span class="sr-label">\u25B2 Support</span>' +
+        '<span class="sr-val">$--</span>' +
+        '<span class="sr-dist"></span>' +
+      '</span>' +
+      '<span class="sr-col resistance-col">' +
+        '<span class="sr-label">\u25BC Resist</span>' +
+        '<span class="sr-val">$--</span>' +
+        '<span class="sr-dist"></span>' +
+      '</span>' +
+    '</div>' +
+    // Bottom: gate, ns, price, proximity warning
     '<div class="tc-bottom">' +
       '<span>gate: --</span>' +
       '<span>ns: --</span>' +
@@ -923,6 +936,46 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
     }
   }
 
+  // ── SR Row: nearest support/resistance with color-coding by direction ──
+  var srRow = cell.querySelector('.row-sr');
+  if (srRow) {
+    var nsVal = sig ? sig.nearest_support : null;
+    var nrVal = sig ? sig.nearest_resistance : null;
+    var dir = direction || 'neutral';
+
+    // Support column
+    var suppVal = srRow.querySelector('.support-col .sr-val');
+    var suppDist = srRow.querySelector('.support-col .sr-dist');
+    if (suppVal && nsVal && price > 0) {
+      var suppDistPct = ((price - nsVal) / price * 100);
+      suppVal.textContent = '$' + nsVal.toFixed(2);
+      suppDist.textContent = suppDistPct > 0 ? '+' + suppDistPct.toFixed(2) + '%' : suppDistPct.toFixed(2) + '%';
+      var suppClose = suppDistPct < 0.5;
+      suppVal.className = 'sr-val ' + (dir === 'long' ? (suppClose ? 'sr-good' : '') : (suppClose ? 'sr-bad' : ''));
+      suppDist.className = 'sr-dist ' + (suppDistPct < 0.5 ? (dir === 'long' ? 'sr-good' : 'sr-bad') : '');
+    } else if (suppVal) {
+      suppVal.textContent = '$--';
+      suppVal.className = 'sr-val';
+      if (suppDist) suppDist.textContent = '';
+    }
+
+    // Resistance column
+    var resVal = srRow.querySelector('.resistance-col .sr-val');
+    var resDist = srRow.querySelector('.resistance-col .sr-dist');
+    if (resVal && nrVal && price > 0) {
+      var resDistPct = ((nrVal - price) / price * 100);
+      resVal.textContent = '$' + nrVal.toFixed(2);
+      resDist.textContent = resDistPct > 0 ? '+' + resDistPct.toFixed(2) + '%' : resDistPct.toFixed(2) + '%';
+      var resClose = resDistPct < 0.5;
+      resVal.className = 'sr-val ' + (dir === 'short' ? (resClose ? 'sr-good' : '') : (resClose ? 'sr-bad' : ''));
+      resDist.className = 'sr-dist ' + (resClose ? (dir === 'short' ? 'sr-good' : 'sr-bad') : '');
+    } else if (resVal) {
+      resVal.textContent = '$--';
+      resVal.className = 'sr-val';
+      if (resDist) resDist.textContent = '';
+    }
+  }
+
   // ── Bottom: ATR, gate, ns, price ──
   var bot = cell.querySelector('.tc-bottom');
   if (bot) {
@@ -950,21 +1003,12 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
       proxHtml = '<span class="proximity-warn ' + warnCls + '" title="' + proxWarn + '">\u26A0 ' + warnLabel + '</span>';
     }
 
-    // ── Nearest support/resistance (compact, shown from signal data) ──
-    var srHtml = '';
-    if (sig && (sig.nearest_support || sig.nearest_resistance)) {
-      var nsVal = sig.nearest_support ? '$' + sig.nearest_support.toFixed(2) : '--';
-      var nrVal = sig.nearest_resistance ? '$' + sig.nearest_resistance.toFixed(2) : '--';
-      srHtml = '<span class="tc-sr"><span class="sr-support">S:' + nsVal + '</span> <span class="sr-resistance">R:' + nrVal + '</span></span>';
-    }
-
     var pxStr = price > 0 ? '$' + price.toFixed(2) : '$--';
     bot.innerHTML =
       (atrStr ? '<span>' + atrStr + '</span>' : '') +
       '<span class="' + gateCls + '" title="' + (gate && !gate.gate_passed ? (gate.gate_reason || 'fail').replace(/_/g, ' ') : '') + '">' + gateStr + '</span>' +
       '<span class="' + (ns > 0.1 ? 'tc-ns-pos' : ns < -0.1 ? 'tc-ns-neg' : '') + '">' + nsStr + '</span>' +
       proxHtml +
-      srHtml +
       '<span style="margin-left:auto;font-variant-numeric:tabular-nums">' + pxStr + '</span>';
   }
 

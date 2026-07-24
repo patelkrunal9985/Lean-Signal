@@ -667,7 +667,44 @@ header {
   margin: 6px 0;
 }
 
-/* ── Support/Resistance on cards ── */
+/* ── Support/Resistance Row (dedicated card row) ── */
+.row-sr {
+  display: flex;
+  gap: 8px;
+  padding: 3px 0;
+  margin: 2px 0;
+  border-top: 1px solid rgba(48, 54, 61, 0.5);
+  border-bottom: 1px solid rgba(48, 54, 61, 0.5);
+}
+.sr-col {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+}
+.sr-col .sr-label {
+  color: var(--text-muted);
+  font-weight: 500;
+  font-size: 9px;
+  white-space: nowrap;
+}
+.sr-col .sr-val {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.sr-col .sr-val.sr-good { color: var(--accent); }
+.sr-col .sr-val.sr-bad { color: var(--danger); }
+.sr-col .sr-dist {
+  font-size: 8px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.sr-col .sr-dist.sr-good { color: var(--accent); }
+.sr-col .sr-dist.sr-bad { color: var(--danger); }
+
+/* ── Compact S/R in bottom bar (kept for reference, hidden when row-sr present) ── */
 .tc-sr {
   display: inline-flex;
   gap: 6px;

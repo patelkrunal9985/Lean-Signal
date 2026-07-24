@@ -648,7 +648,7 @@ def _compute_conviction(
         elif prev_direction not in (None, "neutral"):
             base = prev_conviction * 0.5
 
-        max_conv = _get_velocity_building_max(instrument_type) if velocity_supports else 0.40
+        max_conv = _get_velocity_building_max(instrument_type) if velocity_supports else 0.50
         conviction = min(base, max_conv)
 
         # ── Fix 2: Hot Start — SR rejection at key level + velocity > 1 ATR ──
@@ -759,12 +759,14 @@ def update(
 
         # ── Track consecutive same-direction cycles for building ramp (P0.1) ──
         _last_dir = _get_prev_direction(ticker)
-        # increments when direction matches last cycle, resets otherwise
-        # (starts at 0 for first cycle, matching old len(memory) behavior)
+        # increments when direction matches last cycle.
+        # Only resets on TRUE FLIP (long→short or short→long), not on neutral.
+        # Neutral cycles between same-direction cycles don't reset progress.
         if direction == _last_dir and direction in ("long", "short"):
             _direction_cycles[ticker] = _direction_cycles.get(ticker, 0) + 1
-        else:
-            _direction_cycles[ticker] = 0
+        elif direction in ("long", "short") and _last_dir in ("long", "short") and direction != _last_dir:
+            _direction_cycles[ticker] = 0  # true flip: long↔short
+        # else: neutral or first signal — keep current count
 
         # ── Determine previous direction ──
         current_state = _signal_state.get(ticker, "none")

@@ -132,6 +132,13 @@ CONSENSUS_THRESHOLD = 0.20
 CONSENSUS_THRESHOLD_FUTURE = 0.12
 CONSENSUS_THRESHOLD_OPTION = 0.18
 COUNTER_TREND_CONSENSUS_THRESHOLD = 0.50
+COUNTER_TREND_CONSENSUS_THRESHOLD_FUTURE = 0.30
+
+# ── Velocity-based counter-trend override ──
+# When price moves this many ATRs against the current regime direction
+# in a single cycle, the counter-trend penalty is bypassed entirely.
+# The market IS telling us the regime is changing.
+CT_VELOCITY_BYPASS_ATR = 1.5
 
 # ── Quality Gate: Minimum confidence floor for individual votes ──
 # Votes below this threshold are excluded from consensus computation entirely.
@@ -417,6 +424,7 @@ def compute_consensus(
     sma_50: float = 0,
     dte: int | None = None,
     volume_profile: dict = None,
+    prev_price: float = 0,
 ) -> tuple[str, float, dict[str, Any]]:
     meta: dict[str, Any] = {}
     regime_weights = REGIME_WEIGHTS.get(regime, REGIME_WEIGHTS["ranging"]).copy()
@@ -457,6 +465,20 @@ def compute_consensus(
             meta["consensus_regime_quality"] = round(regime_quality, 4)
     meta["consensus_regime"] = regime
 
+    # ── Velocity-based counter-trend bypass check (computed once, reused twice) ──
+    velocity_ct_bypass = False
+    velocity_atr_val = 0.0
+    if prev_price > 0 and current_price > 0 and atr > 0 and trend_dir is not None:
+        velocity_atr_val = abs(current_price - prev_price) / max(atr, 0.01)
+        is_against_regime = (
+            (trend_dir == "long" and current_price < prev_price) or
+            (trend_dir == "short" and current_price > prev_price)
+        )
+        if is_against_regime and velocity_atr_val >= CT_VELOCITY_BYPASS_ATR:
+            velocity_ct_bypass = True
+            meta["consensus_velocity_bypass"] = True
+            meta["consensus_velocity_atr"] = round(velocity_atr_val, 2)
+
     # ── Collect all votes with family info ──
     all_votes = []
 
@@ -489,7 +511,8 @@ def compute_consensus(
         tod_weights[sname] = tod_mult
         w *= tod_mult
         if trend_dir is not None and direction != trend_dir:
-            w *= COUNTER_TREND_PENALTY
+            if not velocity_ct_bypass:
+                w *= COUNTER_TREND_PENALTY
         weighted_long += confidence * w if direction == "long" else 0
         weighted_short += confidence * w if direction == "short" else 0
         total_weight += w
@@ -529,7 +552,8 @@ def compute_consensus(
         w *= tod_mult
         # ── Counter-trend penalty ──
         if trend_dir is not None and direction != trend_dir:
-            w *= COUNTER_TREND_PENALTY
+            if not velocity_ct_bypass:
+                w *= COUNTER_TREND_PENALTY
         weighted_long += confidence * w if direction == "long" else 0
         weighted_short += confidence * w if direction == "short" else 0
         total_weight += w
@@ -600,7 +624,12 @@ def compute_consensus(
     if trend_dir is not None:
         inferred = "long" if net > 0 else "short"
         if inferred != trend_dir:
-            threshold = COUNTER_TREND_CONSENSUS_THRESHOLD
+            if not velocity_ct_bypass:
+                threshold = (
+                    COUNTER_TREND_CONSENSUS_THRESHOLD_FUTURE
+                    if instr_type == "future"
+                    else COUNTER_TREND_CONSENSUS_THRESHOLD
+                )
 
     if net > threshold:
         direction = "long"

@@ -679,12 +679,46 @@ class SignalQualityGate:
                     )
 
             # Check 3: Overbought/oversold RSI + BB
-            if rsi < 35 and bb_pct < 0.25 and signal_dir == "short":
-                confidence_mult *= 0.40
-                trend_reasons.append(f"oversold_rsi={rsi}_bb={bb_pct:.2f}")
-            if rsi > 65 and bb_pct > 0.75 and signal_dir == "long":
-                confidence_mult *= 0.40
-                trend_reasons.append(f"overbought_rsi={rsi}_bb={bb_pct:.2f}")
+            # ── Velocity bypass: skip oversold/overbought block when price
+            # is moving >1.5 ATR against regime — during a trend crash,
+            # oversold readings are expected and confirm the move.
+            # Uses the same threshold constant as consensus_coordinator.
+            try:
+                from engine.consensus_coordinator import CT_VELOCITY_BYPASS_ATR as _CT_VB
+            except ImportError:
+                _CT_VB = 1.5
+            vel_bypass_rsibb = False
+            _gate_atr = indicators.get("atr_14", 0)
+            _regime_trend_dir = {
+                "strong_uptrend": "long", "uptrend": "long",
+                "downtrend": "short", "strong_downtrend": "short",
+            }.get(regime_type)
+            if _gate_atr > 0 and current_price > 0 and _regime_trend_dir:
+                # Use cycle-level velocity from signal persistence (same source as consensus)
+                try:
+                    from engine.signal_persistence import get_ticker_state
+                    _st_gate = get_ticker_state(ticker)
+                    _prev_snap_gate = _st_gate.get("current_signal") or {}
+                    _prev_px_gate = float(_prev_snap_gate.get("price", 0) or 0)
+                    if _prev_px_gate > 0:
+                        _vel_atr = abs(current_price - _prev_px_gate) / max(_gate_atr, 0.01)
+                        _against = (
+                            (_regime_trend_dir == "long" and current_price < _prev_px_gate) or
+                            (_regime_trend_dir == "short" and current_price > _prev_px_gate)
+                        )
+                        if _against and _vel_atr >= _CT_VB:
+                            vel_bypass_rsibb = True
+                            trend_reasons.append(f"velocity_bypass_rsi_bb_{_vel_atr:.1f}atr")
+                except Exception:
+                    pass
+
+            if not vel_bypass_rsibb:
+                if rsi < 35 and bb_pct < 0.25 and signal_dir == "short":
+                    confidence_mult *= 0.40
+                    trend_reasons.append(f"oversold_rsi={rsi}_bb={bb_pct:.2f}")
+                if rsi > 65 and bb_pct > 0.75 and signal_dir == "long":
+                    confidence_mult *= 0.40
+                    trend_reasons.append(f"overbought_rsi={rsi}_bb={bb_pct:.2f}")
 
             # Check 4: Contradictory order flow + VW momentum
             if of_bias == "bullish" and vw_mom > 0.6 and signal_dir == "short":

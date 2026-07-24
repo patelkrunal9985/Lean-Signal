@@ -133,12 +133,23 @@ def evaluate_tickers(
         sma_50 = data.get("indicators", {}).get("sma_50", 0)
         dte_val = data.get("dte", None)
 
+        # ── Previous cycle price for velocity-based counter-trend override ──
+        _prev_price = 0.0
+        try:
+            from engine.signal_persistence import get_ticker_state
+            _st = get_ticker_state(ticker)
+            _prev_snap = _st.get("current_signal") or {}
+            _prev_price = float(_prev_snap.get("price", 0) or 0)
+        except Exception:
+            pass
+
         direction, conf, consensus_meta = compute_consensus(
             v2_results, v3_results_raw,
             regime.get("primary_regime", "ranging"),
             ticker, instr_type, data.get("current_price", 0), atr, sma_50,
             dte=dte_val,
             volume_profile=data.get("volume_profile_intraday", {}),
+            prev_price=_prev_price,
         )
 
         all_strategy_votes = v2_results + v3_results_raw

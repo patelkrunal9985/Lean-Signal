@@ -51,11 +51,17 @@ _INVALID_CACHE_TTL = 3600            # 1h
 # They need tighter sanity gates to catch IBKR tick glitches like
 # the MYM 400-point bump bug (1% deviation passes 15% gate unnoticed).
 _MICRO_FUTURE_SYMBOLS = {"MCL", "MGC"}
+_BLOCKED_FUTURE_SYMBOLS = {"MES", "MNQ", "MYM", "M2K"}
 
 
 def _is_micro_future(ticker_or_key: str) -> bool:
     """Check if a ticker or cache key corresponds to a micro futures contract."""
     return ticker_or_key.replace("=F", "").strip() in _MICRO_FUTURE_SYMBOLS
+
+
+def _is_blocked_future(ticker_or_key: str) -> bool:
+    """Check if a ticker is a removed micro futures contract that should be ignored."""
+    return ticker_or_key.replace("=F", "").strip() in _BLOCKED_FUTURE_SYMBOLS
 
 
 def _validate_futures_contract(contract) -> tuple[bool, str]:
@@ -211,7 +217,7 @@ class IBKRStreamer:
     def update_subscriptions(self, tickers: list[str]):
         """Update the list of subscribed tickers. Only re-subscribes if changed."""
         global _subscribed_tickers
-        new_set = {t.upper().strip() for t in tickers if t and t.strip()}
+        new_set = {t.upper().strip() for t in tickers if t and t.strip() and not _is_blocked_future(t)}
         with _live_prices_lock:
             if new_set == _subscribed_tickers:
                 return
@@ -732,6 +738,10 @@ class IBKRStreamer:
     def _make_contract(self, ticker: str) -> Optional[object]:
         from ib_insync import Stock, Future, Index
         ticker = ticker.upper().strip()
+        # Block removed micro futures from ever being subscribed
+        if _is_blocked_future(ticker):
+            logger.debug(f"IBKR: blocking removed micro future {ticker}")
+            return None
         # Special symbol mappings for IBKR
         special_map = {
             "BRK.B": "BRK-B",

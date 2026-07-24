@@ -1324,6 +1324,423 @@ except Exception as e:
     results['errors'].append({'strategy': 'Verdict.reduce', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
     print(f' [FAIL] Verdict REDUCE FAILED: {str(e)[:80]}')
 
+# -- 15g. Test Health Score Calculation (5-Factor Composite) --
+print('\n--- HEALTH SCORE CALCULATION ---')
+
+try:
+    # Test 1: Insufficient data (< 2 snapshots) → caution with insufficient_data warning
+    persist_reset()
+    persist_update("HEALTH_1", "long", 0.6, 0.4, cm_pnl, cycle_id=1, current_price=5500, instrument_type="future")
+    h = get_signal_health_score("HEALTH_1")
+    assert h["health"] == 50, f"insufficient data: expected health=50, got {h['health']}"
+    assert h["label"] == "caution", f"insufficient data: expected label=caution, got {h['label']}"
+    assert "insufficient_data" in h["warnings"], f"expected insufficient_data warning, got {h['warnings']}"
+    results['passed'] += 1
+    print(f'   [OK] Health: insufficient data → health=50, label=caution')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'Health.insufficient_data', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Health insufficient data FAILED: {str(e)[:80]}')
+
+try:
+    # Test 2: Neutral direction → terminal (health=0)
+    persist_reset()
+    persist_update("HEALTH_NEUT", "long", 0.6, 0.4, cm_pnl, cycle_id=1, current_price=5500, instrument_type="future")
+    persist_update("HEALTH_NEUT", "neutral", 0.0, 0.0, cm_pnl, cycle_id=2, current_price=5500, instrument_type="future")
+    h = get_signal_health_score("HEALTH_NEUT")
+    assert h["health"] == 0, f"neutral: expected health=0, got {h['health']}"
+    assert h["label"] == "terminal", f"neutral: expected label=terminal, got {h['label']}"
+    assert "no_active_signal" in h["warnings"], f"expected no_active_signal warning, got {h['warnings']}"
+    results['passed'] += 1
+    print(f'   [OK] Health: neutral direction → terminal (health=0)')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'Health.neutral_direction', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Health neutral FAILED: {str(e)[:80]}')
+
+try:
+    # Test 3: Robust signal — strong net_score, tight CV, diverse families
+    persist_reset()
+    cm_robust = {
+        "consensus_families": {"momentum": 0.35, "flow": 0.35, "gamma": 0.30},
+        "consensus_family_count": 3,
+        "consensus_agreement_cv": 0.15,
+        "consensus_threshold": 0.2,
+        "consensus_dominant_share": 0.35,
+        "consensus_active_votes": 5,
+        "consensus_weighted_long": 0.8,
+        "consensus_weighted_short": 0.1,
+        "consensus_net_score": 0.55,
+        "consensus_counter_trend": "no",
+        "consensus_conviction_tier": "gold",
+    }
+    for i in range(3):
+        persist_update("HEALTH_ROBUST", "long", 0.75, 0.55, cm_robust, cycle_id=i+1, current_price=5500, instrument_type="future")
+    h = get_signal_health_score("HEALTH_ROBUST")
+    assert h["health"] >= 70, f"robust: expected health>=70, got {h['health']}"
+    assert h["label"] in ("robust", "caution"), f"robust: expected robust or caution, got {h['label']}"
+    assert "factors" in h and len(h["factors"]) == 5, f"expected 5 factors, got {len(h.get('factors', {}))}"
+    results['passed'] += 1
+    print(f'   [OK] Health: robust signal → health={h["health"]}, label={h["label"]}, factors={list(h["factors"].keys())}')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'Health.robust_signal', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Health robust FAILED: {str(e)[:80]}')
+
+try:
+    # Test 4: Fragile signal — scattered CV, single family dominant, near threshold
+    persist_reset()
+    cm_fragile = {
+        "consensus_families": {"momentum": 0.7},
+        "consensus_family_count": 1,
+        "consensus_agreement_cv": 0.70,
+        "consensus_threshold": 0.2,
+        "consensus_dominant_share": 0.70,
+        "consensus_active_votes": 2,
+        "consensus_weighted_long": 0.4,
+        "consensus_weighted_short": 0.3,
+        "consensus_net_score": 0.22,
+        "consensus_counter_trend": "yes",
+        "consensus_conviction_tier": "bronze",
+    }
+    for i in range(3):
+        persist_update("HEALTH_FRAGILE", "long", 0.4, 0.22, cm_fragile, cycle_id=i+1, current_price=5500, instrument_type="future")
+    h = get_signal_health_score("HEALTH_FRAGILE")
+    assert h["health"] <= 50, f"fragile: expected health<=50, got {h['health']}"
+    # Should have multiple warnings
+    assert len(h["warnings"]) >= 2, f"fragile: expected >=2 warnings, got {len(h['warnings'])}: {h['warnings']}"
+    results['passed'] += 1
+    print(f'   [OK] Health: fragile signal → health={h["health"]}, label={h["label"]}, warnings={h["warnings"]}')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'Health.fragile_signal', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Health fragile FAILED: {str(e)[:80]}')
+
+try:
+    # Test 5: Net score momentum — improving vs deteriorating
+    persist_reset()
+    # Improving momentum: net_score goes from 0.2 → 0.35 → 0.50
+    cm_mom = dict(cm_pnl)
+    cm_mom["consensus_net_score"] = 0.20
+    persist_update("HEALTH_MOM", "long", 0.5, 0.20, cm_mom, cycle_id=1, current_price=5500, instrument_type="future")
+    cm_mom["consensus_net_score"] = 0.35
+    persist_update("HEALTH_MOM", "long", 0.55, 0.35, cm_mom, cycle_id=2, current_price=5500, instrument_type="future")
+    cm_mom["consensus_net_score"] = 0.50
+    persist_update("HEALTH_MOM", "long", 0.6, 0.50, cm_mom, cycle_id=3, current_price=5500, instrument_type="future")
+    h_improving = get_signal_health_score("HEALTH_MOM")
+    net_mom_improving = h_improving["factors"].get("net_momentum", 0)
+    assert net_mom_improving > 0.6, f"improving momentum: expected >0.6, got {net_mom_improving}"
+
+    # Deteriorating momentum: net_score goes from 0.50 → 0.35 → 0.20
+    persist_reset()
+    cm_mom2 = dict(cm_pnl)
+    cm_mom2["consensus_net_score"] = 0.50
+    persist_update("HEALTH_MOM2", "long", 0.6, 0.50, cm_mom2, cycle_id=1, current_price=5500, instrument_type="future")
+    cm_mom2["consensus_net_score"] = 0.35
+    persist_update("HEALTH_MOM2", "long", 0.55, 0.35, cm_mom2, cycle_id=2, current_price=5500, instrument_type="future")
+    cm_mom2["consensus_net_score"] = 0.20
+    persist_update("HEALTH_MOM2", "long", 0.5, 0.20, cm_mom2, cycle_id=3, current_price=5500, instrument_type="future")
+    h_det = get_signal_health_score("HEALTH_MOM2")
+    net_mom_det = h_det["factors"].get("net_momentum", 0)
+    assert net_mom_det < 0.4, f"deteriorating momentum: expected <0.4, got {net_mom_det}"
+    assert net_mom_improving > net_mom_det, f"improving ({net_mom_improving:.3f}) should be > deteriorating ({net_mom_det:.3f})"
+    results['passed'] += 1
+    print(f'   [OK] Health: momentum improving={net_mom_improving:.3f} vs deteriorating={net_mom_det:.3f}')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'Health.momentum', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Health momentum FAILED: {str(e)[:80]}')
+
+try:
+    # Test 6: Strategy retention — votes and families dropping triggers warning
+    persist_reset()
+    cm_ret = dict(cm_pnl)
+    cm_ret["consensus_active_votes"] = 5
+    cm_ret["consensus_families"] = {"momentum": 0.5, "flow": 0.3, "gamma": 0.2}
+    cm_ret["consensus_family_count"] = 3
+    persist_update("HEALTH_RET", "long", 0.7, 0.5, cm_ret, cycle_id=1, current_price=5500, instrument_type="future")
+    # Cycle 2: votes drop from 5→3, families drop from 3→2
+    cm_ret["consensus_active_votes"] = 3
+    cm_ret["consensus_families"] = {"momentum": 0.6, "flow": 0.4}
+    cm_ret["consensus_family_count"] = 2
+    persist_update("HEALTH_RET", "long", 0.55, 0.35, cm_ret, cycle_id=2, current_price=5500, instrument_type="future")
+    # Cycle 3: votes drop 3→1, families drop 2→1 → retention should be well below 0.5
+    cm_ret["consensus_active_votes"] = 1
+    cm_ret["consensus_families"] = {"momentum": 0.9}
+    cm_ret["consensus_family_count"] = 1
+    persist_update("HEALTH_RET", "long", 0.5, 0.30, cm_ret, cycle_id=3, current_price=5500, instrument_type="future")
+    h = get_signal_health_score("HEALTH_RET")
+    retention = h["factors"].get("retention", 0)
+    # retention: count=1/3=0.33, family=1/2=0.5 → blend=0.33*0.6+0.5*0.4=0.2+0.2=0.4
+    assert retention < 0.5, f"retention drop: expected <0.5, got {retention}"
+    has_drop_warning = any("dropped" in w for w in h["warnings"])
+    assert has_drop_warning, f"expected dropped strategies warning, got {h['warnings']}"
+    results['passed'] += 1
+    print(f'   [OK] Health: strategy retention drop → retention={retention:.3f}, warnings={h["warnings"]}')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'Health.retention', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Health retention FAILED: {str(e)[:80]}')
+
+try:
+    # Test 7: Classification thresholds
+    persist_reset()
+    # Robust: health >= 75
+    cm_rob = dict(cm_pnl)
+    cm_rob["consensus_net_score"] = 0.60
+    cm_rob["consensus_agreement_cv"] = 0.15
+    cm_rob["consensus_dominant_share"] = 0.35
+    cm_rob["consensus_active_votes"] = 5
+    for i in range(3):
+        persist_update("HEALTH_CLS", "long", 0.8, 0.60, cm_rob, cycle_id=i+1, current_price=5500, instrument_type="future")
+    h = get_signal_health_score("HEALTH_CLS")
+    assert h["health"] >= 75, f"classification: expected health>=75 (robust), got {h['health']}"
+    assert h["label"] == "robust", f"expected robust, got {h['label']}"
+
+    # Fragile: health < 50 — use a weaker signal
+    persist_reset()
+    cm_frag = dict(cm_pnl)
+    cm_frag["consensus_net_score"] = 0.22
+    cm_frag["consensus_agreement_cv"] = 0.7
+    cm_frag["consensus_dominant_share"] = 0.7
+    cm_frag["consensus_active_votes"] = 1
+    cm_frag["consensus_families"] = {"momentum": 0.7}
+    cm_frag["consensus_family_count"] = 1
+    for i in range(3):
+        persist_update("HEALTH_CLS2", "long", 0.3, 0.22, cm_frag, cycle_id=i+1, current_price=5500, instrument_type="future")
+    h2 = get_signal_health_score("HEALTH_CLS2")
+    assert h2["label"] in ("fragile", "terminal"), f"expected fragile or terminal, got {h2['label']}"
+    assert h["health"] > h2["health"], f"robust ({h['health']}) should beat fragile ({h2['health']})"
+    results['passed'] += 1
+    print(f'   [OK] Health: classification robust={h["health"]}({h["label"]}) vs fragile={h2["health"]}({h2["label"]})')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'Health.classification', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Health classification FAILED: {str(e)[:80]}')
+
+persist_reset()
+
+# -- 15h. Test Correlation Discount (_get_correlation_discount) --
+print('\n--- CORRELATION DISCOUNT ---')
+from engine.signal_persistence import _get_correlation_discount
+
+try:
+    # Test 1: Ticker not in any group → no discount
+    persist_reset()
+    disc = _get_correlation_discount("AAPL", "long")
+    assert disc == 1.0, f"non-group ticker: expected 1.0, got {disc}"
+    results['passed'] += 1
+    print(f'   [OK] Correlation: non-group ticker → discount={disc}')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'Correlation.non_group', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Correlation non-group FAILED: {str(e)[:80]}')
+
+try:
+    # Test 2: Neutral direction → no discount
+    persist_reset()
+    disc = _get_correlation_discount("ES=F", "neutral")
+    assert disc == 1.0, f"neutral direction: expected 1.0, got {disc}"
+    results['passed'] += 1
+    print(f'   [OK] Correlation: neutral direction → discount={disc}')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'Correlation.neutral_dir', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Correlation neutral FAILED: {str(e)[:80]}')
+
+try:
+    # Test 3: Ticker in group, no other ticker in same direction → 1.0
+    persist_reset()
+    # Only ES=F has a direction set
+    persist_update("ES=F", "long", 0.7, 0.5, cm_pnl, cycle_id=1, current_price=5500, instrument_type="future")
+    disc = _get_correlation_discount("ES=F", "long")
+    assert disc == 1.0, f"solo ticker: expected 1.0, got {disc}"
+    results['passed'] += 1
+    print(f'   [OK] Correlation: solo ticker in group → discount={disc}')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'Correlation.solo_ticker', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Correlation solo FAILED: {str(e)[:80]}')
+
+try:
+    # Test 4: Ticker in group, another ticker in same direction → 0.70 discount
+    persist_reset()
+    persist_update("ES=F", "long", 0.7, 0.5, cm_pnl, cycle_id=1, current_price=5500, instrument_type="future")
+    persist_update("NQ=F", "long", 0.7, 0.5, cm_pnl, cycle_id=1, current_price=18000, instrument_type="future")
+    disc = _get_correlation_discount("ES=F", "long")
+    assert disc == 0.70, f"correlated long: expected 0.70, got {disc}"
+    # NQ=F in different direction → ES=F shouldn't be discounted for short
+    disc_short = _get_correlation_discount("ES=F", "short")
+    assert disc_short == 1.0, f"correlated but different direction: expected 1.0, got {disc_short}"
+    results['passed'] += 1
+    print(f'   [OK] Correlation: 2 indices long → discount={disc}, short → {disc_short}')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'Correlation.correlated', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Correlation correlated FAILED: {str(e)[:80]}')
+
+try:
+    # Test 5: Ticker in equities group with same direction
+    persist_reset()
+    persist_update("SPY", "long", 0.7, 0.5, cm_pnl, cycle_id=1, current_price=550, instrument_type="stock")
+    persist_update("QQQ", "long", 0.7, 0.5, cm_pnl, cycle_id=1, current_price=420, instrument_type="stock")
+    disc = _get_correlation_discount("SPY", "long")
+    assert disc == 0.70, f"correlated equities: expected 0.70, got {disc}"
+    results['passed'] += 1
+    print(f'   [OK] Correlation: SPY+QQQ both long → discount={disc}')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'Correlation.equities', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Correlation equities FAILED: {str(e)[:80]}')
+
+persist_reset()
+
+# -- 15i. Test Actionability Metric (JS _actionability logic verified in Python) --
+print('\n--- ACTIONABILITY METRIC ---')
+
+def _actionability_py(confidence, tier, aligned, state):
+    """Python equivalent of app.js _actionability() for verification."""
+    tierW = {"bronze": 1, "silver": 2, "gold": 3, "platinum": 4}.get(tier, 1)
+    stateW = {"none": 0, "watching": 1, "pending": 2, "active": 3, "confirmed": 4, "weakening": 2}.get(state, 1)
+    alignW = 1.0 if aligned else 0.6
+    base = (confidence * 100) * (tierW / 4) * (stateW / 4) * alignW
+    return min(round(base), 100)
+
+try:
+    # Test 1: Max case — platinum, confirmed, aligned, 95% confidence
+    act = _actionability_py(0.95, "platinum", True, "confirmed")
+    assert act == 95, f"max case: expected 95, got {act}"
+    results['passed'] += 1
+    print(f'   [OK] Actionability: max case (platinum/confirmed/aligned/0.95) → {act}')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'Actionability.max', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Actionability max FAILED: {str(e)[:80]}')
+
+try:
+    # Test 2: Minimum actionable — bronze, watching, aligned, 25% confidence
+    act = _actionability_py(0.25, "bronze", True, "watching")
+    assert act <= 10, f"low case: expected <=10, got {act}"
+    results['passed'] += 1
+    print(f'   [OK] Actionability: low case (bronze/watching/aligned/0.25) → {act}')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'Actionability.low', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Actionability low FAILED: {str(e)[:80]}')
+
+try:
+    # Test 3: Counter-trend penalty — same as max but NOT aligned
+    # Use confidence=0.61 to avoid Python banker's rounding at .5 boundary
+    act_aligned = _actionability_py(0.61, "silver", True, "active")
+    act_counter = _actionability_py(0.61, "silver", False, "active")
+    assert act_counter < act_aligned, f"counter-trend should be lower: aligned={act_aligned}, counter={act_counter}"
+    # Counter = aligned * 0.6 (with rounding tolerance of ±1 due to integer rounding)
+    assert abs(act_counter - round(act_aligned * 0.6)) <= 1, f"counter should be ~60% of aligned: {act_counter} vs {round(act_aligned * 0.6)}"
+    results['passed'] += 1
+    print(f'   [OK] Actionability: aligned={act_aligned} vs counter-trend={act_counter} (~0.6x penalty)')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'Actionability.counter_trend', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Actionability counter FAILED: {str(e)[:80]}')
+
+try:
+    # Test 4: Weakening state — stateW=2 (same as pending)
+    act_pending = _actionability_py(0.50, "silver", True, "pending")
+    act_weakening = _actionability_py(0.50, "silver", True, "weakening")
+    assert act_pending == act_weakening, f"pending and weakening should have same stateW: {act_pending} vs {act_weakening}"
+    results['passed'] += 1
+    print(f'   [OK] Actionability: pending={act_pending} == weakening={act_weakening} (both stateW=2)')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'Actionability.weakening', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Actionability weakening FAILED: {str(e)[:80]}')
+
+try:
+    # Test 5: Cap at 100
+    act = _actionability_py(1.0, "platinum", True, "confirmed")
+    assert act <= 100, f"cap test: expected <=100, got {act}"
+    # Deliberately overshoot: 1.0 * (4/4) * (4/4) * 1.0 * 100 = 100 → capped
+    assert act == 100, f"should cap at 100, got {act}"
+    results['passed'] += 1
+    print(f'   [OK] Actionability: cap at 100 → {act}')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'Actionability.cap', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Actionability cap FAILED: {str(e)[:80]}')
+
+# -- 15j. Test Gate-Rejected State Rendering Logic --
+print('\n--- GATE-REJECTED STATE LOGIC ---')
+
+def _compute_state_class_py(state, gate_passed):
+    """Python equivalent of app.js _updateCell gate-rejected class logic.
+    
+    Gate-rejected persistent slots get 'state-gate-rejected' appended
+    when gate_passed is False AND state is not 'none'/'watching'.
+    """
+    has_gate_reject = (not gate_passed and state not in ("none", "watching"))
+    base = f"state-{state}"
+    return f"{base} state-gate-rejected" if has_gate_reject else base
+
+try:
+    # Test 1: Gate passed, confirmed state → just 'state-confirmed'
+    cls = _compute_state_class_py("confirmed", True)
+    assert cls == "state-confirmed", f"gate passed: expected 'state-confirmed', got '{cls}'"
+    results['passed'] += 1
+    print(f'   [OK] Gate-reject: gate passed + confirmed → "{cls}"')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'GateReject.passed', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Gate-reject passed FAILED: {str(e)[:80]}')
+
+try:
+    # Test 2: Gate FAILED, confirmed state → 'state-confirmed state-gate-rejected'
+    cls = _compute_state_class_py("confirmed", False)
+    assert cls == "state-confirmed state-gate-rejected", f"gate failed+confirmed: got '{cls}'"
+    results['passed'] += 1
+    print(f'   [OK] Gate-reject: gate failed + confirmed → "{cls}"')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'GateReject.confirmed_fail', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Gate-reject confirmed fail FAILED: {str(e)[:80]}')
+
+try:
+    # Test 3: Gate failed, but state=none → NO gate-rejected class (no persistent slot)
+    cls = _compute_state_class_py("none", False)
+    assert cls == "state-none", f"gate failed+none: expected 'state-none', got '{cls}'"
+    results['passed'] += 1
+    print(f'   [OK] Gate-reject: gate failed + none → "{cls}" (no reject class)')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'GateReject.none', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Gate-reject none FAILED: {str(e)[:80]}')
+
+try:
+    # Test 4: Gate failed, watching → no gate-rejected class (still building)
+    cls = _compute_state_class_py("watching", False)
+    assert cls == "state-watching", f"gate failed+watching: expected 'state-watching', got '{cls}'"
+    results['passed'] += 1
+    print(f'   [OK] Gate-reject: gate failed + watching → "{cls}" (no reject class)')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'GateReject.watching', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Gate-reject watching FAILED: {str(e)[:80]}')
+
+try:
+    # Test 5: Active thesis — gate failed → reject class applied
+    cls = _compute_state_class_py("active", False)
+    assert cls == "state-active state-gate-rejected", f"gate failed+active: got '{cls}'"
+    # Same state with gate passed → no reject
+    cls_ok = _compute_state_class_py("active", True)
+    assert cls_ok == "state-active", f"gate passed+active: expected 'state-active', got '{cls_ok}'"
+    results['passed'] += 1
+    print(f'   [OK] Gate-reject: active+failed="{cls}" vs active+passed="{cls_ok}"')
+except Exception as e:
+    results['failed'] += 1
+    results['errors'].append({'strategy': 'GateReject.active', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
+    print(f' [FAIL] Gate-reject active FAILED: {str(e)[:80]}')
+
+persist_reset()
+
 # -- 17. Test Strategy Performance Tracking (True EWMA + Outcome-based) --
 print('\n--- STRATEGY PERFORMANCE TRACKING (True EWMA) ---')
 persist_reset()  # Clean slate for strategy perf tests

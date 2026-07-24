@@ -5,6 +5,15 @@ Before making any commit, run all tests and ensure they pass:
 
 After a successful commit and passing tests, always push to `origin`.
 
+# UI Change Rule: Always Verify on localhost:8088
+After ANY change to UI files (static/app.js, templates/dashboard.html, static/styles.css), do the following:
+1. Fetch http://localhost:8088/static/app.js — verify paren balance (`js.count('(') - js.count(')')`) and brace balance (`js.count('{') - js.count('}')`) are both 0
+2. Fetch http://localhost:8088/ — verify the HTML loads and contains expected elements (ticker-grid, ibkr-status, etc.)
+3. Run a cycle via POST to /api/run-cycle and verify it completes
+4. Fetch http://localhost:8088/api/status — verify connection.connected is true, market_hours.open is correct
+5. Open http://localhost:8088 in a browser (or programmatically verify) to confirm no JS console errors
+6. If user reported issues, specifically check what the browser serves (not just the file on disk) — clear browser cache before testing
+
 # Golden Rule: Always Push to Git
 After every meaningful set of changes, stage, commit with a descriptive message, and push to origin. Never leave uncommitted work sitting locally.
 

@@ -17,6 +17,15 @@ After ANY change to UI files (static/app.js, templates/dashboard.html, static/st
 # Golden Rule: Always Push to Git
 After every meaningful set of changes, stage, commit with a descriptive message, and push to origin. Never leave uncommitted work sitting locally.
 
+# Golden Rule: Analyze & Plan Before Implementing
+For ANY development work (code changes, new features, refactors, bug fixes, etc.):
+1. **Analyze** — Gather context, read relevant files, research as needed
+2. **Present a plan** — Describe the proposed approach, affected files, and reasoning
+3. **Wait for approval** — Do NOT make any code changes until explicitly asked
+4. **After approval** — Implement the changes, verify with tests, then commit and push immediately. Never leave uncommitted work sitting locally.
+
+The default mode is analyze and plan — never implement without permission.
+
 # Session Summary (July 22, 2026)
 
 ## Building Phase Fix — Signal Generation Unblocked

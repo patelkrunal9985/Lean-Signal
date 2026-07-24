@@ -494,15 +494,16 @@ function _updateStickyEvents(signals, flips, flipPotentials) {
    Card Grid Dashboard — Signal Rendering
    ═══════════════════════════════════════════════════════════════ */
 
-// Row groupings for card layout
-var _ROW_DEFS = [
-  { tickers: ['ES=F', 'NQ=F', 'RTY=F', 'YM=F'] },
-  { tickers: ['CL=F', 'GC=F', 'VX=F'] },
-  { tickers: ['SPY', 'QQQ', 'SPY_OPT', 'QQQ_OPT'] }
-];
+// Tab-based groupings for card layout
+var _SIGNAL_TABS = {
+  indices: { label: 'Indices', tickers: ['ES=F', 'NQ=F', 'RTY=F', 'YM=F'] },
+  commodities: { label: 'Commodities', tickers: ['GC=F', 'CL=F', 'VX=F'] },
+  equities: { label: 'Equities', tickers: ['SPY', 'QQQ', 'SPY_OPT', 'QQQ_OPT'] }
+};
+var _currentSignalSubTab = 'indices';
 
 var _GRID_TICKERS = [];
-_ROW_DEFS.forEach(function(r) { r.tickers.forEach(function(t) { _GRID_TICKERS.push(t); }); });
+Object.values(_SIGNAL_TABS).forEach(function(g) { g.tickers.forEach(function(t) { _GRID_TICKERS.push(t); }); });
 
 var _gridInitialized = false;
 var _cellCache = {};
@@ -625,6 +626,13 @@ function _createTickerCell(ticker) {
       '<div class="meter-bar bronze" style="width:5%"></div>' +
       '<span class="trend-indicator">\u2013</span>' +
     '</div>' +
+    // PnL row (hidden when no active thesis)
+    '<div class="row-pnl" style="display:none">' +
+      '<span class="pnl-label">Entry:</span><span class="pnl-val">$--</span>' +
+      '<span class="pnl-label">Now:</span><span class="pnl-val">$--</span>' +
+      '<span class="pnl-pct">--</span>' +
+      '<span class="pnl-dollar">--</span>' +
+    '</div>' +
     // Row 2: Score, Confidence, Strategies
     '<div class="row2">' +
       '<span>Score: <strong>--</strong></span>' +
@@ -686,33 +694,51 @@ function _createTickerCell(ticker) {
   return cell;
 }
 
-// ── Initialize the grid with rows (first load only) ──
+// ── Initialize all 3 signal grids (first load only) ──
 function _initTickerGrid() {
-  var grid = document.getElementById('ticker-grid');
-  if (!grid) return;
-  grid.innerHTML = '';
-
-  _ROW_DEFS.forEach(function(rowDef) {
+  Object.keys(_SIGNAL_TABS).forEach(function(tabKey) {
+    var grid = document.getElementById('signals-grid-' + tabKey);
+    if (!grid) return;
+    grid.innerHTML = '';
+    var group = _SIGNAL_TABS[tabKey];
     var row = document.createElement('div');
     row.className = 'ticker-row';
-    rowDef.tickers.forEach(function(t) {
+    group.tickers.forEach(function(t) {
       var cell = _createTickerCell(t);
       row.appendChild(cell);
-      _cellCache[t] = {
-        element: cell,
-        state: 'none',
-        direction: 'neutral',
-        confidence: 0,
-        price: 0,
-        verdict: '',
-        gate: null,
-        sig: null
-      };
+      if (!_cellCache[t]) {
+        _cellCache[t] = {
+          element: cell,
+          state: 'none',
+          direction: 'neutral',
+          confidence: 0,
+          price: 0,
+          verdict: '',
+          gate: null,
+          sig: null
+        };
+      } else {
+        _cellCache[t].element = cell;
+      }
     });
     grid.appendChild(row);
   });
-
   _gridInitialized = true;
+}
+
+// ── Switch signals sub-tab (indices / commodities / equities) ──
+function switchSignalsSubTab(sub) {
+  _currentSignalSubTab = sub;
+  document.querySelectorAll('#signals-sub-tabs .sub-tab').forEach(function(st) {
+    st.classList.toggle('active', st.dataset.subtab === sub);
+  });
+  document.querySelectorAll('.signals-grid').forEach(function(sg) {
+    sg.classList.toggle('active', sg.id === 'signals-grid-' + sub);
+  });
+  // Re-render if we have cycle data
+  if (_status.last_cycle && _status.last_cycle.status === 'completed') {
+    renderSignals(_status.last_cycle);
+  }
 }
 
 // ── Mapping verbatim verdict text to CSS class suffixes ──
@@ -886,6 +912,27 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
     }
   }
 
+  // ── Row 2p: PnL (merged from active positions) — shows when thesis is active ──
+  var r2p = cell.querySelector('.row-pnl');
+  if (r2p) {
+    var entryPx = st ? st.state_entry_price : 0;
+    var hasThesis = st && st.has_thesis && entryPx > 0 && price > 0;
+    if (hasThesis) {
+      var dirSign = (st.active_direction || 'long') === 'short' ? -1 : 1;
+      var pnlPct = ((price - entryPx) / entryPx * 100 * dirSign);
+      var pnlDollar = (price - entryPx) * dirSign;
+      var pnlCls = pnlPct > 2 ? 'pnl-gain' : pnlPct > 0 ? 'pnl-flat' : pnlPct < -2 ? 'pnl-loss' : 'pnl-flat';
+      r2p.style.display = 'flex';
+      r2p.innerHTML =
+        '<span class="pnl-label">Entry:</span><span class="pnl-val">$' + entryPx.toFixed(2) + '</span>' +
+        '<span class="pnl-label">Now:</span><span class="pnl-val">$' + price.toFixed(2) + '</span>' +
+        '<span class="pnl-pct ' + pnlCls + '">' + (pnlPct >= 0 ? '+' : '') + pnlPct.toFixed(2) + '%</span>' +
+        '<span class="pnl-dollar ' + pnlCls + '">$' + (pnlDollar >= 0 ? '+' : '') + pnlDollar.toFixed(2) + '</span>';
+    } else {
+      r2p.style.display = 'none';
+    }
+  }
+
   // ── Row 2: Score, Conf, Strats ──
   var r2 = cell.querySelector('.row2');
   if (r2) {
@@ -1052,79 +1099,6 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
   cache.sig = sig;
 }
 
-// ── Render Active Positions Strip (top) ──
-function _renderActivePositions() {
-  var strip = document.getElementById('active-positions-strip');
-  var container = document.getElementById('active-positions-cards');
-  if (!strip || !container) return;
-
-  // Get all tickers with active/confirmed/weakening state
-  var last = _status.last_cycle;
-  var states = (last && last.signal_states) || {};
-  var byTicker = states.by_ticker || {};
-  var allSigs = [];
-  if (last && last.signals) {
-    ['stock','future','option'].forEach(function(type) {
-      (last.signals[type] || []).forEach(function(s) { allSigs.push(s); });
-    });
-  }
-
-  var activeTickers = [];
-  for (var t in byTicker) {
-    var st = byTicker[t];
-    if (st && (st.state === 'active' || st.state === 'confirmed' || st.state === 'weakening')) {
-      var sig = allSigs.find(function(s) { return s.ticker === t; });
-      activeTickers.push({ ticker: t, state: st, signal: sig });
-    }
-  }
-
-  if (activeTickers.length === 0) {
-    strip.style.display = 'none';
-    return;
-  }
-
-  strip.style.display = 'block';
-  document.getElementById('active-count').textContent = '(' + activeTickers.length + ')';
-  document.getElementById('active-count').className = 'status-badge ' + (activeTickers.some(function(a) { return a.state.state === 'confirmed'; }) ? 'connected' : 'running');
-
-  // Render cards
-  container.innerHTML = '';
-  activeTickers.forEach(function(item) {
-    var ticker = item.ticker;
-    var st = item.state;
-    var sig = item.signal;
-
-    var card = document.createElement('div');
-    card.className = 'active-position-card';
-    card.onclick = function() {
-      if (sig) showSignalPopup(sig, last);
-    };
-
-    var dir = sig ? sig.direction : 'neutral';
-    var dirArrow = _getDirectionArrow(dir);
-    var dirLabel = dir === 'long' ? 'LONG' : dir === 'short' ? 'SHORT' : 'NEUTRAL';
-    var conf = sig ? sig.confidence : (st.max_conviction || 0);
-
-    var entryPx = st.state_entry_price || (sig ? sig.entry_price : 0);
-    var sl = sig ? sig.stop_loss : 0;
-    var tp = sig ? sig.take_profit : 0;
-
-    card.innerHTML =
-      '<div class="ap-header">' +
-        '<span class="ap-ticker">' + ticker.replace('=F','').replace('_OPT','') + ' <span class="direction-badge ' + dir + '">' + dirArrow + ' ' + dirLabel + '</span></span>' +
-        '<span class="ap-verdict ' + st.state + '">' + st.state.toUpperCase() + '</span>' +
-      '</div>' +
-      '<div class="ap-row">' +
-        '<span>Conv: <strong>' + (conf * 100).toFixed(0) + '%</strong></span>' +
-        (entryPx ? '<span class="ap-entry">Entry: <strong>$' + entryPx.toFixed(2) + '</strong></span>' : '') +
-        (sl ? '<span class="ap-sl">SL: <strong>$' + sl.toFixed(2) + '</strong></span>' : '') +
-        (tp ? '<span class="ap-tp">TP: <strong>$' + tp.toFixed(2) + '</strong></span>' : '') +
-      '</div>';
-
-    container.appendChild(card);
-  });
-}
-
 // ── Main render: called on each status update ──
 function renderSignals(cycle) {
   // Initialize grid on first call
@@ -1161,7 +1135,7 @@ function renderSignals(cycle) {
 
   // Update each grid cell
   _GRID_TICKERS.forEach(function(ticker) {
-    var st = byTicker[ticker] || { state: 'none', direction: 'neutral', max_conviction: 0 };
+    var st = byTicker[ticker] || { state: 'none', direction: 'neutral', conviction: 0 };
     var sig = allSigs.find(function(s) { return s.ticker === ticker; });
     var gate = gateByTicker[ticker];
     var priceData = prices[ticker];
@@ -1170,7 +1144,7 @@ function renderSignals(cycle) {
     // Determine state and direction
     var state = st.state || 'none';
     var direction = st.active_direction || (sig ? sig.direction : 'neutral');
-    var confidence = sig ? sig.confidence : (st.max_conviction || 0);
+    var confidence = sig ? sig.confidence : (st.conviction || 0);
 
     // If no signal but we have gate data, use gate info
     if (!sig && gate) {
@@ -1185,9 +1159,6 @@ function renderSignals(cycle) {
 
     _updateCell(ticker, state, direction, confidence, price, sig, gate, st);
   });
-
-  // Update active positions strip
-  _renderActivePositions();
 
   // Update summary counts
   var totalSignals = allSigs.length;

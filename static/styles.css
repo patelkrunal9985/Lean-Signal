@@ -172,18 +172,53 @@ header {
 .price-ticker-bar .flow-delta.bullish { color: var(--accent); }
 .price-ticker-bar .flow-delta.bearish { color: var(--danger); }
 
-/* ── Signal Grid (3-column compact layout) — scoped to signals tab only ── */
-#tab-signals .signals-group.active {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-  align-items: start;
+/* ── Sub-tabs for signal groups (indices / commodities / equities) ── */
+#signals-sub-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px 0;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--border);
 }
-@media (max-width: 1100px) {
-  #tab-signals .signals-group.active { grid-template-columns: repeat(2, 1fr); }
+#signals-sub-tabs .sub-tab {
+  padding: 6px 16px;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  border-bottom: 3px solid transparent;
+  transition: all 0.15s ease;
+  border-radius: 0;
 }
-@media (max-width: 700px) {
-  #tab-signals .signals-group.active { grid-template-columns: 1fr; }
+#signals-sub-tabs .sub-tab:hover { color: var(--text); background: var(--bg-hover); }
+#signals-sub-tabs .sub-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* ── Signal Grid per sub-tab (hidden by default, shown when active) ── */
+.signals-grid {
+  display: none;
+}
+.signals-grid.active {
+  display: block;
+}
+.signals-grid .ticker-row {
+  display: flex;
+  gap: 10px;
+}
+/* Indices tab: 4 equal columns */
+#signals-grid-indices .ticker-cell { min-width: 0; flex: 1 1 0; }
+/* Commodities tab: 3 equal columns */
+#signals-grid-commodities .ticker-cell { min-width: 0; flex: 1 1 0; }
+/* Equities tab: 4 columns */
+#signals-grid-equities .ticker-cell { min-width: 0; flex: 1 1 0; }
+
+@media (max-width: 900px) {
+  .signals-grid .ticker-row { flex-wrap: wrap; }
+  .signals-grid .ticker-cell { flex: 1 1 45% !important; min-width: 200px; }
+}
+@media (max-width: 550px) {
+  .signals-grid .ticker-cell { flex: 1 1 100% !important; }
 }
 
 .ticker-name { font-size: 14px; font-weight: 600; }
@@ -862,56 +897,32 @@ header {
   .toc-link { padding: 3px 8px; font-size: 11px; }
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   Fixed Grid Dashboard — Active Positions + Ticker Grid
-   ═══════════════════════════════════════════════════════════════ */
-
-/* ── Active Positions Strip ── */
-.active-positions-strip {
+/* ── PnL Row (merged from active positions) ── */
+.row-pnl {
   display: flex;
-  gap: 10px;
-  overflow-x: auto;
-  padding: 8px 0 12px;
-  margin-bottom: 8px;
-  scrollbar-width: thin;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 8px;
+  margin: 3px 0;
+  border-radius: 6px;
+  background: rgba(88, 166, 255, 0.06);
+  border: 1px solid rgba(88, 166, 255, 0.12);
+  font-size: 11px;
+  flex-wrap: wrap;
 }
-.active-positions-strip::-webkit-scrollbar { height: 4px; }
-.active-positions-strip:empty { display: none; }
+.row-pnl .pnl-label { color: var(--text-muted); font-size: 10px; }
+.row-pnl .pnl-val { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.row-pnl .pnl-pct { font-weight: 700; font-variant-numeric: tabular-nums; padding: 1px 6px; border-radius: 4px; }
+.row-pnl .pnl-dollar { font-weight: 600; font-variant-numeric: tabular-nums; margin-left: auto; }
+.row-pnl .pnl-gain { color: var(--accent); background: rgba(46, 160, 67, 0.1); }
+.row-pnl .pnl-loss { color: var(--danger); background: rgba(248, 81, 73, 0.1); }
+.row-pnl .pnl-flat { color: var(--text-muted); }
 
-.active-position-card {
-  flex: 0 0 auto;
-  min-width: 220px;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 10px 14px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-.active-position-card:hover { border-color: var(--accent); box-shadow: var(--shadow); transform: translateY(-1px); }
-.active-position-card .ap-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
-.active-position-card .ap-ticker { font-size: 15px; font-weight: 700; }
-.active-position-card .ap-verdict { font-size: 10px; }
-.active-position-card .ap-row { display: flex; gap: 10px; font-size: 11px; color: var(--text-muted); flex-wrap: wrap; }
-.active-position-card .ap-row strong { color: var(--text); }
-.active-position-card .ap-entry { color: var(--info); }
-.active-position-card .ap-sl { color: var(--danger); }
-.active-position-card .ap-tp { color: var(--accent); }
-.active-position-card .ap-rr { color: var(--warning); }
-
-/* ── Ticker Card Grid (row-based) ── */
-.ticker-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 0 4px;
-}
-
+/* ── Ticker Row (used within .signals-grid) ── */
 .ticker-row {
   display: flex;
   gap: 10px;
 }
-.ticker-row:first-child .ticker-cell { min-width: 0; flex: 1 1 0; }
 
 /* ── Ticker Card (old signal-card style) ── */
 .ticker-cell {

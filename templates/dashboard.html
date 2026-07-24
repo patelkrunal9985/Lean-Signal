@@ -43,17 +43,16 @@
         <span id="summary-bar-extra" style="margin-left:auto;display:flex;gap:8px;align-items:center"></span>
       </div>
 
-      <!-- Active Positions Strip -->
-      <div id="active-positions-strip" class="active-positions-strip" style="display:none">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;padding:0 4px">
-          <span style="font-size:12px;font-weight:600;color:var(--text-muted)">ACTIVE POSITIONS</span>
-          <span id="active-count" class="status-badge connected"></span>
-        </div>
-        <div id="active-positions-cards" style="display:flex;gap:10px;overflow-x:auto;padding:4px 0"></div>
+      <!-- Sub-tabs for instrument groups -->
+      <div class="sub-tabs" id="signals-sub-tabs">
+        <button class="sub-tab active" data-subtab="indices" onclick="switchSignalsSubTab('indices')">📊 Indices</button>
+        <button class="sub-tab" data-subtab="commodities" onclick="switchSignalsSubTab('commodities')">🛢️ Commodities</button>
+        <button class="sub-tab" data-subtab="equities" onclick="switchSignalsSubTab('equities')">📈 Equities</button>
       </div>
 
-      <!-- All Tickers Grid -->
-      <div class="ticker-grid" id="ticker-grid"></div>
+      <div class="signals-grid active" id="signals-grid-indices"></div>
+      <div class="signals-grid" id="signals-grid-commodities"></div>
+      <div class="signals-grid" id="signals-grid-equities"></div>
     </div>
 
     <div id="tab-history" class="tab-content">

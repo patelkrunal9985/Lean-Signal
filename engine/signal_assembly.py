@@ -205,6 +205,7 @@ def assemble_cycle_result(
     account_data: dict,
     positions_data: dict,
     slot_refresh: dict | None = None,
+    ticker_data_map: dict[str, dict] | None = None,
 ) -> dict[str, Any]:
     """Build the final cycle result dict and handle signal persistence.
 
@@ -422,9 +423,6 @@ def assemble_cycle_result(
             # This ensures the card shows Entry, SL, TP, R:R even when the ticker
             # doesn't generate a fresh signal this cycle (gap fix).
             # ATR multipliers match entry_exit.py per instrument type.
-            # NOTE: nearest_support, nearest_resistance, suggested_entry, and
-            # proximity_warning require OHLCV data from level_engine which is not
-            # available in gate_eval — those fields remain None for persistent slots.
             slot_entry_px = ts.get("state_entry_price", 0)
             slot_atr = gate_eval.get("atr", 0)
             slot_sl = 0.0
@@ -448,8 +446,31 @@ def assemble_cycle_result(
                 slot_sl = round(slot_sl, 4)
                 slot_tp = round(slot_tp, 4)
 
-            # ── Use gate evaluation's strategy_votes for persistent slot cards ──
+            # Use gate evaluation's strategy_votes for persistent slot cards
             slot_strategies = gate_eval.get("strategy_votes", []) or []
+
+            # ── Compute S/R levels from level engine using cached OHLCV data ──
+            slot_ns = None
+            slot_nr = None
+            slot_suggested = None
+            slot_suggested_type = "market"
+            slot_prox_warn = None
+            if ticker_data_map and ticker in ticker_data_map and current_price > 0:
+                try:
+                    from engine.level_engine import aggregate_key_levels
+                    tdata = ticker_data_map[ticker]
+                    levels = aggregate_key_levels(
+                        ticker, tdata, current_price, direction, instr_type,
+                    )
+                    slot_ns = levels.get("nearest_support")
+                    slot_nr = levels.get("nearest_resistance")
+                    se = levels.get("suggested_entry")
+                    if se and abs(se - current_price) > 0.005:
+                        slot_suggested = se
+                        slot_suggested_type = levels.get("suggested_entry_type", "level")
+                    slot_prox_warn = levels.get("proximity_warning")
+                except Exception:
+                    pass
 
             # ── Build the persistent slot signal ──
             slot_signal: dict[str, Any] = {
@@ -472,6 +493,11 @@ def assemble_cycle_result(
                 "stop_loss": slot_sl,
                 "take_profit": slot_tp,
                 "risk_reward": slot_rr,
+                "nearest_support": round(slot_ns, 4) if slot_ns else None,
+                "nearest_resistance": round(slot_nr, 4) if slot_nr else None,
+                "suggested_entry": round(slot_suggested, 4) if slot_suggested else None,
+                "suggested_entry_type": slot_suggested_type,
+                "proximity_warning": slot_prox_warn,
                 # State machine info
                 "state": state,
                 "persistent_slot": True,  # Flag for frontend

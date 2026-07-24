@@ -203,6 +203,7 @@ def run_cycle() -> dict:
         result = assemble_cycle_result(
             signals, gate_evaluations, all_tickers, cycle_id, start_time,
             daytype_prediction, account_data, positions_data, slot_refresh,
+            ticker_data_map=ticker_data_map,
         )
 
         _last_cycle_result = result

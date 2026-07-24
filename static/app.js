@@ -984,11 +984,11 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
       var tp = effectiveSig.take_profit;
       var rr = effectiveSig.risk_reward || (tp - ep) / (ep - sl);
       if (!isFinite(rr)) rr = 0;
-      var slAtr = ratr > 0 ? ' (' + (Math.abs(ep - sl) / ratr).toFixed(1) + '\u00D7)' : '';
       r3.innerHTML = '<span class="level-pair"><span class="level-label">Entry</span><span class="level-val">$' + ep.toFixed(2) + '</span></span>' +
-        '<span class="level-pair"><span class="level-label">SL</span><span class="level-val sl">$' + sl.toFixed(2) + slAtr + '</span></span>' +
+        '<span class="level-pair"><span class="level-label">SL</span><span class="level-val sl" title="' + (ratr > 0 ? Math.abs(ep - sl) / ratr : '') + '\u00D7 ATR from entry">$' + sl.toFixed(2) + '</span></span>' +
         '<span class="level-pair"><span class="level-label">TP</span><span class="level-val tp">$' + tp.toFixed(2) + '</span></span>' +
-        '<span class="level-pair"><span class="level-label">R:R</span><span class="level-val rr">' + rr.toFixed(1) + '</span></span>';
+        '<span class="level-pair"><span class="level-label">R:R</span><span class="level-val rr">' + rr.toFixed(1) + '</span></span>' +
+        '<span class="level-pair"><span class="level-label">ATR</span><span class="level-val">' + (ratr > 0 ? '$' + ratr.toFixed(2) : '$--') + '</span></span>';
     } else {
       r3.innerHTML = '<span class="level-pair"><span class="level-label">Entry</span><span class="level-val">$--</span></span>' +
         '<span class="level-pair"><span class="level-label">SL</span><span class="level-val sl">$--</span></span>' +

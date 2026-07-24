@@ -985,19 +985,41 @@ header {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* ── Grid area: levels (entry, SL, TP, R:R) ── */
+/* ── Grid area: levels (Entry, SL, TP, R:R, ATR) — fixed 5-column grid ── */
 .ticker-cell .grid-levels {
   grid-area: levels;
-  display: flex;
-  gap: 4px;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 2px;
   font-size: 13px;
   color: var(--text-muted);
   min-height: 22px;
   align-items: center;
 }
 .ticker-cell .grid-levels .level-pair {
-  flex: 1;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
   min-width: 0;
+  overflow: hidden;
+  padding: 0 4px;
+  border-right: 1px solid var(--border);
+}
+.ticker-cell .grid-levels .level-pair:last-child {
+  border-right: none;
+}
+.ticker-cell .grid-levels .level-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.ticker-cell .grid-levels .level-val {
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

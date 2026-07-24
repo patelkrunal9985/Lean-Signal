@@ -294,6 +294,10 @@ class LeanSignalsHandler(BaseHTTPRequestHandler):
                     self._send_json({"events": []})
             elif path == "/api/data-quality":
                 self._send_json(self._get_data_quality())
+            elif path == "/favicon.ico":
+                # Browsers auto-request this; return 204 to avoid 404 noise
+                self.send_response(204)
+                self.end_headers()
             else:
                 self._send_json({"error": "not_found"}, 404)
         except Exception as e:

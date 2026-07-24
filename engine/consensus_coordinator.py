@@ -128,7 +128,7 @@ COUNTER_TREND_PENALTY = 0.25
 # Base threshold: requires meaningful directional tilt
 # Options get stricter threshold (0.40) — 0DTE gamma whipsaw demands strong confluence
 CONSENSUS_THRESHOLD = 0.20
-CONSENSUS_THRESHOLD_OPTION = 0.25
+CONSENSUS_THRESHOLD_OPTION = 0.18
 COUNTER_TREND_CONSENSUS_THRESHOLD = 0.50
 
 # ── Quality Gate: Minimum confidence floor for individual votes ──
@@ -272,10 +272,10 @@ WEAK_SIGNAL_WEIGHT_STRONG = 0.50  # Above this, no dampening
 # DTE-aware threshold configuration for options
 # 0DTE -> 0.25, 1-2DTE -> 0.30, 3-5DTE -> 0.35, 6+DTE -> 0.40
 DTE_THRESHOLD_MAP: list[tuple[int, float]] = [
-    (0, 0.15),
-    (2, 0.18),
-    (5, 0.22),
-    (999, 0.25),
+    (0, 0.10),
+    (2, 0.12),
+    (5, 0.15),
+    (999, 0.18),
 ]
 
 # ── Conviction Tiers ──
@@ -320,7 +320,11 @@ FAMILY_DIVERSITY_BONUS = {
     5: 1.40,
 }
 # Maximum per-family contribution to prevent one family from dominating.
+# Options get a higher threshold (0.55) because option strategies naturally
+# cluster in 2-3 families (options_micro, options_macro, volatility).
+# Penalizing this clustering unfairly crushes option net_scores.
 MAX_FAMILY_WEIGHT_SHARE = 0.40
+MAX_FAMILY_WEIGHT_SHARE_OPTION = 0.55
 
 
 def _get_family(strategy_name: str) -> str:
@@ -328,7 +332,7 @@ def _get_family(strategy_name: str) -> str:
     return STRATEGY_FAMILY_MAP.get(strategy_name, "technical")
 
 
-def _compute_family_diversity(votes: list[dict]) -> dict:
+def _compute_family_diversity(votes: list[dict], instr_type: str = "stock") -> dict:
     families = {}
     for v in votes:
         fam = v.get("family", _get_family(v.get("name", v.get("strategy", ""))))
@@ -336,11 +340,14 @@ def _compute_family_diversity(votes: list[dict]) -> dict:
         families[fam] += v.get("confidence", 0) * v.get("weight", 0.5)
     total = sum(families.values()) or 1
     shares = {f: s / total for f, s in families.items()}
-    # Dominant family share — if >40%, penalize
+    # Dominant family share — if > threshold, penalize.
+    # Options get a higher threshold (0.55) because their strategies
+    # naturally cluster in 2-3 families (options_micro/macro/volatility).
+    max_share = MAX_FAMILY_WEIGHT_SHARE_OPTION if instr_type == "option" else MAX_FAMILY_WEIGHT_SHARE
     dominant = max(shares.values()) if shares else 0
     diversity_penalty = 1.0
-    if dominant > MAX_FAMILY_WEIGHT_SHARE:
-        diversity_penalty = MAX_FAMILY_WEIGHT_SHARE / dominant
+    if dominant > max_share:
+        diversity_penalty = max_share / dominant
     return {
         "families": families,
         "family_count": len(families),
@@ -528,7 +535,7 @@ def compute_consensus(
         })
 
     # ── Family diversity computation ──
-    fam_div = _compute_family_diversity(all_votes)
+    fam_div = _compute_family_diversity(all_votes, instr_type)
     meta["consensus_families"] = fam_div["families"]
     meta["consensus_family_count"] = fam_div["family_count"]
     meta["consensus_dominant_share"] = fam_div["dominant_share"]

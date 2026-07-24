@@ -1,24 +1,25 @@
 :root {
-  --bg: #0d1117;
-  --bg-card: #161b22;
-  --bg-hover: #1c2333;
-  --border: #30363d;
-  --text: #e6edf3;
-  --text-muted: #8b949e;
-  --accent: #2ea043;
-  --accent-dim: #1a6e30;
-  --danger: #f85149;
-  --danger-dim: #8b1a1a;
-  --warning: #d29922;
-  --warning-dim: #6b4d0a;
-  --info: #58a6ff;
-  --header-bg: #161b22;
-  --tab-bg: #1c2333;
-  --tab-active: #2ea043;
+  --bg: #f4f5f7;
+  --bg-card: #ffffff;
+  --bg-hover: #f0f1f3;
+  --border: #dde0e4;
+  --text: #1a1d23;
+  --text-muted: #6b7280;
+  --accent: #16a34a;
+  --accent-dim: #dcfce7;
+  --danger: #dc2626;
+  --danger-dim: #fef2f2;
+  --warning: #b45309;
+  --warning-dim: #fffbeb;
+  --info: #2563eb;
+  --header-bg: #ffffff;
+  --tab-bg: #f0f1f3;
+  --tab-active: #16a34a;
   --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --radius: 8px;
-  --radius-sm: 4px;
-  --shadow: 0 1px 3px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2);
+  --radius: 10px;
+  --radius-sm: 6px;
+  --shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-lg: 0 4px 12px rgba(0,0,0,0.08);
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -38,9 +39,10 @@ header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12px 24px;
+  padding: 10px 24px;
   background: var(--header-bg);
   border-bottom: 1px solid var(--border);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.03);
 }
 .logo h1 { font-size: 22px; font-weight: 600; }
 .subtitle { font-size: 11px; color: var(--text-muted); display: block; }
@@ -75,15 +77,15 @@ header {
 .btn:active { transform: scale(0.97); }
 .btn-primary { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
 .btn-primary:hover { background: var(--accent); color: #fff; }
-.btn-secondary { background: transparent; color: var(--text); }
-.btn-secondary:hover { background: var(--bg-hover); }
+.btn-secondary { background: #f3f4f6; color: var(--text); border-color: var(--border); }
+.btn-secondary:hover { background: #e5e7eb; }
 
 /* ── Tabs ── */
 .tabs {
   display: flex;
   gap: 2px;
-  padding: 8px 24px;
-  background: var(--bg);
+  padding: 6px 24px;
+  background: #fafbfc;
   border-bottom: 1px solid var(--border);
 }
 .tab {
@@ -138,7 +140,7 @@ header {
   display: flex;
   gap: 16px;
   padding: 6px 24px;
-  background: var(--bg-card);
+  background: #fafbfc;
   border-bottom: 1px solid var(--border);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
@@ -221,25 +223,25 @@ header {
   .signals-grid .ticker-cell { flex: 1 1 100% !important; }
 }
 
-.ticker-name { font-size: 21px; font-weight: 700; }
+.ticker-name { font-size: 18px; font-weight: 700; }
 .instrument-badge {
-  font-size: 13px;
-  padding: 3px 9px;
-  border-radius: 6px;
-  background: var(--bg-hover);
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: #f3f4f6;
   color: var(--text-muted);
   margin-left: 6px;
 }
 .direction-badge {
   padding: 4px 12px;
-  border-radius: 8px;
-  font-size: 15px;
+  border-radius: 6px;
+  font-size: 14px;
   font-weight: 700;
   white-space: nowrap;
 }
-.direction-badge.long { background: var(--accent-dim); color: var(--accent); }
-.direction-badge.short { background: var(--danger-dim); color: var(--danger); }
-.direction-badge.neutral { background: var(--bg-hover); color: var(--text-muted); }
+.direction-badge.long { background: #dcfce7; color: #16a34a; }
+.direction-badge.short { background: #fef2f2; color: #dc2626; }
+.direction-badge.neutral { background: #f3f4f6; color: #9ca3af; }
 .level-label { color: var(--text-muted); }
 .level-val { color: var(--text); font-weight: 500; }
 .level-val.sl { color: var(--danger); }
@@ -278,17 +280,17 @@ header {
 /* ── Signal State Badges ── */
 .state-badge {
   display: inline-block;
-  padding: 4px 12px;
-  border-radius: 8px;
-  font-size: 14px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  font-size: 12px;
   font-weight: 700;
   margin-left: 4px;
 }
-.state-badge.confirmed { background: var(--accent-dim); color: var(--accent); }
-.state-badge.active { background: #1a3a6e; color: var(--info); }
-.state-badge.pending { background: var(--warning-dim); color: var(--warning); }
-.state-badge.weakening { background: var(--danger-dim); color: var(--danger); animation: weakenPulse 1s ease-in-out infinite; }
-.state-badge.watching { background: var(--bg-hover); color: var(--text-muted); }
+.state-badge.confirmed { background: #dcfce7; color: #16a34a; }
+.state-badge.active { background: #dbeafe; color: #2563eb; }
+.state-badge.pending { background: #fffbeb; color: #b45309; }
+.state-badge.weakening { background: #fef2f2; color: #dc2626; animation: weakenPulse 1s ease-in-out infinite; }
+.state-badge.watching { background: #f3f4f6; color: #9ca3af; }
 
 @keyframes weakenPulse {
   0%, 100% { opacity: 1; }
@@ -298,27 +300,27 @@ header {
 /* ── Thesis Age Badge (cycle counter) ── */
 .thesis-age-badge {
   display: inline-block;
-  padding: 3px 10px;
-  border-radius: 7px;
-  font-size: 13px;
+  padding: 2px 8px;
+  border-radius: 5px;
+  font-size: 11px;
   font-weight: 700;
   margin-left: 6px;
   letter-spacing: 0.3px;
   vertical-align: middle;
 }
-.thesis-age-badge.fresh { background: rgba(0, 200, 100, 0.15); color: #00c864; }
-.thesis-age-badge.aging { background: var(--warning-dim); color: var(--warning); }
-.thesis-age-badge.stale { background: var(--danger-dim); color: var(--danger); }
+.thesis-age-badge.fresh { background: #dcfce7; color: #16a34a; }
+.thesis-age-badge.aging { background: #fffbeb; color: #b45309; }
+.thesis-age-badge.stale { background: #fef2f2; color: #dc2626; }
 
 /* ── Signal Generation Badge (shows datetime + entry price) ── */
 .generated-badge {
   display: inline-block;
-  padding: 3px 9px;
-  border-radius: 6px;
-  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 5px;
+  font-size: 10px;
   font-weight: 500;
-  color: var(--info);
-  background: #1a3a5e;
+  color: #2563eb;
+  background: #eff6ff;
   margin-left: 4px;
   white-space: nowrap;
 }
@@ -349,7 +351,7 @@ header {
   gap: 6px;
   padding: 4px 8px;
   margin: 3px 0;
-  background: #1a2a3a;
+  background: #eff6ff;
   border: 1px dashed var(--info);
   border-radius: var(--radius-sm);
   font-size: 10px;
@@ -448,6 +450,7 @@ header {
   border-radius: var(--radius);
   margin-bottom: 6px;
   overflow: hidden;
+  box-shadow: var(--shadow);
 }
 .history-header {
   display: flex;
@@ -473,6 +476,7 @@ header {
   padding: 8px 14px;
   text-align: center;
   min-width: 100px;
+  box-shadow: var(--shadow);
 }
 .slot-card .slot-label { font-size: 11px; color: var(--text-muted); }
 .slot-card .slot-value { font-size: 18px; font-weight: 600; margin: 4px 0; }
@@ -490,11 +494,11 @@ header {
   padding: 40px 20px; overflow-y: auto;
 }
 .popup {
-  background: var(--bg);
+  background: #ffffff;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   max-width: 640px; width: 100%;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.12);
 }
 .popup.popup-validate { max-width: 800px; }
 .popup-header {
@@ -621,73 +625,71 @@ header {
 .verdict-row { margin-bottom: 6px; }
 .verdict-badge {
   display: inline-block;
-  padding: 6px 18px;
-  border-radius: 8px;
-  font-size: 16px;
+  padding: 4px 14px;
+  border-radius: 6px;
+  font-size: 14px;
   font-weight: 700;
   letter-spacing: 0.5px;
   text-transform: uppercase;
 }
 .verdict-badge.strong-buy, .verdict-badge.strong-long {
-  background: #0d3d1a; color: #2ea043; border: 1px solid var(--accent);
-  box-shadow: 0 0 8px rgba(46, 160, 67, 0.3);
+  background: #dcfce7; color: #16a34a; border: 1px solid #16a34a;
 }
 .verdict-badge.strong-sell, .verdict-badge.strong-short {
-  background: #3d0d0d; color: #f85149; border: 1px solid var(--danger);
-  box-shadow: 0 0 8px rgba(248, 81, 73, 0.3);
+  background: #fef2f2; color: #dc2626; border: 1px solid #dc2626;
 }
 .verdict-badge.buy, .verdict-badge.long {
-  background: var(--accent-dim); color: var(--accent); border: 1px solid var(--accent);
+  background: #dcfce7; color: #16a34a; border: 1px solid #86efac;
 }
 .verdict-badge.sell, .verdict-badge.short {
-  background: var(--danger-dim); color: var(--danger); border: 1px solid var(--danger);
+  background: #fef2f2; color: #dc2626; border: 1px solid #fca5a5;
 }
 .verdict-badge.hold {
-  background: var(--warning-dim); color: var(--warning); border: 1px solid var(--warning);
+  background: #fffbeb; color: #b45309; border: 1px solid #fcd34d;
 }
 .verdict-badge.reduce {
-  background: #3d1a0d; color: #f0883e; border: 1px solid #f0883e;
+  background: #fff7ed; color: #ea580c; border: 1px solid #fdba74;
 }
 .verdict-badge.exit {
-  background: var(--danger-dim); color: var(--danger); border: 1px solid var(--danger);
+  background: #fef2f2; color: #dc2626; border: 1px solid #dc2626;
   animation: weakenPulse 1.5s ease-in-out infinite;
 }
 .verdict-badge.wait {
-  background: #1a3a6e; color: var(--info); border: 1px solid var(--info);
+  background: #eff6ff; color: #2563eb; border: 1px solid #2563eb;
 }
 .verdict-badge.avoid {
-  background: #2a2a2a; color: #9e9e9e; border: 1px solid #666;
+  background: #f3f4f6; color: #9ca3af; border: 1px solid #d1d5db;
 }
 .verdict-badge.no-action {
-  background: var(--bg-hover); color: var(--text-muted); border: 1px solid var(--border);
+  background: #f9fafb; color: #9ca3af; border: 1px solid #e5e7eb;
 }
 
 /* ── Conviction Meter ── */
-.conviction-meter { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
-.conviction-meter .meter-pct { font-size: 16px; font-weight: 700; min-width: 52px; }
-.meter-pct.bronze { color: #8b7355; }
-.meter-pct.silver { color: #a0a0a0; }
-.meter-pct.gold { color: var(--warning); }
-.meter-pct.platinum { color: var(--info); }
-.meter-bar { height: 8px; min-width: 4px; border-radius: 4px; transition: width 0.5s ease; flex: 1; }
-.meter-bar.bronze { background: #8b7355; }
-.meter-bar.silver { background: #a0a0a0; }
-.meter-bar.gold { background: var(--warning); }
-.meter-bar.platinum { background: var(--info); }
+.conviction-meter { display: flex; align-items: center; gap: 8px; }
+.conviction-meter .meter-pct { font-size: 14px; font-weight: 700; min-width: 48px; }
+.meter-pct.bronze { color: #92400e; }
+.meter-pct.silver { color: #6b7280; }
+.meter-pct.gold { color: #b45309; }
+.meter-pct.platinum { color: #2563eb; }
+.meter-bar { height: 6px; min-width: 4px; border-radius: 3px; transition: width 0.5s ease; flex: 1; background: #f3f4f6; }
+.meter-bar.bronze { background: #d97706; }
+.meter-bar.silver { background: #9ca3af; }
+.meter-bar.gold { background: #f59e0b; }
+.meter-bar.platinum { background: #2563eb; }
 
 /* ── Conviction Tier Badge ── */
 .tier-badge {
   display: inline-block;
-  padding: 4px 11px;
-  border-radius: 7px;
-  font-size: 14px;
+  padding: 3px 9px;
+  border-radius: 6px;
+  font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
 }
-.tier-badge.bronze { background: #3d2e1f; color: #8b7355; }
-.tier-badge.silver { background: #2a2a2a; color: #a0a0a0; }
-.tier-badge.gold { background: var(--warning-dim); color: var(--warning); }
-.tier-badge.platinum { background: #1a3a6e; color: var(--info); }
+.tier-badge.bronze { background: #fef3c7; color: #92400e; }
+.tier-badge.silver { background: #f3f4f6; color: #6b7280; }
+.tier-badge.gold { background: #fef3c7; color: #b45309; }
+.tier-badge.platinum { background: #dbeafe; color: #2563eb; }
 
 /* ── Health Label Badge ── */
 .health-label-badge {
@@ -720,23 +722,22 @@ header {
 /* ── Support/Resistance Row (dedicated card row) ── */
 .row-sr {
   display: flex;
-  gap: 12px;
-  padding: 6px 0;
-  margin: 4px 0;
-  border-top: 1px solid rgba(48, 54, 61, 0.5);
-  border-bottom: 1px solid rgba(48, 54, 61, 0.5);
+  gap: 10px;
+  padding: 4px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
 }
 .sr-col {
   flex: 1;
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 14px;
+  gap: 6px;
+  font-size: 12px;
 }
 .sr-col .sr-label {
   color: var(--text-muted);
   font-weight: 600;
-  font-size: 13px;
+  font-size: 11px;
   white-space: nowrap;
 }
 .sr-col .sr-val {
@@ -747,7 +748,7 @@ header {
 .sr-col .sr-val.sr-good { color: var(--accent); }
 .sr-col .sr-val.sr-bad { color: var(--danger); }
 .sr-col .sr-dist {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
@@ -769,16 +770,16 @@ header {
   display: inline-block;
   padding: 1px 6px;
   border-radius: 4px;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 150px;
+  max-width: 140px;
 }
-.proximity-warn.danger { background: var(--danger-dim); color: var(--danger); }
-.proximity-warn.warning { background: var(--warning-dim); color: var(--warning); }
-.proximity-warn.info { background: rgba(88, 166, 255, 0.15); color: var(--info); }
+.proximity-warn.danger { background: #fef2f2; color: #dc2626; }
+.proximity-warn.warning { background: #fffbeb; color: #b45309; }
+.proximity-warn.info { background: #eff6ff; color: #2563eb; }
 
 /* ── Popup limit entry highlight ── */
 .limit-entry-highlight {
@@ -915,22 +916,21 @@ header {
 /* ── PnL Row (merged from active positions) ── */
 .row-pnl {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   align-items: center;
-  padding: 6px 10px;
-  margin: 4px 0;
+  padding: 4px 10px;
   border-radius: 6px;
-  background: rgba(88, 166, 255, 0.06);
-  border: 1px solid rgba(88, 166, 255, 0.12);
-  font-size: 13px;
+  background: rgba(37, 99, 235, 0.04);
+  border: 1px solid rgba(37, 99, 235, 0.10);
+  font-size: 12px;
   flex-wrap: wrap;
 }
-.row-pnl .pnl-label { color: var(--text-muted); font-size: 12px; }
-.row-pnl .pnl-val { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; font-size: 13px; }
-.row-pnl .pnl-pct { font-weight: 700; font-variant-numeric: tabular-nums; padding: 2px 7px; border-radius: 4px; font-size: 13px; }
-.row-pnl .pnl-dollar { font-weight: 600; font-variant-numeric: tabular-nums; margin-left: auto; font-size: 13px; }
-.row-pnl .pnl-gain { color: var(--accent); background: rgba(46, 160, 67, 0.1); }
-.row-pnl .pnl-loss { color: var(--danger); background: rgba(248, 81, 73, 0.1); }
+.row-pnl .pnl-label { color: var(--text-muted); font-size: 11px; }
+.row-pnl .pnl-val { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; font-size: 12px; }
+.row-pnl .pnl-pct { font-weight: 700; font-variant-numeric: tabular-nums; padding: 1px 6px; border-radius: 4px; font-size: 12px; }
+.row-pnl .pnl-dollar { font-weight: 600; font-variant-numeric: tabular-nums; margin-left: auto; font-size: 12px; }
+.row-pnl .pnl-gain { color: #16a34a; background: #dcfce7; }
+.row-pnl .pnl-loss { color: #dc2626; background: #fef2f2; }
 .row-pnl .pnl-flat { color: var(--text-muted); }
 
 /* ── Ticker Row (used within .signals-grid) ── */
@@ -944,90 +944,130 @@ header {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 22px 26px;
+  padding: 16px 20px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all 0.2s ease;
   min-width: 0;
   overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
+  grid-template-rows: auto auto auto auto auto auto auto auto auto;
+  grid-template-areas:
+    "verdict verdict verdict verdict"
+    "header  header  header  header"
+    "conv    conv    conv    conv"
+    "pnl     pnl     pnl     pnl"
+    "stats   stats   stats   stats"
+    "levels  levels  levels  levels"
+    "limit   limit   limit   limit"
+    "sr      sr      sr      sr"
+    "bottom  bottom  bottom  bottom";
+  gap: 6px;
   flex: 1;
 }
-.ticker-cell:hover { border-color: var(--accent); box-shadow: var(--shadow); transform: translateY(-1px); }
+.ticker-cell:hover { border-color: var(--accent); box-shadow: var(--shadow-lg); }
 
-/* ── Card internal rows ── */
-.ticker-cell .tc-verdict-row {
-  margin-bottom: 4px;
-}
-.ticker-cell .row4 {
+/* ── Grid area: verdict row ── */
+.ticker-cell .grid-verdict {
+  grid-area: verdict;
   display: flex;
-  gap: 8px;
-  font-size: 14px;
   align-items: center;
-  padding: 4px 0;
-  margin-top: 2px;
-  border-top: 1px dashed rgba(167, 139, 250, 0.3);
+  gap: 6px;
+  min-height: 28px;
 }
-.ticker-cell .row4 .limit-label { color: #a78bfa; font-weight: 600; }
-.ticker-cell .limit-type {
-  font-size: 11px;
-  color: var(--text-muted);
-  background: rgba(167, 139, 250, 0.12);
-  padding: 2px 7px;
-  border-radius: 4px;
-  margin-left: 4px;
-  white-space: nowrap;
-}
-.ticker-cell .row1 {
+/* ── Grid area: header (ticker name + badges | direction) ── */
+.ticker-cell .grid-header {
+  grid-area: header;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 6px;
   gap: 8px;
-  flex-wrap: nowrap;
+  min-height: 32px;
 }
-.ticker-cell .row2 {
-  display: flex;
-  gap: 14px;
-  font-size: 15px;
-  color: var(--text-muted);
-  margin-bottom: 3px;
-  flex-wrap: wrap;
+/* ── Grid area: conviction meter ── */
+.ticker-cell .grid-conv {
+  grid-area: conv;
+  min-height: 28px;
 }
-.ticker-cell .row3 {
-  display: flex;
-  gap: 10px;
-  font-size: 14px;
-  color: var(--text-muted);
-  flex-wrap: wrap;
-}
-.ticker-cell .tc-bottom {
+/* ── Grid area: PnL row ── */
+.ticker-cell .grid-pnl {
+  grid-area: pnl;
+  min-height: 24px;
   display: flex;
   align-items: center;
+}
+/* ── Grid area: stats (score, conf, strats) ── */
+.ticker-cell .grid-stats {
+  grid-area: stats;
+  display: flex;
   gap: 12px;
   font-size: 13px;
   color: var(--text-muted);
-  margin-top: 3px;
-  padding-top: 6px;
+  min-height: 22px;
+  align-items: center;
+}
+/* ── Grid area: levels (entry, SL, TP, R:R) ── */
+.ticker-cell .grid-levels {
+  grid-area: levels;
+  display: flex;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-muted);
+  min-height: 22px;
+  align-items: center;
+}
+/* ── Grid area: limit entry ── */
+.ticker-cell .grid-limit {
+  grid-area: limit;
+  display: flex;
+  gap: 6px;
+  font-size: 12px;
+  align-items: center;
+  min-height: 22px;
+  padding-top: 4px;
+  border-top: 1px dashed rgba(124, 58, 237, 0.2);
+}
+.ticker-cell .grid-limit .limit-label { color: #7c3aed; font-weight: 600; }
+.ticker-cell .limit-type {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: rgba(124, 58, 237, 0.08);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+/* ── Grid area: support/resistance ── */
+.ticker-cell .grid-sr {
+  grid-area: sr;
+  min-height: 24px;
+}
+/* ── Grid area: bottom bar ── */
+.ticker-cell .grid-bottom {
+  grid-area: bottom;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--text-muted);
+  min-height: 22px;
+  padding-top: 4px;
   border-top: 1px solid var(--border);
 }
 
 /* ── Regime badge (on card row1) ── */
 .regime-badge {
   display: inline-block;
-  padding: 3px 10px;
-  border-radius: 6px;
-  font-size: 13px;
+  padding: 2px 8px;
+  border-radius: 5px;
+  font-size: 11px;
   font-weight: 700;
   margin-left: 6px;
   letter-spacing: 0.3px;
-  background: var(--bg-hover);
+  background: #f3f4f6;
   color: var(--text-muted);
 }
-.regime-badge.aligned { background: rgba(0, 200, 100, 0.2); color: #00c864; }
-.regime-badge.counter { background: rgba(255, 50, 50, 0.2); color: #ff5050; }
-.regime-badge.neutral { background: var(--bg-hover); color: var(--text-muted); }
+.regime-badge.aligned { background: #dcfce7; color: #16a34a; }
+.regime-badge.counter { background: #fef2f2; color: #dc2626; }
+.regime-badge.neutral { background: #f3f4f6; color: var(--text-muted); }
 
 /* ── Trend indicator (next to conviction meter) ── */
 .trend-indicator {
@@ -1044,41 +1084,41 @@ header {
 /* ── Flip/TP badge on verdict row ── */
 .flip-tp-badge {
   display: inline-block;
-  padding: 3px 10px;
-  border-radius: 6px;
-  font-size: 13px;
+  padding: 2px 8px;
+  border-radius: 5px;
+  font-size: 11px;
   font-weight: 700;
   margin-left: 6px;
   vertical-align: middle;
   animation: flipPulse 1.5s ease-in-out infinite;
 }
 .flip-tp-badge.tp-event {
-  background: var(--danger-dim);
-  color: var(--danger);
+  background: #fef2f2;
+  color: #dc2626;
 }
 .flip-tp-badge.flip-major {
-  background: var(--warning-dim);
-  color: var(--warning);
+  background: #fffbeb;
+  color: #b45309;
 }
 .flip-tp-badge.flip-potential {
-  background: #1a3a6e;
-  color: var(--info);
+  background: #dbeafe;
+  color: #2563eb;
   animation: none;
 }
 
 /* ── Actionability indicator ── */
 .actionability {
   display: inline-block;
-  padding: 3px 10px;
-  border-radius: 6px;
-  font-size: 13px;
+  padding: 2px 8px;
+  border-radius: 5px;
+  font-size: 11px;
   font-weight: 700;
-  margin-left: 6px;
+  margin-left: auto;
   vertical-align: middle;
 }
-.actionability.high { background: var(--accent-dim); color: var(--accent); }
-.actionability.medium { background: var(--warning-dim); color: var(--warning); }
-.actionability.low { background: var(--bg-hover); color: var(--text-muted); }
+.actionability.high { background: #dcfce7; color: #16a34a; }
+.actionability.medium { background: #fffbeb; color: #b45309; }
+.actionability.low { background: #f3f4f6; color: #9ca3af; }
 
 /* ── Card-specific extras ── */
 .tc-gate-pass { color: var(--accent); }
@@ -1088,38 +1128,38 @@ header {
 
 /* ── State-based card colors ── */
 .ticker-cell.state-confirmed {
-  background: rgba(0, 200, 100, 0.15);
-  border: 2px solid #00c864;
-  box-shadow: 0 0 10px rgba(0, 200, 100, 0.12);
+  background: #f0fdf4;
+  border: 2px solid #16a34a;
+  box-shadow: 0 0 8px rgba(22, 163, 74, 0.10);
 }
 .ticker-cell.state-active {
-  background: rgba(0, 200, 100, 0.08);
-  border: 1px solid #00c864;
+  background: #f0fdf4;
+  border: 1px solid #16a34a;
 }
 .ticker-cell.state-pending {
-  background: rgba(255, 170, 0, 0.12);
-  border: 1px solid #ffaa00;
+  background: #fffbeb;
+  border: 1px solid #f59e0b;
 }
 .ticker-cell.state-watching {
-  background: rgba(255, 170, 0, 0.04);
-  border: 1px dashed #6b4d0a;
+  background: #fafbfc;
+  border: 1px dashed #d1d5db;
 }
 .ticker-cell.state-weakening {
-  background: rgba(255, 50, 50, 0.10);
-  border: 1px solid #ff3232;
+  background: #fef2f2;
+  border: 1px solid #ef4444;
 }
 .ticker-cell.state-none {
-  border: 1px dashed #2a2a2a;
+  border: 1px dashed #e5e7eb;
 }
 
 /* ── Persistent slot with gate-rejected current cycle (P2.25) ── */
 .ticker-cell.state-gate-rejected {
-  background: rgba(255, 50, 50, 0.05);
-  border: 1px dashed #8b1a1a;
+  background: #fef2f2;
+  border: 1px dashed #fca5a5;
   opacity: 0.85;
 }
-.ticker-cell.state-gate-rejected .tc-bottom {
-  border-top-color: var(--danger-dim);
+.ticker-cell.state-gate-rejected .grid-bottom {
+  border-top-color: #fecaca;
 }
 
 /* ── No state badge override needed — reuses .state-badge from above ── */
@@ -1129,10 +1169,10 @@ header {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 10px;
-  margin-bottom: 4px;
-  background: linear-gradient(135deg, rgba(167, 139, 250, 0.15), rgba(236, 72, 153, 0.12));
-  border: 1px solid rgba(167, 139, 250, 0.4);
+  padding: 4px 10px;
+  margin-bottom: 0;
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.08), rgba(236, 72, 153, 0.06));
+  border: 1px solid rgba(124, 58, 237, 0.25);
   border-radius: var(--radius-sm);
   animation: reversalGlow 1.2s ease-in-out infinite;
   font-size: 10px;

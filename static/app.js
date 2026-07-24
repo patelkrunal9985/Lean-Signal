@@ -595,79 +595,85 @@ function _createTickerCell(ticker) {
   var typeLabel = isOption ? 'opt' : isFuture ? 'fut' : 'stk';
 
   cell.innerHTML =
-    // Verdict badge (full width, colored)
-    '<div class="tc-verdict-row">' +
-      '<span class="verdict-badge no-action">NO ACTION</span>' +
-      '<span class="flip-tp-badge"></span>' +
-      '<span class="actionability low">Act: --</span>' +
+    // Grid area: verdict
+    '<div class="grid-verdict">' +
+      '<div style="display:flex;align-items:center;gap:6px;width:100%">' +
+        '<span class="verdict-badge no-action">NO ACTION</span>' +
+        '<span class="flip-tp-badge"></span>' +
+        '<span class="actionability low">Act: --</span>' +
+      '</div>' +
+      '<div class="reversal-banner" style="display:none">' +
+        '<span class="reversal-arrow">\u21BB</span>' +
+        '<span class="reversal-label">REVERSAL</span>' +
+        '<span class="reversal-dir"></span>' +
+        '<span class="reversal-level"></span>' +
+      '</div>' +
     '</div>' +
-    // Reversal signal banner (hidden by default, shown during V-reversals at key levels)
-    '<div class="reversal-banner" style="display:none">' +
-      '<span class="reversal-arrow">\u21BB</span>' +
-      '<span class="reversal-label">REVERSAL</span>' +
-      '<span class="reversal-dir"></span>' +
-      '<span class="reversal-level"></span>' +
-
-    '</div>' +
-    // Row 1: ticker name, instrument badge, state badge (with cycle count), regime badge, direction badge
-    '<div class="row1">' +
+    // Grid area: header (ticker + badges | direction)
+    '<div class="grid-header">' +
       '<div>' +
         '<span class="ticker-name">' + ticker.replace('=F','').replace('_OPT','') + '</span>' +
         '<span class="instrument-badge">' + typeLabel + '</span>' +
-        '<span class="state-badge none">none</span>' +
+        '<span class="state-badge none">NONE</span>' +
         '<span class="thesis-age-badge" style="display:none"></span>' +
         '<span class="regime-badge">--</span>' +
       '</div>' +
       '<span class="direction-badge neutral">\u2013 NEUTRAL</span>' +
     '</div>' +
-    // Conviction meter: tier badge + percentage + meter bar + trend indicator
-    '<div class="conviction-meter">' +
-      '<span class="tier-badge bronze">BRONZE</span>' +
-      '<span class="meter-pct bronze">0.0%</span>' +
-      '<div class="meter-bar bronze" style="width:5%"></div>' +
-      '<span class="trend-indicator">\u2013</span>' +
+    // Grid area: conviction meter
+    '<div class="grid-conv">' +
+      '<div class="conviction-meter">' +
+        '<span class="tier-badge bronze">BRONZE</span>' +
+        '<span class="meter-pct bronze">0.0%</span>' +
+        '<div class="meter-bar bronze" style="width:5%"></div>' +
+        '<span class="trend-indicator">\u2013</span>' +
+      '</div>' +
     '</div>' +
-    // PnL row (hidden when no active thesis)
-    '<div class="row-pnl" style="display:none">' +
-      '<span class="pnl-label">Entry:</span><span class="pnl-val">$--</span>' +
-      '<span class="pnl-label">Now:</span><span class="pnl-val">$--</span>' +
-      '<span class="pnl-pct">--</span>' +
-      '<span class="pnl-dollar">--</span>' +
+    // Grid area: PnL (always reserved, shows -- when no thesis)
+    '<div class="grid-pnl">' +
+      '<div class="row-pnl" style="visibility:hidden">' +
+        '<span class="pnl-label">Entry</span><span class="pnl-val">$--</span>' +
+        '<span class="pnl-label">Now</span><span class="pnl-val">$--</span>' +
+        '<span class="pnl-pct pnl-flat">0.00%</span>' +
+        '<span class="pnl-dollar pnl-flat">$0.00</span>' +
+      '</div>' +
     '</div>' +
-    // Row 2: Score, Confidence, Strategies
-    '<div class="row2">' +
+    // Grid area: stats (score, conf, strats)
+    '<div class="grid-stats">' +
       '<span>Score: <strong>--</strong></span>' +
       '<span>Conf: <strong>--</strong></span>' +
       '<span>Strats: <strong>0/0</strong></span>' +
     '</div>' +
-    // Row 3: Entry, SL, TP, R:R
-    '<div class="row3">' +
+    // Grid area: levels (entry, SL, TP, R:R)
+    '<div class="grid-levels">' +
       '<span class="level-label">Entry</span><span class="level-val">$--</span>' +
       '<span class="level-label">SL</span><span class="level-val sl">$--</span>' +
       '<span class="level-label">TP</span><span class="level-val tp">$--</span>' +
       '<span class="level-label">R:R</span><span class="level-val rr">--</span>' +
     '</div>' +
-    // Row 4: Suggested Limit Entry (hidden by default, shown when suggested_entry != entry_price)
-    '<div class="row4" style="display:none">' +
+    // Grid area: limit entry (always reserved)
+    '<div class="grid-limit">' +
       '<span class="level-label limit-label">\u{1F3AF} Limit</span>' +
       '<span class="level-val limit">$--</span>' +
       '<span class="limit-type"></span>' +
     '</div>' +
-    // SR Row: nearest support & resistance with distance %
-    '<div class="row-sr">' +
-      '<span class="sr-col support-col">' +
-        '<span class="sr-label">\u25B2 Support</span>' +
-        '<span class="sr-val">$--</span>' +
-        '<span class="sr-dist"></span>' +
-      '</span>' +
-      '<span class="sr-col resistance-col">' +
-        '<span class="sr-label">\u25BC Resist</span>' +
-        '<span class="sr-val">$--</span>' +
-        '<span class="sr-dist"></span>' +
-      '</span>' +
+    // Grid area: support/resistance
+    '<div class="grid-sr">' +
+      '<div class="row-sr">' +
+        '<span class="sr-col support-col">' +
+          '<span class="sr-label">\u25B2 S:</span>' +
+          '<span class="sr-val">$--</span>' +
+          '<span class="sr-dist"></span>' +
+        '</span>' +
+        '<span class="sr-col resistance-col">' +
+          '<span class="sr-label">\u25BC R:</span>' +
+          '<span class="sr-val">$--</span>' +
+          '<span class="sr-dist"></span>' +
+        '</span>' +
+      '</div>' +
     '</div>' +
-    // Bottom: gate, ns, price, proximity warning
-    '<div class="tc-bottom">' +
+    // Grid area: bottom bar
+    '<div class="grid-bottom">' +
       '<span>gate: --</span>' +
       '<span>ns: --</span>' +
       '<span class="proximity-warn"></span>' +
@@ -941,19 +947,19 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
       var pnlPct = ((price - entryPx) / entryPx * 100 * dirSign);
       var pnlDollar = (price - entryPx) * dirSign;
       var pnlCls = pnlPct > 2 ? 'pnl-gain' : pnlPct > 0 ? 'pnl-flat' : pnlPct < -2 ? 'pnl-loss' : 'pnl-flat';
-      r2p.style.display = 'flex';
+      r2p.style.visibility = 'visible';
       r2p.innerHTML =
-        '<span class="pnl-label">Entry:</span><span class="pnl-val">$' + entryPx.toFixed(2) + '</span>' +
-        '<span class="pnl-label">Now:</span><span class="pnl-val">$' + price.toFixed(2) + '</span>' +
+        '<span class="pnl-label">Entry</span><span class="pnl-val">$' + entryPx.toFixed(2) + '</span>' +
+        '<span class="pnl-label">Now</span><span class="pnl-val">$' + price.toFixed(2) + '</span>' +
         '<span class="pnl-pct ' + pnlCls + '">' + (pnlPct >= 0 ? '+' : '') + pnlPct.toFixed(2) + '%</span>' +
         '<span class="pnl-dollar ' + pnlCls + '">$' + (pnlDollar >= 0 ? '+' : '') + pnlDollar.toFixed(2) + '</span>';
     } else {
-      r2p.style.display = 'none';
+      r2p.style.visibility = 'hidden';
     }
   }
 
   // ── Row 2: Score, Conf, Strats (use cached votes when no current gate/sig) ──
-  var r2 = cell.querySelector('.row2');
+  var r2 = cell.querySelector('.grid-stats');
   if (r2) {
     var votes = (gate && gate.strategy_votes) ? gate.strategy_votes : (sig ? (sig.strategy_votes || []) : (cachedGate ? (cachedGate.strategy_votes || []) : (cachedSig ? (cachedSig.strategies || []) : [])));
     var total = votes ? votes.length : 0;
@@ -967,7 +973,7 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
   }
 
   // ── Row 3: Entry, SL, TP, R:R (use cached sig when no current signal) ──
-  var r3 = cell.querySelector('.row3');
+  var r3 = cell.querySelector('.grid-levels');
   if (r3) {
     var ratr = effectiveGate ? (effectiveGate.atr || 0) : 0;
     var atrCtx = ratr > 0 ? ' ATR $' + ratr.toFixed(2) : '';
@@ -992,18 +998,19 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
   }
 
   // ── Row 4: Suggested Limit Entry (use cached sig) ──
-  var r4 = cell.querySelector('.row4');
+  var r4 = cell.querySelector('.grid-limit');
   if (r4) {
     var suggested = effectiveSig ? effectiveSig.suggested_entry : 0;
     var entryPx4 = effectiveSig ? effectiveSig.entry_price : 0;
     var suggType = effectiveSig ? (effectiveSig.suggested_entry_type || '') : '';
     if (suggested && entryPx4 && Math.abs(suggested - entryPx4) > 0.005) {
-      r4.style.display = 'flex';
-      r4.innerHTML = '<span class="level-label limit-label">🎯 Limit</span>' +
+      r4.innerHTML = '<span class="level-label limit-label">\u{1F3AF} Limit</span>' +
         '<span class="level-val limit">$' + suggested.toFixed(2) + '</span>' +
         '<span class="limit-type">' + _formatLevelType(suggType) + '</span>';
     } else {
-      r4.style.display = 'none';
+      r4.innerHTML = '<span class="level-label limit-label">\u{1F3AF} Limit</span>' +
+        '<span class="level-val limit">$--</span>' +
+        '<span class="limit-type"></span>';
     }
   }
 
@@ -1071,7 +1078,7 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
     }
 
     // ── Bottom: ATR, gate, ns, price ──
-    var bot = cell.querySelector('.tc-bottom');
+    var bot = cell.querySelector('.grid-bottom');
     if (bot) {
         var atr = effectiveGate ? (effectiveGate.atr || 0) : 0;
     var atrStr = atr > 0 ? 'ATR $' + atr.toFixed(2) : '';

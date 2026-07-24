@@ -498,8 +498,7 @@ function _updateStickyEvents(signals, flips, flipPotentials) {
 var _ROW_DEFS = [
   { tickers: ['ES=F', 'NQ=F', 'RTY=F', 'YM=F'] },
   { tickers: ['CL=F', 'GC=F', 'VX=F'] },
-  { tickers: ['SPY_OPT', 'QQQ_OPT'] },
-  { tickers: ['SPY', 'QQQ'] }
+  { tickers: ['SPY', 'QQQ', 'SPY_OPT', 'QQQ_OPT'] }
 ];
 
 var _GRID_TICKERS = [];

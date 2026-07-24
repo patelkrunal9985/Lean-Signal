@@ -22,10 +22,10 @@ logger = get_logger("engine.level_engine")
 FIB_RETRACEMENTS = [0.236, 0.382, 0.5, 0.618, 0.786]
 FIB_EXTENSIONS = [1.272, 1.618, 2.0, 2.618]
 
-# ── Level proximity thresholds (as % of price) ──
+# ── Level proximity thresholds (as % of price) — per-instrument ──
 AT_LEVEL_PCT = 0.0015      # Within 0.15% = "at" the level
-NEAR_LEVEL_PCT = 0.005     # Within 0.5% = "approaching"
-CLOSE_LEVEL_PCT = 0.01     # Within 1% = "nearby"
+NEAR_LEVEL_PCT = 0.005     # Within 0.5% = "near"
+CLOSE_LEVEL_PCT = 0.015    # Within 1.5% = "approaching" (was 1.0%, too sensitive for futures)
 ENTRY_ZONE_PCT = 0.008     # Within 0.8% = valid entry zone
 
 # ── Level type priority (higher = more significant) ──

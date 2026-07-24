@@ -773,10 +773,17 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
   var cell = cache.element;
   if (!cell) return;
 
-  // ── Meta (computed first so regime badge can use it) ──
+  // ── Meta (computed first, then overridden by cached data) ──
   var meta = gate && gate.consensus_meta ? gate.consensus_meta : (sig && sig.consensus_meta ? sig.consensus_meta : null);
-  var tier = (meta && meta.consensus_conviction_tier) ? meta.consensus_conviction_tier : 'bronze';
-  var ns = meta ? meta.consensus_net_score : 0;
+
+  // ── Cached data persistence: fall back to last known good cycle ──
+  var cachedSig = cache.sig;
+  var cachedGate = cache.gate;
+  var effectiveSig = sig || cachedSig;
+  var effectiveGate = gate || cachedGate;
+  var effectiveMeta = effectiveSig ? effectiveSig.consensus_meta : effectiveGate ? effectiveGate.consensus_meta : meta;
+  var tier = (effectiveMeta && effectiveMeta.consensus_conviction_tier) ? effectiveMeta.consensus_conviction_tier : 'bronze';
+  var ns = effectiveMeta ? effectiveMeta.consensus_net_score : 0;
 
   // Gate-rejected persistent slot: show distinct visual alongside state (P2.25)
   var hasGateReject = (gate && !gate.gate_passed && state !== 'none' && state !== 'watching');
@@ -795,9 +802,9 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
     cell.style.opacity = '1';
   }
 
-  // ── Verdict badge ──
+  // ── Verdict badge (use cached verdict when no current signal) ──
   var ve = cell.querySelector('.verdict-badge');
-  var verdict = sig ? (sig.verdict || 'NO ACTION') : 'NO ACTION';
+  var verdict = sig ? (sig.verdict || 'NO ACTION') : (cachedSig ? (cachedSig.verdict || 'HOLD') : 'NO ACTION');
   if (ve) {
     ve.textContent = verdict;
     ve.className = 'verdict-badge ' + _verdictClass(verdict);
@@ -832,7 +839,7 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
   // ── Regime badge with alignment color (meta now available) ──
   var re = cell.querySelector('.regime-badge');
   if (re) {
-    var regime = (sig && sig.regime) || (gate && gate.regime) || (meta && meta.consensus_regime) || '';
+    var regime = (sig && sig.regime) || (gate && gate.regime) || (meta && meta.consensus_regime) || (st && st.entry_regime) || '';
     if (regime && regime !== 'unknown') {
       var isUptrend = regime.indexOf('uptrend') >= 0;
       var isDowntrend = regime.indexOf('downtrend') >= 0;
@@ -933,13 +940,13 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
     }
   }
 
-  // ── Row 2: Score, Conf, Strats ──
+  // ── Row 2: Score, Conf, Strats (use cached votes when no current gate/sig) ──
   var r2 = cell.querySelector('.row2');
   if (r2) {
-    var votes = gate ? gate.strategy_votes : (sig ? (sig.strategy_votes || []) : []);
+    var votes = (gate && gate.strategy_votes) ? gate.strategy_votes : (sig ? (sig.strategy_votes || []) : (cachedGate ? (cachedGate.strategy_votes || []) : (cachedSig ? (cachedSig.strategies || []) : [])));
     var total = votes ? votes.length : 0;
     var active = votes ? votes.filter(function(v) { return v.confidence > 0.3; }).length : 0;
-    var scoreStr = sig ? ((sig.composite_score || 0) * 100).toFixed(1) + '%' : (meta ? (Math.abs(ns) * 100).toFixed(1) + '%' : '--');
+    var scoreStr = sig ? ((sig.composite_score || 0) * 100).toFixed(1) + '%' : (meta ? (Math.abs(ns) * 100).toFixed(1) + '%' : (cachedSig ? (Math.abs((cachedSig.consensus_meta||{}).consensus_net_score||0) * 100).toFixed(1) + '%' : '--'));
     var confStr = (confidence * 100).toFixed(1) + '%';
     r2.innerHTML =
       '<span>Score: <strong>' + scoreStr + '</strong></span>' +
@@ -947,26 +954,24 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
       '<span>Strats: <strong>' + active + '/' + total + '</strong></span>';
   }
 
-  // ── Row 3: Entry, SL (ATR context), TP, R:R ──
+  // ── Row 3: Entry, SL, TP, R:R (use cached sig when no current signal) ──
   var r3 = cell.querySelector('.row3');
   if (r3) {
-    var atr = gate ? (gate.atr || 0) : 0;
-    var atrCtx = atr > 0 ? ' ATR $' + atr.toFixed(2) : '';
-    if (sig && sig.entry_price && sig.stop_loss && sig.take_profit) {
-      var ep = sig.entry_price;
-      var sl = sig.stop_loss;
-      var tp = sig.take_profit;
-      var rr = sig.risk_reward || (tp - ep) / (ep - sl);
+    var ratr = effectiveGate ? (effectiveGate.atr || 0) : 0;
+    var atrCtx = ratr > 0 ? ' ATR $' + ratr.toFixed(2) : '';
+    if (effectiveSig && effectiveSig.entry_price && effectiveSig.stop_loss && effectiveSig.take_profit) {
+      var ep = effectiveSig.entry_price;
+      var sl = effectiveSig.stop_loss;
+      var tp = effectiveSig.take_profit;
+      var rr = effectiveSig.risk_reward || (tp - ep) / (ep - sl);
       if (!isFinite(rr)) rr = 0;
-      var slAtr = atr > 0 ? ' (' + (Math.abs(ep - sl) / atr).toFixed(1) + '\u00D7)' : '';
-      r3.innerHTML =
-        '<span class="level-label">Entry</span><span class="level-val">$' + ep.toFixed(2) + '</span>' +
+      var slAtr = ratr > 0 ? ' (' + (Math.abs(ep - sl) / ratr).toFixed(1) + '\u00D7)' : '';
+      r3.innerHTML = '<span class="level-label">Entry</span><span class="level-val">$' + ep.toFixed(2) + '</span>' +
         '<span class="level-label">SL</span><span class="level-val sl">$' + sl.toFixed(2) + slAtr + '</span>' +
         '<span class="level-label">TP</span><span class="level-val tp">$' + tp.toFixed(2) + '</span>' +
         '<span class="level-label">R:R</span><span class="level-val rr">' + rr.toFixed(1) + '</span>';
     } else {
-      r3.innerHTML =
-        '<span class="level-label">Entry</span><span class="level-val">$--</span>' +
+      r3.innerHTML = '<span class="level-label">Entry</span><span class="level-val">$--</span>' +
         '<span class="level-label">SL</span><span class="level-val sl">$--</span>' +
         '<span class="level-label">TP</span><span class="level-val tp">$--</span>' +
         '<span class="level-label">R:R</span><span class="level-val rr">--</span>' +
@@ -974,16 +979,15 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
     }
   }
 
-  // ── Row 4: Suggested Limit Entry (shown when suggested_entry differs from entry_price) ──
+  // ── Row 4: Suggested Limit Entry (use cached sig) ──
   var r4 = cell.querySelector('.row4');
   if (r4) {
-    var suggested = sig ? sig.suggested_entry : 0;
-    var entryPx = sig ? sig.entry_price : 0;
-    var suggType = sig ? (sig.suggested_entry_type || '') : '';
-    if (suggested && entryPx && Math.abs(suggested - entryPx) > 0.005) {
+    var suggested = effectiveSig ? effectiveSig.suggested_entry : 0;
+    var entryPx4 = effectiveSig ? effectiveSig.entry_price : 0;
+    var suggType = effectiveSig ? (effectiveSig.suggested_entry_type || '') : '';
+    if (suggested && entryPx4 && Math.abs(suggested - entryPx4) > 0.005) {
       r4.style.display = 'flex';
-      r4.innerHTML =
-        '<span class="level-label limit-label">\u{1F3AF} Limit</span>' +
+      r4.innerHTML = '<span class="level-label limit-label">🎯 Limit</span>' +
         '<span class="level-val limit">$' + suggested.toFixed(2) + '</span>' +
         '<span class="limit-type">' + _formatLevelType(suggType) + '</span>';
     } else {
@@ -991,11 +995,11 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
     }
   }
 
-  // ── SR Row: nearest support/resistance with color-coding by direction ──
+  // ── SR Row: nearest support/resistance (use cached sig) ──
   var srRow = cell.querySelector('.row-sr');
   if (srRow) {
-    var nsVal = sig ? sig.nearest_support : null;
-    var nrVal = sig ? sig.nearest_resistance : null;
+    var nsVal = effectiveSig ? effectiveSig.nearest_support : null;
+    var nrVal = effectiveSig ? effectiveSig.nearest_resistance : null;
     var dir = direction || 'neutral';
 
     // Support column
@@ -1057,23 +1061,24 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
     // ── Bottom: ATR, gate, ns, price ──
     var bot = cell.querySelector('.tc-bottom');
     if (bot) {
-        var atr = gate ? (gate.atr || 0) : 0;
+        var atr = effectiveGate ? (effectiveGate.atr || 0) : 0;
     var atrStr = atr > 0 ? 'ATR $' + atr.toFixed(2) : '';
     var nsStr = 'ns: ' + (ns >= 0 ? '+' : '') + ns.toFixed(2);
     var gateStr = 'gate: --';
     var gateCls = '';
-    if (gate) {
-      if (gate.gate_passed) {
+    var eGate = effectiveGate;
+    if (eGate) {
+      if (eGate.gate_passed) {
         gateStr = 'gate: passed';
         gateCls = 'tc-gate-pass';
       } else {
-        var reason = (gate.gate_reason || 'fail').replace(/_/g, ' ');
+        var reason = (eGate.gate_reason || 'fail').replace(/_/g, ' ');
         gateStr = 'gate: ' + reason.slice(0, 35);
         gateCls = 'tc-gate-fail';
       }
     }
-    // ── Proximity warning ──
-    var proxWarn = sig ? (sig.proximity_warning || '') : '';
+    // ── Proximity warning (use cached sig) ──
+    var proxWarn = effectiveSig ? (effectiveSig.proximity_warning || '') : '';
     var proxHtml = '';
     if (proxWarn) {
       var warnCls = proxWarn.indexOf('AT_') >= 0 ? 'danger' : proxWarn.indexOf('NEAR_') >= 0 ? 'warning' : 'info';
@@ -1081,7 +1086,7 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
       proxHtml = '<span class="proximity-warn ' + warnCls + '" title="' + proxWarn + '">\u26A0 ' + warnLabel + '</span>';
     }
 
-    var pxStr = price > 0 ? '$' + price.toFixed(2) : '$--';
+    var pxStr = price > 0 ? '$' + price.toFixed(2) : (effectiveSig && effectiveSig.current_price > 0 ? '$' + effectiveSig.current_price.toFixed(2) : (effectiveGate && effectiveGate.current_price > 0 ? '$' + effectiveGate.current_price.toFixed(2) : '$--'));
     bot.innerHTML =
       (atrStr ? '<span>' + atrStr + '</span>' : '') +
       '<span class="' + gateCls + '" title="' + (gate && !gate.gate_passed ? (gate.gate_reason || 'fail').replace(/_/g, ' ') : '') + '">' + gateStr + '</span>' +
@@ -1141,21 +1146,10 @@ function renderSignals(cycle) {
     var priceData = prices[ticker];
     var price = (priceData && priceData.price) || (gate && gate.current_price) || (sig && sig.current_price) || 0;
 
-    // Determine state and direction
+    // Determine state and direction — always trust persistence engine, never fabricate
     var state = st.state || 'none';
     var direction = st.active_direction || (sig ? sig.direction : 'neutral');
-    var confidence = sig ? sig.confidence : (st.conviction || 0);
-
-    // If no signal but we have gate data, use gate info
-    if (!sig && gate) {
-      direction = gate.direction || 'neutral';
-      confidence = gate.consensus_confidence || 0;
-      if (!state || state === 'none') {
-        if (confidence > 0.25) state = 'watching';
-        else if (confidence > 0.15) state = 'pending';
-        else state = 'none';
-      }
-    }
+    var confidence = st.conviction || (sig ? sig.confidence : 0);
 
     _updateCell(ticker, state, direction, confidence, price, sig, gate, st);
   });

@@ -238,9 +238,10 @@ def evaluate_tickers(
         }
         gate_evaluations.append(gate_eval_entry)
 
-        # ── Entry/Exit levels ──
+        # ── Entry/Exit levels — compute for ALL tickers with direction, not just gate-passed ──
+        # Gate-rejected tickers with active thesis still need levels for dashboard display
         levels: dict = {}
-        if direction != "neutral" and gate_result.get("passed", False):
+        if direction != "neutral":
             try:
                 levels = compute_entry_exit_levels(
                     ticker, data, direction, conf, instr_type
@@ -357,7 +358,7 @@ def evaluate_tickers(
             "tpo_profile": data.get("tpo_profile", {}),
         }
 
-        if direction != "neutral" and gate_result.get("passed", False):
+        if direction != "neutral":
             signals.append(signal)
             set_priority(ticker, instr_type, 5000)
 

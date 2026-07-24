@@ -950,12 +950,21 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
       proxHtml = '<span class="proximity-warn ' + warnCls + '" title="' + proxWarn + '">\u26A0 ' + warnLabel + '</span>';
     }
 
+    // ── Nearest support/resistance (compact, shown from signal data) ──
+    var srHtml = '';
+    if (sig && (sig.nearest_support || sig.nearest_resistance)) {
+      var nsVal = sig.nearest_support ? '$' + sig.nearest_support.toFixed(2) : '--';
+      var nrVal = sig.nearest_resistance ? '$' + sig.nearest_resistance.toFixed(2) : '--';
+      srHtml = '<span class="tc-sr"><span class="sr-support">S:' + nsVal + '</span> <span class="sr-resistance">R:' + nrVal + '</span></span>';
+    }
+
     var pxStr = price > 0 ? '$' + price.toFixed(2) : '$--';
     bot.innerHTML =
       (atrStr ? '<span>' + atrStr + '</span>' : '') +
       '<span class="' + gateCls + '" title="' + (gate && !gate.gate_passed ? (gate.gate_reason || 'fail').replace(/_/g, ' ') : '') + '">' + gateStr + '</span>' +
       '<span class="' + (ns > 0.1 ? 'tc-ns-pos' : ns < -0.1 ? 'tc-ns-neg' : '') + '">' + nsStr + '</span>' +
       proxHtml +
+      srHtml +
       '<span style="margin-left:auto;font-variant-numeric:tabular-nums">' + pxStr + '</span>';
   }
 
@@ -1316,11 +1325,15 @@ function showSignalPopup(signal, cycle) {
   // ── Suggested entry (limit order level) ──
   var popupLimitRow = document.getElementById('popup-limit-entry-row');
   var suggested = signal.suggested_entry || 0;
-  var entryPx = signal.entry_price || signal.current_price || 0;
-  if (popupLimitRow && suggested && entryPx && Math.abs(suggested - entryPx) > 0.005) {
+  var suggType = signal.suggested_entry_type || '';
+  // Show when suggested_entry differs meaningfully from current price, OR when
+  // the type is explicitly set (handles options where entry_price ≈ suggested_entry)
+  var curPx = signal.current_price || signal.entry_price || 0;
+  var showLimit = suggested && curPx && suggType && suggType !== 'market' && Math.abs(suggested - curPx) / Math.max(curPx, 0.01) > 0.001;
+  if (popupLimitRow && showLimit) {
     popupLimitRow.style.display = 'flex';
     document.getElementById('popup-limit-entry').textContent = '$' + suggested.toFixed(2);
-    document.getElementById('popup-limit-type').textContent = _formatLevelType(signal.suggested_entry_type || '');
+    document.getElementById('popup-limit-type').textContent = _formatLevelType(suggType);
   } else if (popupLimitRow) {
     popupLimitRow.style.display = 'none';
   }

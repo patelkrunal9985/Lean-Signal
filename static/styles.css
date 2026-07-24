@@ -662,6 +662,21 @@ header {
 .health-pct.fragile { color: var(--danger); }
 .health-pct.terminal { color: #666; }
 .fragile-badge { display: inline-block; padding: 2px 7px; border-radius: 8px; font-size: 10px; font-weight: 700; background: var(--danger-dim); color: var(--danger); margin-left: 4px; animation: weakenPulse 1.5s ease-in-out infinite; }
+/* ── Proximity banner wrapper (popup) ── */
+.proximity-banner-wrapper {
+  margin: 6px 0;
+}
+
+/* ── Support/Resistance on cards ── */
+.tc-sr {
+  display: inline-flex;
+  gap: 6px;
+  font-size: 9px;
+  font-weight: 500;
+}
+.tc-sr .sr-support { color: var(--accent); }
+.tc-sr .sr-resistance { color: var(--danger); }
+
 /* ── Proximity Warning (level engine) ── */
 .proximity-warn {
   display: inline-block;

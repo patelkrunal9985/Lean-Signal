@@ -489,7 +489,6 @@ function _updateStickyEvents(signals, flips, flipPotentials) {
     }
   }
 }
-}
 
 /* ═══════════════════════════════════════════════════════════════
    Fixed Grid Dashboard — Signal Rendering
@@ -706,7 +705,7 @@ function renderSignals(cycle) {
   var groups = cycle.signals || {};
   ['stock','future','option'].forEach(function(type) {
     (groups[type] || []).forEach(function(s) { allSigs.push(s); });
-  }
+  });
 
   // Get gate evaluations for per-ticker strategy data
   var gateEvals = cycle.gate_evaluations || [];
@@ -753,6 +752,8 @@ function renderSignals(cycle) {
   var elapsed = cycle.elapsed_seconds || 0;
   document.getElementById('cycle-elapsed').textContent = 'Last cycle: ' + elapsed.toFixed(1) + 's';
 }
+}
+
 /* ═══════════════════════════════════════════════════════════════
    History Rendering
    ═══════════════════════════════════════════════════════════════ */

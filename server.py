@@ -447,6 +447,30 @@ class ThreadedHTTPServer(HTTPServer):
 
 
 def run_server(host: str = "0.0.0.0", port: int = 8088, open_browser: bool = True):
+    # Kill any orphaned server on the same port before binding
+    try:
+        import subprocess, os, signal
+        result = subprocess.run(
+            ["netstat", "-ano"], capture_output=True, text=True, timeout=5,
+        )
+        for line in result.stdout.splitlines():
+            if f":{port}" in line and "LISTENING" in line:
+                parts = line.strip().split()
+                if parts:
+                    pid_str = parts[-1]
+                    try:
+                        pid = int(pid_str)
+                        if pid != os.getpid():
+                            if os.name == "nt":
+                                os.system(f"taskkill /F /PID {pid} >nul 2>&1")
+                            else:
+                                os.kill(pid, signal.SIGTERM)
+                            logger.warning(f"Killed orphaned server PID {pid} on port {port}")
+                    except (ValueError, OSError):
+                        pass
+    except Exception:
+        pass
+
     logger.info(f"Initializing engine...")
     init_engine()
     server = ThreadedHTTPServer((host, port), LeanSignalsHandler)

@@ -98,7 +98,7 @@ def compute_verdict(signal: dict, health: dict | None, signal_states: dict | Non
     # watching/pending state. This gives users immediate feedback instead of
     # showing "NO ACTION" until the signal reaches active state.
     gate_passed = signal.get("gate_passed", False)
-    if state in ("none", "watching", "pending") and direction != "neutral" and gate_passed:
+    if state in ("none", "watching") and direction != "neutral" and gate_passed:
         return direction.upper()
 
     if state in ("none", "watching") or direction == "neutral":

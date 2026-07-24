@@ -961,4 +961,14 @@ header {
   border: 1px dashed #2a2a2a;
 }
 
+/* ── Persistent slot with gate-rejected current cycle (P2.25) ── */
+.ticker-cell.state-gate-rejected {
+  background: rgba(255, 50, 50, 0.05);
+  border: 1px dashed #8b1a1a;
+  opacity: 0.85;
+}
+.ticker-cell.state-gate-rejected .tc-bottom {
+  border-top-color: var(--danger-dim);
+}
+
 /* ── No state badge override needed — reuses .state-badge from above ── */

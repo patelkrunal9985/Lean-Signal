@@ -12,6 +12,15 @@ from utils.time_utils import now_iso
 
 logger = get_logger("engine.signal_assembly")
 
+
+def _coalesce_num(primary, fallback):
+    """Return primary if not None, else fallback.
+
+    Unlike `primary or fallback`, this correctly handles 0 as a valid value.
+    """
+    return primary if primary is not None else fallback
+
+
 # Strip "_<digit>..." suffixes from gate reasons so variable numerics (e.g.
 # "within_15min_of_close", "atr_too_high_0.0821", "stale_price_5s") collapse
 # into a single bucket per failure mode without colliding on the first word.
@@ -423,13 +432,37 @@ def assemble_cycle_result(
                 # State machine info
                 "state": state,
                 "persistent_slot": True,  # Flag for frontend
-                "consensus_meta": {
-                    "consensus_conviction_tier": conv_tier,
-                    "consensus_counter_trend": (
-                        gate_eval.get("consensus_meta", {}).get("consensus_counter_trend")
-                        or last_snap.get("counter_trend", "no")
-                    ),
-                },
+            "consensus_meta": {
+                "consensus_conviction_tier": conv_tier,
+                "consensus_counter_trend": (
+                    gate_eval.get("consensus_meta", {}).get("consensus_counter_trend")
+                    or last_snap.get("counter_trend", "no")
+                ),
+                "consensus_net_score": _coalesce_num(
+                    gate_eval.get("consensus_meta", {}).get("consensus_net_score"),
+                    last_snap.get("net_score", 0),
+                ),
+                "consensus_active_votes": _coalesce_num(
+                    gate_eval.get("consensus_meta", {}).get("consensus_active_votes"),
+                    last_snap.get("active_votes", 0),
+                ),
+                "consensus_weighted_long": _coalesce_num(
+                    gate_eval.get("consensus_meta", {}).get("consensus_weighted_long"),
+                    last_snap.get("weighted_long", 0),
+                ),
+                "consensus_weighted_short": _coalesce_num(
+                    gate_eval.get("consensus_meta", {}).get("consensus_weighted_short"),
+                    last_snap.get("weighted_short", 0),
+                ),
+                "consensus_regime": (
+                    gate_eval.get("consensus_meta", {}).get("consensus_regime")
+                    or last_snap.get("regime", "unknown")
+                ),
+                "consensus_families": (
+                    gate_eval.get("consensus_meta", {}).get("consensus_families")
+                    or last_snap.get("families", {})
+                ),
+            },
                 "strategies": [],
                 "market_dashboard": {},
             }

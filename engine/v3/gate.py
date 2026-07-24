@@ -166,7 +166,7 @@ def _check_correlation_conflict(ticker: str, signal_dir: str, ticker_data: dict)
     if opposite_count >= 2:
         return True, f"correlation_conflict_{opposite_count}_opposing_{','.join(conflict_tickers)}"
     if opposite_count >= 1:
-        # Single conflict: flag but don't block — reduce confidence
+        # Single conflict: reduce confidence via correlation_info, don't block
         return False, f"correlation_warning_{conflict_tickers[0]}"
 
     return False, ""
@@ -236,6 +236,10 @@ def _check_news_sentiment(ticker_data: dict) -> tuple[bool, str]:
     # Strong negative news = potential short, strong positive = potential long
     # This is a soft filter - just logging for now
     return True, f"news_sentiment_{avg_sentiment:.2f}"
+
+
+# Time-of-day reason constants (avoid fragile string matching)
+TOD_REASON_MIDDAY_REDUCED = "midday_reduced_conviction"
 
 
 class SignalQualityGate:
@@ -350,8 +354,8 @@ class SignalQualityGate:
         confidence_mult *= platinum.get("confidence_multiplier", 1.0)
 
         # ── Macro event window filter ──
-        macro_ok, macro_reason = _is_macro_event_window(ticker, ticker_data)
-        if macro_ok:
+        macro_event_detected, macro_reason = _is_macro_event_window(ticker, ticker_data)
+        if macro_event_detected:
             return {
                 "passed": False, "ticker": ticker,
                 "direction": signal_direction, "confidence": signal_confidence,
@@ -374,6 +378,9 @@ class SignalQualityGate:
         corr_blocked, corr_reason = _check_correlation_conflict(ticker, alignment["direction"], ticker_data)
         if corr_blocked:
             confidence_mult *= 0.70  # Reduce confidence but don't block
+        # Surface single-conflict warnings: apply confidence discount for 1 opposing signal
+        if corr_reason and not corr_blocked and corr_reason.startswith("correlation_warning"):
+            confidence_mult *= 0.85  # Mild discount for single opposing signal
         # Store correlation info for transparency
         correlation_info = corr_reason if corr_reason else "none"
 
@@ -443,10 +450,6 @@ class SignalQualityGate:
             if not vwap_ok:
                 return {"passed": False, "reason": vwap_reason, "window": window,
                         "vwap_position": vwap_pos, "confidence_multiplier": confidence_mult}
-
-        # -- Midday lull: require extra conviction (signal already passes by now if here) --
-        if reason == "midday_reduced_conviction":
-            confidence_mult *= 0.80
 
         return {"passed": True, "reason": reason, "window": window,
                 "vwap_position": vwap_pos, "confidence_multiplier": confidence_mult}

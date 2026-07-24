@@ -67,9 +67,9 @@ def _autosave():
                 "entry_regime": dict(_entry_regime),
                 "entry_direction": dict(_entry_direction),
                 "direction_cycles": dict(_direction_cycles),
-                # Save last 2 snapshots per ticker (enough for health score after restart)
+                # Save last 3 snapshots per ticker (health score momentum needs 3 cycles)
                 "signal_memory": {
-                    t: mem[-2:] if len(mem) >= 2 else mem
+                    t: mem[-3:] if len(mem) >= 3 else mem
                     for t, mem in _signal_memory.items()
                 },
                 "version": 4,
@@ -271,11 +271,16 @@ def _get_signal_budget_max(instr_type: str = "") -> int:
             return int(val)
     return int(get_setting("signal_budget_max", 6))
 
-def _count_active_signals() -> int:
-    """P1.2: Count tickers in thesis states (pending/active/confirmed/weakening)."""
+def _count_active_signals(instr_type: str = "") -> int:
+    """P1.2: Count tickers in thesis states, optionally scoped by instrument type."""
     count = 0
-    for state in _signal_state.values():
+    for ticker, state in _signal_state.items():
         if state in ("pending", "active", "confirmed", "weakening"):
+            if instr_type:
+                mem = _signal_memory.get(ticker, [])
+                ticker_type = mem[-1].get("instrument_type", "") if mem else ""
+                if ticker_type != instr_type:
+                    continue
             count += 1
     return count
 
@@ -540,6 +545,8 @@ def _compute_conviction(
             conviction *= _get_conviction_decay()
 
         # PnL Guardian overrides (ATR-distance, not percentage)
+        # Save pre-velocity conviction for fair PnL Guardian threshold check (P1.19)
+        pre_velocity_conviction = conviction
         if entry_price > 0 and current_price > 0:
             if atr > 0:
                 atr_dist = (current_price - entry_price) / max(atr, 0.01)
@@ -555,9 +562,8 @@ def _compute_conviction(
                 exit_th = _get_pnl_force_exit_atr() / 100.0
             if entry_dir == "short":
                 atr_dist = -atr_dist
-            # P0.2: Require pre-PnL conviction >= 0.25 for force-confirm
-            pre_pnl_conviction = conviction
-            if atr_dist > confirm_th and pre_pnl_conviction >= 0.25:
+            # P0.2: Require pre-velocity conviction >= 0.25 for force-confirm
+            if atr_dist > confirm_th and pre_velocity_conviction >= 0.25:
                 conviction = max(conviction, 0.80)
             elif atr_dist > floor_th:
                 conviction = max(conviction, 0.20)
@@ -767,7 +773,7 @@ def update(
         new_state, significant = _compute_state(ticker, conviction, direction)
         # P1.2: Signal budget cap — don't escalate to thesis if over budget
         if new_state in ("pending", "active", "confirmed") and _signal_state.get(ticker, "none") not in ("pending", "active", "confirmed", "weakening"):
-            if _count_active_signals() >= _get_signal_budget_max(instrument_type):
+            if _count_active_signals(instrument_type) >= _get_signal_budget_max(instrument_type):
                 new_state = "watching"
                 significant = False
         snapshot["state"] = new_state

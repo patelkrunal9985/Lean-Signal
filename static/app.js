@@ -507,6 +507,25 @@ _ROW_DEFS.forEach(function(r) { r.tickers.forEach(function(t) { _GRID_TICKERS.pu
 var _gridInitialized = false;
 var _cellCache = {};
 
+// ── Cleanup stale frontend state for removed tickers (P2.14) ──
+function _cleanupRemovedTickers(activeTickers) {
+  // activeTickers: array of ticker strings currently in the grid
+  var keepSet = {};
+  activeTickers.forEach(function(t) { keepSet[t] = true; });
+  // Clean _stickyTps
+  for (var t in _stickyTps) {
+    if (!keepSet[t]) delete _stickyTps[t];
+  }
+  // Clean _stickyFlips
+  for (var t in _stickyFlips) {
+    if (!keepSet[t]) delete _stickyFlips[t];
+  }
+  // Clean _cellCache (keep grid tickers)
+  for (var t in _cellCache) {
+    if (!keepSet[t]) delete _cellCache[t];
+  }
+}
+
 function _getDirectionArrow(dir) {
   return dir === 'long' ? '\u25b2' : dir === 'short' ? '\u25bc' : '\u2013';
 }
@@ -686,7 +705,10 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
   var tier = (meta && meta.consensus_conviction_tier) ? meta.consensus_conviction_tier : 'bronze';
   var ns = meta ? meta.consensus_net_score : 0;
 
-  cell.className = 'ticker-cell state-' + state;
+  // Gate-rejected persistent slot: show distinct visual alongside state (P2.25)
+  var hasGateReject = (gate && !gate.gate_passed && state !== 'none' && state !== 'watching');
+  var stateCls = 'state-' + state + (hasGateReject ? ' state-gate-rejected' : '');
+  cell.className = 'ticker-cell ' + stateCls;
 
   // ── Visual heat: glow intensity based on conviction ──
   var heatLevel = Math.min(Math.floor(confidence / 0.25), 4);
@@ -777,7 +799,7 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
       var isUptrend = regime.indexOf('uptrend') >= 0;
       var isDowntrend = regime.indexOf('downtrend') >= 0;
       var isLong = dirLabel === 'long';
-      aligned = (isLong && isUptrend) || (!isLong && isUptrend) && dirLabel === 'short';
+      aligned = (isLong && isUptrend) || (!isLong && isDowntrend) && dirLabel === 'short';
     }
     var act = _actionability(confidence, tier, aligned, stateLabel);
     ae.textContent = 'Act: ' + act;
@@ -992,6 +1014,9 @@ function renderSignals(cycle) {
   // Update sticky events (flip/TP badges linger for N cycles)
   _updateStickyEvents(allSigs, flips, flipsPotential);
 
+  // Cleanup stale frontend state for tickers no longer in grid (P2.14)
+  _cleanupRemovedTickers(_GRID_TICKERS);
+
   // Get live prices
   var prices = _livePrices || {};
 
@@ -1001,7 +1026,7 @@ function renderSignals(cycle) {
     var sig = allSigs.find(function(s) { return s.ticker === ticker; });
     var gate = gateByTicker[ticker];
     var priceData = prices[ticker];
-    var price = priceData ? priceData.price : 0;
+    var price = (priceData && priceData.price) || (gate && gate.current_price) || (sig && sig.current_price) || 0;
 
     // Determine state and direction
     var state = st.state || 'none';
@@ -1093,7 +1118,6 @@ function renderHistory() {
       cycleDiv.querySelector('.history-body').innerHTML = bodyHtml;
     }
 
-    cycleDiv.querySelector('.history-body').innerHTML += '</div>';
     container.appendChild(cycleDiv);
   });
 }
@@ -1566,6 +1590,9 @@ function showValidatePopup(data) {
     signals.forEach(function(s) {
       var card = document.createElement('div');
       card.className = 'ticker-cell state-' + (s.state || 'none');
+      card.onclick = function() {
+        if (s) showSignalPopup(s, _status.last_cycle);
+      };
       var dirCls = s.direction === 'long' ? 'long' : s.direction === 'short' ? 'short' : 'neutral';
       var vCls = _verdictClass(s.verdict || '');
       var dirArrow = s.direction === 'long' ? '\u25b2' : s.direction === 'short' ? '\u25bc' : '\u2013';
@@ -1825,9 +1852,7 @@ function renderCheatSheet() {
     html += '</div>';
   });
 
-  html += '<div class="cheatsheet-footer">';
-  html += '<p>💡 <strong>Tip:</strong> This cheat sheet is updated whenever new features are added. If something is missing, check the <code>renderCheatSheet()</code> function in <code>static/app.js</code>.</p>';
-  html += '</div>';
+  html += '<div class="cheatsheet-footer">' + '<p>💡 <strong>Tip:</strong> This cheat sheet is updated whenever new features are added. If something is missing, check the <code>renderCheatSheet()</code> function in <code>static/app.js</code>.</p>' + '</div>';
 
   container.innerHTML = html;
 }

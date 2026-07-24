@@ -985,44 +985,46 @@ header {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* ── Grid area: levels (Entry, SL, TP, R:R, ATR) — fixed 5-column grid ── */
+/* ── Grid area: levels (Entry, SL, TP, R:R, ATR) — vertical stack, full width ── */
 .ticker-cell .grid-levels {
   grid-area: levels;
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  display: flex;
+  flex-direction: column;
   gap: 2px;
   font-size: 13px;
   color: var(--text-muted);
   min-height: 22px;
-  align-items: center;
 }
 .ticker-cell .grid-levels .level-pair {
   display: flex;
   flex-direction: row;
   align-items: center;
-  justify-content: center;
-  gap: 3px;
+  justify-content: space-between;
   min-width: 0;
   overflow: hidden;
-  padding: 0 4px;
-  border-right: 1px solid var(--border);
+  padding: 2px 0;
+  border-bottom: 1px solid var(--border);
 }
 .ticker-cell .grid-levels .level-pair:last-child {
-  border-right: none;
+  border-bottom: none;
 }
 .ticker-cell .grid-levels .level-label {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text-muted);
   white-space: nowrap;
   flex-shrink: 0;
+  width: 48px;
+  font-weight: 600;
 }
 .ticker-cell .grid-levels .level-val {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  text-align: right;
   overflow: hidden;
   text-overflow: ellipsis;
+  max-width: 100%;
 }
 /* ── Grid area: PnL row ── */
 .ticker-cell .grid-pnl {

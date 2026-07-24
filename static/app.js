@@ -737,6 +737,7 @@ function renderSignals(cycle) {
         else if (confidence > 0.15) state = 'pending';
         else state = 'none';
       }
+    }
 
     _updateCell(ticker, state, direction, confidence, price, sig ? sig.verdict : 'NO ACTION', gate ? gate.strategy_votes : []);
   });
@@ -751,7 +752,6 @@ function renderSignals(cycle) {
 
   var elapsed = cycle.elapsed_seconds || 0;
   document.getElementById('cycle-elapsed').textContent = 'Last cycle: ' + elapsed.toFixed(1) + 's';
-}
 }
 
 /* ═══════════════════════════════════════════════════════════════

@@ -600,6 +600,14 @@ function _createTickerCell(ticker) {
       '<span class="flip-tp-badge"></span>' +
       '<span class="actionability low">Act: --</span>' +
     '</div>' +
+    // Reversal signal banner (hidden by default, shown during V-reversals at key levels)
+    '<div class="reversal-banner" style="display:none">' +
+      '<span class="reversal-arrow">\u21BB</span>' +
+      '<span class="reversal-label">REVERSAL</span>' +
+      '<span class="reversal-dir"></span>' +
+      '<span class="reversal-level"></span>' +
+
+    '</div>' +
     // Row 1: ticker name, instrument badge, state badge (with cycle count), regime badge, direction badge
     '<div class="row1">' +
       '<div>' +
@@ -974,12 +982,35 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
       resVal.className = 'sr-val';
       if (resDist) resDist.textContent = '';
     }
-  }
+  }    // ── Reversal Signal Banner (Fix 1: shows during V-reversals at key levels) ──
+    var revBanner = cell.querySelector('.reversal-banner');
+    if (revBanner) {
+        var revSig = null;
+        // Check current signal snapshot from persistence engine (by_ticker)
+        if (st && st.current_signal && st.current_signal.reversal_signal) {
+            revSig = st.current_signal.reversal_signal;
+        }
+        if (revSig && revSig.entry_level && revSig.direction) {
+            revBanner.style.display = 'flex';
+            var revDir = revBanner.querySelector('.reversal-dir');
+            if (revDir) {
+                revDir.textContent = revSig.direction.toUpperCase();
+                revDir.className = 'reversal-dir ' + (revSig.direction === 'long' ? 'long' : 'short');
+            }
+            var revLevel = revBanner.querySelector('.reversal-level');
+            if (revLevel) {
+                var entryType = _formatLevelType(revSig.entry_type || '');
+                revLevel.textContent = '\u{1F3AF} $' + (revSig.entry_level || 0).toFixed(2) + (entryType ? ' - ' + entryType : '');
+            }
+        } else {
+            revBanner.style.display = 'none';
+        }
+    }
 
-  // ── Bottom: ATR, gate, ns, price ──
-  var bot = cell.querySelector('.tc-bottom');
-  if (bot) {
-    var atr = gate ? (gate.atr || 0) : 0;
+    // ── Bottom: ATR, gate, ns, price ──
+    var bot = cell.querySelector('.tc-bottom');
+    if (bot) {
+        var atr = gate ? (gate.atr || 0) : 0;
     var atrStr = atr > 0 ? 'ATR $' + atr.toFixed(2) : '';
     var nsStr = 'ns: ' + (ns >= 0 ? '+' : '') + ns.toFixed(2);
     var gateStr = 'gate: --';

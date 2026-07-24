@@ -379,6 +379,18 @@ def _get_trend_direction(memory: list[dict], window: int = 3) -> str:
     return "flat"
 
 
+def _find_sr_rejection_vote(strategy_votes: list | None, direction: str | None = None) -> dict | None:
+    """Find an SR rejection strategy vote in the list, optionally filtered by direction."""
+    if not strategy_votes:
+        return None
+    for v in strategy_votes:
+        name = v.get("name", v.get("strategy", ""))
+        if name == "sr_rejection":
+            if direction is None or v.get("direction") == direction:
+                return v
+    return None
+
+
 def _score_flip_significance(
     ticker: str,
     direction: str,
@@ -481,6 +493,15 @@ def _compute_conviction(
             name = cv.get("name", cv.get("strategy", ""))
             current[name] = cv.get("direction", "neutral")
 
+        # ── Pre-compute adverse check (used by level-holding and velocity penalty) ──
+        is_adverse = (entry_dir == "long" and price_dir < 0) or (entry_dir == "short" and price_dir > 0)
+
+        # ── Fix 5: Level-Gated Decay — SR rejection confirms level is holding ──
+        level_holding = False
+        sr_thesis_vote = _find_sr_rejection_vote(curr_votes, entry_dir)
+        if sr_thesis_vote and sr_thesis_vote.get("confidence", 0) > 0.15 and is_adverse:
+            level_holding = True
+
         if entry_strategies:
             total_auth = 0.0
             support_auth = 0.0
@@ -529,16 +550,28 @@ def _compute_conviction(
             conviction *= 0.5
 
         # ── Velocity penalty (adverse = against thesis direction) ──
-        is_adverse = (entry_dir == "long" and price_dir < 0) or (entry_dir == "short" and price_dir > 0)
         if velocity_atr > 0 and is_adverse:
             spike = _get_velocity_spike_atr()
             penalty = _get_velocity_penalty_atr()
-            if velocity_atr >= spike:
-                conviction *= 0.30
-            elif velocity_atr >= penalty:
-                conviction *= 0.55
-            extra_decay = min(velocity_atr * 0.12, 0.15)
-            conviction *= max(_get_conviction_decay() - extra_decay, 0.80)
+            # Fix 5: Level-Gated Decay — if SR rejection confirms level is holding, skip extra decay
+            if level_holding:
+                # Level is holding against adverse pressure — use base decay only
+                if velocity_atr >= spike:
+                    conviction *= 0.55  # gentler than 0.30 — level is confirmed
+                elif velocity_atr >= penalty:
+                    conviction *= 0.75  # gentler than 0.55 — level absorbing
+                conviction *= _get_conviction_decay()  # base decay, no extra
+            else:
+                if velocity_atr >= spike:
+                    conviction *= 0.30
+                elif velocity_atr >= penalty:
+                    # Fix 4: Pullback Tolerance — moderate adverse with broad support
+                    if edge > 0.5:
+                        conviction *= 0.70  # gentler: pullback with support
+                    else:
+                        conviction *= 0.55
+                extra_decay = min(velocity_atr * 0.12, 0.15)
+                conviction *= max(_get_conviction_decay() - extra_decay, 0.80)
         else:
             if velocity_atr >= _get_velocity_penalty_atr() and not is_adverse:
                 conviction = min(conviction * 1.05, 0.95)
@@ -617,6 +650,12 @@ def _compute_conviction(
 
         max_conv = _get_velocity_building_max(instrument_type) if velocity_supports else 0.40
         conviction = min(base, max_conv)
+
+        # ── Fix 2: Hot Start — SR rejection at key level + velocity > 1 ATR ──
+        if conviction < 0.35 and direction in ("long", "short"):
+            sr_vote = _find_sr_rejection_vote(strategy_votes, direction)
+            if sr_vote and sr_vote.get("confidence", 0) > 0.20 and velocity_atr > 1.0:
+                conviction = max(conviction, 0.35)
 
     conviction = max(0.0, min(1.0, conviction))
     old_peak = _conviction_peak.get(ticker, 0.0)
@@ -850,6 +889,33 @@ def update(
             if direction != "neutral":
                 _active_direction[ticker] = direction
 
+        # ── Fix 1: Reversal Signal Detection ──
+        # SR rejection fired opposite direction of active thesis + velocity > 0.8 ATR
+        reversal_signal = None
+        if prev_direction in ("long", "short") and direction in ("long", "short") and direction != prev_direction:
+            sr_vote = _find_sr_rejection_vote(strategy_votes, direction)
+            if sr_vote and sr_vote.get("confidence", 0) > 0.15:
+                # Compute velocity for reversal check
+                rev_vel = 0.0
+                if atr > 0 and current_price > 0:
+                    mem_snap = _signal_memory.get(ticker, [])
+                    # Use previous snapshot (index -2) for velocity, since current
+                    # snapshot (index -1) was just appended with the same current_price
+                    if len(mem_snap) >= 2:
+                        pp = mem_snap[-2].get("price", 0)
+                        if pp > 0:
+                            rev_vel = abs(current_price - pp) / max(atr, 0.01)
+                if rev_vel > 0.8:
+                    reversal_signal = {
+                        "direction": direction,
+                        "confidence": round(sr_vote.get("confidence", 0), 4),
+                        "entry_level": sr_vote.get("level"),
+                        "entry_type": sr_vote.get("level_type", sr_vote.get("signal_type", "")),
+                        "sr_rejection": True,
+                        "cycle_id": cycle_id,
+                    }
+                    snapshot["reversal_signal"] = reversal_signal
+
         # ── Detect significant flips ──
         flip_event = None
         is_direction_change = (
@@ -888,6 +954,13 @@ def update(
                 _flip_history[ticker].pop(0)
             if is_real_flip:
                 _last_flip_cycle[ticker] = cycle_id
+
+            # ── Fix 3: Enrich flip event with level info from SR rejection vote ──
+            if flip_event is not None:
+                sr_flip = _find_sr_rejection_vote(strategy_votes, direction)
+                if sr_flip and sr_flip.get("level"):
+                    flip_event["suggested_entry"] = sr_flip.get("level")
+                    flip_event["suggested_entry_type"] = sr_flip.get("level_type", sr_flip.get("signal_type", ""))
 
         # ── Track top contributors ──
         if strategy_votes and len(strategy_votes) > 0:

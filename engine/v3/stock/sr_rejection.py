@@ -20,6 +20,14 @@ from utils.logger import get_logger
 
 logger = get_logger("engine.v3.stock.sr_rejection")
 
+# ── Consecutive rejection tracking (Fix 6) ──
+# Tracks last rejection level per ticker for confidence multiplier
+_rejection_tracker: dict[str, dict] = {}  # ticker -> {level, level_type, direction, count}
+_MAX_REJECTION_TRACKER_ENTRIES = 50  # cap to prevent unbounded growth
+_CONFIDENCE_MULTIPLIER_2ND = 1.30  # 2nd rejection at same level: +30%
+_CONFIDENCE_MULTIPLIER_3RD = 1.50   # 3rd+ rejection at same level: +50%
+_MAX_CONFIDENCE_WITH_MULTIPLIER = 0.85
+
 # ── Proximity thresholds ──
 PROXIMITY_PCT = 0.005       # Within 0.5% = approaching
 AT_LEVEL_PCT = 0.0015       # Within 0.15% = at level
@@ -314,9 +322,45 @@ class SRRejectionStock(BaseV3Strategy):
                     if fb_score > 0:
                         best_signal["signal_type"] = "failed_breakout_rejection"
 
+        # ── Fix 6: Consecutive rejection tracking ──
+        if best_signal is not None and best_signal["confidence"] >= 0.10:
+            sig_level = best_signal.get("level", 0)
+            sig_dir = best_signal.get("direction", "")
+            prev_rej = _rejection_tracker.get(ticker)
+            # Use tolerance for floating-point level comparison
+            prev_level = prev_rej.get("level", 0) if prev_rej else 0
+            same_level = (prev_level > 0 and sig_level > 0 and
+                          abs(prev_level - sig_level) / max(sig_level, 0.01) < 0.001)
+            if prev_rej and same_level and prev_rej.get("direction") == sig_dir:
+                prev_rej["count"] += 1
+                if prev_rej["count"] >= 3:
+                    best_signal["confidence"] = min(
+                        best_signal["confidence"] * _CONFIDENCE_MULTIPLIER_3RD,
+                        _MAX_CONFIDENCE_WITH_MULTIPLIER,
+                    )
+                    best_signal["consecutive_rejections"] = prev_rej["count"]
+                elif prev_rej["count"] == 2:
+                    best_signal["confidence"] = min(
+                        best_signal["confidence"] * _CONFIDENCE_MULTIPLIER_2ND,
+                        _MAX_CONFIDENCE_WITH_MULTIPLIER,
+                    )
+                    best_signal["consecutive_rejections"] = 2
+            else:
+                _rejection_tracker[ticker] = {
+                    "level": sig_level, "level_type": best_signal.get("level_type", ""),
+                    "direction": sig_dir, "count": 1,
+                }
+
         if best_signal is None or best_signal["confidence"] < 0.10:
+            _rejection_tracker.pop(ticker, None)  # Reset on no signal
+            # Periodic cleanup: cap tracker size
+            if len(_rejection_tracker) > _MAX_REJECTION_TRACKER_ENTRIES:
+                oldest = sorted(_rejection_tracker.keys())[:10]
+                for k in oldest:
+                    _rejection_tracker.pop(k, None)
             return {"direction": "neutral", "confidence": 0.0, "strategy": self.name, "reasons": ["no_rejection_detected"]}
 
+        best_signal["confidence"] = round(best_signal["confidence"], 4)
         best_signal["strategy"] = self.name
         best_signal["reasons"] = [f"sr_rejection_{best_signal['signal_type']}_{best_signal['level_type']}"]
         return best_signal

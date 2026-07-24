@@ -210,6 +210,7 @@ header {
 .level-val.sl { color: var(--danger); }
 .level-val.tp { color: var(--accent); }
 .level-val.rr { color: var(--warning); }
+.level-val.limit { color: #a78bfa; font-weight: 700; }
 .row-mini { display: flex; gap: 8px; font-size: 10px; color: var(--text-muted); padding: 3px 0; flex-wrap: wrap; }
 
 /* ── Flip badge ── */
@@ -661,6 +662,59 @@ header {
 .health-pct.fragile { color: var(--danger); }
 .health-pct.terminal { color: #666; }
 .fragile-badge { display: inline-block; padding: 2px 7px; border-radius: 8px; font-size: 10px; font-weight: 700; background: var(--danger-dim); color: var(--danger); margin-left: 4px; animation: weakenPulse 1.5s ease-in-out infinite; }
+/* ── Proximity Warning (level engine) ── */
+.proximity-warn {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 150px;
+}
+.proximity-warn.danger { background: var(--danger-dim); color: var(--danger); }
+.proximity-warn.warning { background: var(--warning-dim); color: var(--warning); }
+.proximity-warn.info { background: rgba(88, 166, 255, 0.15); color: var(--info); }
+
+/* ── Popup limit entry highlight ── */
+.limit-entry-highlight {
+  border: 1px solid rgba(167, 139, 250, 0.4) !important;
+  background: rgba(167, 139, 250, 0.08) !important;
+}
+.limit-entry-highlight .level-entry.limit {
+  color: #a78bfa !important;
+  font-weight: 700;
+}
+.limit-type-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 500;
+  color: #a78bfa;
+  background: rgba(167, 139, 250, 0.12);
+  margin-left: 6px;
+}
+
+/* ── Support / resistance popup levels ── */
+.support-level { border-left: 2px solid var(--accent); }
+.resistance-level { border-left: 2px solid var(--danger); }
+
+/* ── Proximity banner in popup ── */
+.proximity-banner {
+  display: block;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+}
+.proximity-banner.prox-danger { background: var(--danger-dim); color: var(--danger); border: 1px solid var(--danger); }
+.proximity-banner.prox-warning { background: var(--warning-dim); color: var(--warning); border: 1px solid var(--warning); }
+.proximity-banner.prox-info { background: rgba(88, 166, 255, 0.15); color: var(--info); border: 1px solid rgba(88, 166, 255, 0.3); }
+
 /* ── Health Warning Chips (categorized by factor) ── */
 .health-warnings { display: flex; gap: 4px; flex-wrap: wrap; padding: 2px 0; }
 .warn-chip {
@@ -827,6 +881,25 @@ header {
 /* ── Card internal rows ── */
 .ticker-cell .tc-verdict-row {
   margin-bottom: 2px;
+}
+.ticker-cell .row4 {
+  display: flex;
+  gap: 4px;
+  font-size: 10px;
+  align-items: center;
+  padding: 2px 0;
+  margin-top: 1px;
+  border-top: 1px dashed rgba(167, 139, 250, 0.3);
+}
+.ticker-cell .row4 .limit-label { color: #a78bfa; font-weight: 600; }
+.ticker-cell .limit-type {
+  font-size: 9px;
+  color: var(--text-muted);
+  background: rgba(167, 139, 250, 0.12);
+  padding: 1px 5px;
+  border-radius: 4px;
+  margin-left: 4px;
+  white-space: nowrap;
 }
 .ticker-cell .row1 {
   display: flex;

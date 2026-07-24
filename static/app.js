@@ -534,6 +534,25 @@ function _getDirClass(dir) {
   return dir === 'long' ? 'long' : dir === 'short' ? 'short' : 'neutral';
 }
 
+// ── Format suggested entry level type for display ──
+function _formatLevelType(type) {
+  if (!type || type === 'market' || type === 'none') return '';
+  var labels = {
+    'fib_236': 'Fib 23.6%', 'fib_382': 'Fib 38.2%', 'fib_50': 'Fib 50%',
+    'fib_618': 'Fib 61.8%', 'fib_786': 'Fib 78.6%',
+    'fib_1272': 'Fib 127.2%', 'fib_1618': 'Fib 161.8%',
+    'prior_day_high': 'Prior Day High', 'prior_day_low': 'Prior Day Low',
+    'prior_week_high': 'Prior Week High', 'prior_week_low': 'Prior Week Low',
+    'gamma_flip': 'Gamma Flip', 'gamma_wall': 'Gamma Wall',
+    'gex_magnet': 'GEX Magnet', 'poc': 'Volume POC',
+    'value_area_high': 'VA High', 'value_area_low': 'VA Low',
+    'sma_20': 'SMA 20', 'sma_50': 'SMA 50',
+    'pivot_r1': 'Pivot R1', 'pivot_s1': 'Pivot S1',
+    'confluence_zone': 'Confluence Zone'
+  };
+  return labels[type] || type.replace(/_/g, ' ');
+}
+
 // ── Build synthetic signal from gate evaluation (no signal generated but gate data exists) ──
 function _buildSyntheticSignal(gate) {
   var meta = gate.consensus_meta || {};
@@ -611,10 +630,17 @@ function _createTickerCell(ticker) {
       '<span class="level-label">TP</span><span class="level-val tp">$--</span>' +
       '<span class="level-label">R:R</span><span class="level-val rr">--</span>' +
     '</div>' +
-    // Bottom: gate, ns, price
+    // Row 4: Suggested Limit Entry (hidden by default, shown when suggested_entry != entry_price)
+    '<div class="row4" style="display:none">' +
+      '<span class="level-label limit-label">\u{1F3AF} Limit</span>' +
+      '<span class="level-val limit">$--</span>' +
+      '<span class="limit-type"></span>' +
+    '</div>' +
+    // Bottom: ATR, gate, ns, price, proximity warning
     '<div class="tc-bottom">' +
       '<span>gate: --</span>' +
       '<span>ns: --</span>' +
+      '<span class="proximity-warn"></span>' +
       '<span style="margin-left:auto;font-variant-numeric:tabular-nums">$--</span>' +
     '</div>';
 
@@ -880,6 +906,23 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
     }
   }
 
+  // ── Row 4: Suggested Limit Entry (shown when suggested_entry differs from entry_price) ──
+  var r4 = cell.querySelector('.row4');
+  if (r4) {
+    var suggested = sig ? sig.suggested_entry : 0;
+    var entryPx = sig ? sig.entry_price : 0;
+    var suggType = sig ? (sig.suggested_entry_type || '') : '';
+    if (suggested && entryPx && Math.abs(suggested - entryPx) > 0.005) {
+      r4.style.display = 'flex';
+      r4.innerHTML =
+        '<span class="level-label limit-label">\u{1F3AF} Limit</span>' +
+        '<span class="level-val limit">$' + suggested.toFixed(2) + '</span>' +
+        '<span class="limit-type">' + _formatLevelType(suggType) + '</span>';
+    } else {
+      r4.style.display = 'none';
+    }
+  }
+
   // ── Bottom: ATR, gate, ns, price ──
   var bot = cell.querySelector('.tc-bottom');
   if (bot) {
@@ -898,11 +941,21 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
         gateCls = 'tc-gate-fail';
       }
     }
+    // ── Proximity warning ──
+    var proxWarn = sig ? (sig.proximity_warning || '') : '';
+    var proxHtml = '';
+    if (proxWarn) {
+      var warnCls = proxWarn.indexOf('AT_') >= 0 ? 'danger' : proxWarn.indexOf('NEAR_') >= 0 ? 'warning' : 'info';
+      var warnLabel = proxWarn.replace(/_/g, ' ').replace('AT RESISTANCE', 'AT RESISTANCE').replace('AT SUPPORT', 'AT SUPPORT').slice(0, 40);
+      proxHtml = '<span class="proximity-warn ' + warnCls + '" title="' + proxWarn + '">\u26A0 ' + warnLabel + '</span>';
+    }
+
     var pxStr = price > 0 ? '$' + price.toFixed(2) : '$--';
     bot.innerHTML =
       (atrStr ? '<span>' + atrStr + '</span>' : '') +
       '<span class="' + gateCls + '" title="' + (gate && !gate.gate_passed ? (gate.gate_reason || 'fail').replace(/_/g, ' ') : '') + '">' + gateStr + '</span>' +
       '<span class="' + (ns > 0.1 ? 'tc-ns-pos' : ns < -0.1 ? 'tc-ns-neg' : '') + '">' + nsStr + '</span>' +
+      proxHtml +
       '<span style="margin-left:auto;font-variant-numeric:tabular-nums">' + pxStr + '</span>';
   }
 
@@ -1259,6 +1312,45 @@ function showSignalPopup(signal, cycle) {
   document.getElementById('popup-sl').textContent = signal.stop_loss ? '$' + signal.stop_loss.toFixed(2) : '--';
   document.getElementById('popup-tp').textContent = signal.take_profit ? '$' + signal.take_profit.toFixed(2) : '--';
   document.getElementById('popup-rr').textContent = signal.risk_reward ? signal.risk_reward.toFixed(1) : '--';
+
+  // ── Suggested entry (limit order level) ──
+  var popupLimitRow = document.getElementById('popup-limit-entry-row');
+  var suggested = signal.suggested_entry || 0;
+  var entryPx = signal.entry_price || signal.current_price || 0;
+  if (popupLimitRow && suggested && entryPx && Math.abs(suggested - entryPx) > 0.005) {
+    popupLimitRow.style.display = 'flex';
+    document.getElementById('popup-limit-entry').textContent = '$' + suggested.toFixed(2);
+    document.getElementById('popup-limit-type').textContent = _formatLevelType(signal.suggested_entry_type || '');
+  } else if (popupLimitRow) {
+    popupLimitRow.style.display = 'none';
+  }
+
+  // ── Nearest support / resistance ──
+  var popupSR = document.getElementById('popup-sr-levels');
+  if (popupSR) {
+    var ns = signal.nearest_support;
+    var nr = signal.nearest_resistance;
+    if (ns || nr) {
+      popupSR.style.display = 'flex';
+      document.getElementById('popup-nearest-support').textContent = ns ? '$' + ns.toFixed(2) : '--';
+      document.getElementById('popup-nearest-resistance').textContent = nr ? '$' + nr.toFixed(2) : '--';
+    } else {
+      popupSR.style.display = 'none';
+    }
+  }
+
+  // ── Proximity warning ──
+  var popupProx = document.getElementById('popup-proximity-warning');
+  if (popupProx) {
+    var proxWarn = signal.proximity_warning || '';
+    if (proxWarn) {
+      popupProx.style.display = 'block';
+      var warnCls = proxWarn.indexOf('AT_') >= 0 ? 'prox-danger' : proxWarn.indexOf('NEAR_') >= 0 ? 'prox-warning' : 'prox-info';
+      popupProx.innerHTML = '<span class="proximity-banner ' + warnCls + '">\u26A0 ' + proxWarn.replace(/_/g, ' ').slice(0, 80) + '</span>';
+    } else {
+      popupProx.style.display = 'none';
+    }
+  }
 
   // Option levels
   var optLevels = document.getElementById('popup-option-levels');

@@ -16,6 +16,29 @@ _chain_snapshots = {}  # ticker -> previous chain snapshot
 _option_health_events: list[dict] = []  # health monitoring log
 
 
+def _sanitize_float(value):
+    """Replace NaN/Inf with 0.0 for JSON-safe serialization."""
+    if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
+        return 0.0
+    return value
+
+
+def _sanitize_dict(d: dict) -> dict:
+    """Recursively replace NaN/Inf values in a dict with 0.0."""
+    for k, v in d.items():
+        if isinstance(v, dict):
+            _sanitize_dict(v)
+        elif isinstance(v, list):
+            for i, item in enumerate(v):
+                if isinstance(item, dict):
+                    _sanitize_dict(item)
+                elif isinstance(item, float) and (math.isnan(item) or math.isinf(item)):
+                    v[i] = 0.0
+        elif isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+            d[k] = 0.0
+    return d
+
+
 def engine_health_monitor(ticker: str, status: str = "", details: str = ""):
     """Log option chain health event for diagnostics dashboard."""
     event = {
@@ -480,4 +503,4 @@ def compute_option_metrics(ticker: str, underlying_price: float, ticker_data_map
     else:
         result["odte"] = False
 
-    return result
+    return _sanitize_dict(result)

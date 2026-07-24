@@ -72,6 +72,17 @@ def _load_html(name: str) -> str:
 
 
 def _json_response(data: dict) -> tuple[bytes, bool]:
+    import math as _math
+    # Sanitize NaN/Inf values that break JavaScript JSON.parse()
+    def _sanitize(obj):
+        if isinstance(obj, dict):
+            return {k: _sanitize(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [_sanitize(v) for v in obj]
+        if isinstance(obj, float) and (_math.isnan(obj) or _math.isinf(obj)):
+            return 0.0
+        return obj
+    data = _sanitize(data)
     body = json.dumps(data, indent=2, default=str).encode("utf-8")
     compressed = len(body) > 1024
     if compressed:

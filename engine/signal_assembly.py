@@ -418,6 +418,39 @@ def assemble_cycle_result(
             regime = gate_eval.get("regime", "unknown")
             current_direction = gate_eval.get("direction", "neutral")
 
+            # ── Compute entry/exit levels for persistent slot using ATR from current cycle ──
+            # This ensures the card shows Entry, SL, TP, R:R even when the ticker
+            # doesn't generate a fresh signal this cycle (gap fix).
+            # ATR multipliers match entry_exit.py per instrument type.
+            # NOTE: nearest_support, nearest_resistance, suggested_entry, and
+            # proximity_warning require OHLCV data from level_engine which is not
+            # available in gate_eval — those fields remain None for persistent slots.
+            slot_entry_px = ts.get("state_entry_price", 0)
+            slot_atr = gate_eval.get("atr", 0)
+            slot_sl = 0.0
+            slot_tp = 0.0
+            slot_rr = 0.0
+            if instr_type == "stock":
+                sl_mult, tp_mult = 1.0, 1.5
+            elif instr_type == "option":
+                sl_mult, tp_mult = 0.5, 1.0
+            else:  # future (default)
+                sl_mult, tp_mult = 0.75, 1.5
+            if slot_atr > 0 and slot_entry_px > 0 and direction in ("long", "short"):
+                if direction == "long":
+                    slot_sl = slot_entry_px - slot_atr * sl_mult
+                    slot_tp = slot_entry_px + slot_atr * tp_mult
+                else:
+                    slot_sl = slot_entry_px + slot_atr * sl_mult
+                    slot_tp = slot_entry_px - slot_atr * tp_mult
+                if abs(slot_sl - slot_entry_px) > 0.01:
+                    slot_rr = round(abs(slot_tp - slot_entry_px) / abs(slot_sl - slot_entry_px), 2)
+                slot_sl = round(slot_sl, 4)
+                slot_tp = round(slot_tp, 4)
+
+            # ── Use gate evaluation's strategy_votes for persistent slot cards ──
+            slot_strategies = gate_eval.get("strategy_votes", []) or []
+
             # ── Build the persistent slot signal ──
             slot_signal: dict[str, Any] = {
                 # Identity (from persistence)
@@ -435,7 +468,10 @@ def assemble_cycle_result(
                 "current_price": current_price,
                 "gate_passed": gate_passed,
                 "gate_reason": gate_reason,
-                "entry_price": ts.get("state_entry_price", 0),
+                "entry_price": slot_entry_px,
+                "stop_loss": slot_sl,
+                "take_profit": slot_tp,
+                "risk_reward": slot_rr,
                 # State machine info
                 "state": state,
                 "persistent_slot": True,  # Flag for frontend
@@ -470,7 +506,7 @@ def assemble_cycle_result(
                     or last_snap.get("families", {})
                 ),
             },
-                "strategies": [],
+                "strategies": slot_strategies,
                 "market_dashboard": {},
             }
 

@@ -881,7 +881,7 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
       var isUptrend = regime.indexOf('uptrend') >= 0;
       var isDowntrend = regime.indexOf('downtrend') >= 0;
       var isLong = dirLabel === 'long';
-      aligned = (isLong && isUptrend) || (!isLong && isDowntrend) && dirLabel === 'short';
+      aligned = (isLong && isUptrend) || (!isLong && isDowntrend);
     }
     var act = _actionability(confidence, tier, aligned, stateLabel);
     ae.textContent = 'Act: ' + act;
@@ -946,7 +946,7 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
     var votes = (gate && gate.strategy_votes) ? gate.strategy_votes : (sig ? (sig.strategy_votes || []) : (cachedGate ? (cachedGate.strategy_votes || []) : (cachedSig ? (cachedSig.strategies || []) : [])));
     var total = votes ? votes.length : 0;
     var active = votes ? votes.filter(function(v) { return v.confidence > 0.3; }).length : 0;
-    var scoreStr = sig ? ((sig.composite_score || 0) * 100).toFixed(1) + '%' : (meta ? (Math.abs(ns) * 100).toFixed(1) + '%' : (cachedSig ? (Math.abs((cachedSig.consensus_meta||{}).consensus_net_score||0) * 100).toFixed(1) + '%' : '--'));
+    var scoreStr = sig ? (Math.abs(ns) * 100).toFixed(1) + '%' : (meta ? (Math.abs(ns) * 100).toFixed(1) + '%' : (cachedSig ? (Math.abs((cachedSig.consensus_meta||{}).consensus_net_score||0) * 100).toFixed(1) + '%' : '--'));
     var confStr = (confidence * 100).toFixed(1) + '%';
     r2.innerHTML =
       '<span>Score: <strong>' + scoreStr + '</strong></span>' +

@@ -769,9 +769,9 @@ function _renderActivePositions() {
   if (!strip || !container) return;
 
   // Get all tickers with active/confirmed/weakening state
-  var states = _status.signal_states || {};
-  var byTicker = states.by_ticker || {};
   var last = _status.last_cycle;
+  var states = (last && last.signal_states) || {};
+  var byTicker = states.by_ticker || {};
   var allSigs = [];
   if (last && last.signals) {
     ['stock','future','option'].forEach(function(type) {
@@ -841,7 +841,7 @@ function renderSignals(cycle) {
   if (!_gridInitialized) _initTickerGrid();
 
   // Get signal states (all tickers, not just those with signals)
-  var states = _status.signal_states || {};
+  var states = cycle.signal_states || {};
   var byTicker = states.by_ticker || {};
 
   // Get signal data from this cycle (for those that passed gate)

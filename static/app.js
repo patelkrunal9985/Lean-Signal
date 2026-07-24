@@ -522,26 +522,28 @@ function _createTickerCell(ticker) {
   cell.className = 'ticker-cell state-none';
   cell.setAttribute('data-ticker', ticker);
 
-  // Determine type for styling
   var isOption = ticker.indexOf('_OPT') >= 0;
   var isFuture = ticker.indexOf('=F') >= 0;
   var typeLabel = isOption ? 'opt' : isFuture ? 'fut' : 'stk';
 
   cell.innerHTML =
-    '<div class="tc-header">' +
+    '<div class="tc-top">' +
       '<span class="tc-ticker">' + ticker.replace('=F','').replace('_OPT','') + '</span>' +
       '<span class="tc-dir neutral">–</span>' +
-    '</div>' +
-    '<div class="tc-body">' +
       '<span class="tc-conf">0%</span>' +
       '<span class="tc-state none">none</span>' +
     '</div>' +
-    '<div class="tc-meta">' +
+    '<div class="tc-mid">' +
+      '<span class="tc-verdict">—</span>' +
+      '<span class="tc-gate">gate: —</span>' +
+      '<span class="tc-regime">—</span>' +
+    '</div>' +
+    '<div class="tc-bot">' +
+      '<span class="tc-netscore">ns: —</span>' +
+      '<span class="tc-strats">0 strats</span>' +
       '<span class="tc-price">$—</span>' +
-      '<span class="tc-type">' + typeLabel + '</span>' +
     '</div>';
 
-  // Click handler for popup
   cell.onclick = function() {
     var last = _status.last_cycle;
     if (last && last.signals) {
@@ -578,7 +580,7 @@ function _initTickerGrid() {
 }
 
 // ── Update a single cell in-place ──
-function _updateCell(ticker, state, direction, confidence, price, verdict, strategies) {
+function _updateCell(ticker, state, direction, confidence, price, verdict, strategies, gate) {
   var cache = _cellCache[ticker];
   if (!cache) return;
 
@@ -610,6 +612,44 @@ function _updateCell(ticker, state, direction, confidence, price, verdict, strat
   // Update price
   var priceEl = cell.querySelector('.tc-price');
   if (priceEl && price > 0) priceEl.textContent = '$' + price.toFixed(2);
+
+  // Update verdict
+  var verdictEl = cell.querySelector('.tc-verdict');
+  if (verdictEl) {
+    verdictEl.textContent = verdict || '—';
+    verdictEl.className = 'tc-verdict ' + (verdict === 'STRONG BUY' || verdict === 'STRONG SELL' ? 'strong' : verdict === 'BUY' || verdict === 'SELL' ? 'action' : 'muted');
+  }
+
+  // Update gate status and regime
+  var gateEl = cell.querySelector('.tc-gate');
+  var regimeEl = cell.querySelector('.tc-regime');
+  if (gate) {
+    if (gateEl) {
+      gateEl.textContent = gate.gate_passed ? 'gate: passed' : 'gate: ' + (gate.gate_reason || 'fail');
+      gateEl.className = 'tc-gate ' + (gate.gate_passed ? 'passed' : 'rejected');
+    }
+    if (regimeEl) {
+      var regimeMap = { 'ranging': '\u2194', 'trending': '\u2197', 'high_volatility': '\u26a1', 'low_volatility': '\u2014' };
+      var rIcon = regimeMap[gate.regime] || '?';
+      regimeEl.textContent = rIcon + ' ' + (gate.regime || '');
+    }
+  } else {
+    if (gateEl) { gateEl.textContent = 'gate: —'; gateEl.className = 'tc-gate'; }
+    if (regimeEl) regimeEl.textContent = '—';
+  }
+
+  // Update net score and strategy count
+  var nsEl = cell.querySelector('.tc-netscore');
+  var stratsEl = cell.querySelector('.tc-strats');
+  if (nsEl) {
+    var score = gate && gate.consensus_meta ? gate.consensus_meta.consensus_net_score : 0;
+    nsEl.textContent = 'ns: ' + (score >= 0 ? '+' : '') + score.toFixed(2);
+    nsEl.className = 'tc-netscore ' + (score > 0.1 ? 'positive' : score < -0.1 ? 'negative' : '');
+  }
+  if (stratsEl) {
+    var count = strategies ? strategies.length : (gate && gate.strategy_votes ? gate.strategy_votes.length : 0);
+    stratsEl.textContent = count + ' strat' + (count !== 1 ? 's' : '');
+  }
 
   // Update cache
   cache.state = state;
@@ -739,7 +779,7 @@ function renderSignals(cycle) {
       }
     }
 
-    _updateCell(ticker, state, direction, confidence, price, sig ? sig.verdict : 'NO ACTION', gate ? gate.strategy_votes : []);
+    _updateCell(ticker, state, direction, confidence, price, sig ? sig.verdict : 'NO ACTION', gate ? gate.strategy_votes : [], gate);
   });
 
   // Update active positions strip

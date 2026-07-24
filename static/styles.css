@@ -840,23 +840,44 @@ header {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 10px 12px;
-  min-height: 70px;
+  padding: 8px 10px;
+  min-height: 80px;
   cursor: pointer;
   transition: border-color 0.4s ease, background 0.4s ease, box-shadow 0.4s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 .ticker-cell:hover { box-shadow: var(--shadow); }
-.ticker-cell .tc-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px; }
-.ticker-cell .tc-ticker { font-size: 14px; font-weight: 700; }
-.ticker-cell .tc-dir { font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 7px; }
+
+/* Top row: ticker, direction, confidence, state */
+.ticker-cell .tc-top { display: flex; align-items: center; gap: 6px; }
+.ticker-cell .tc-ticker { font-size: 13px; font-weight: 700; min-width: 40px; }
+.ticker-cell .tc-dir { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 7px; }
 .ticker-cell .tc-dir.long { background: var(--accent-dim); color: var(--accent); }
 .ticker-cell .tc-dir.short { background: var(--danger-dim); color: var(--danger); }
 .ticker-cell .tc-dir.neutral { background: var(--bg-hover); color: var(--text-muted); }
-.ticker-cell .tc-body { display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: var(--text-muted); }
-.ticker-cell .tc-conf { font-weight: 700; }
-.ticker-cell .tc-price { font-variant-numeric: tabular-nums; }
-.ticker-cell .tc-state { font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 6px; }
-.ticker-cell .tc-strat-count { font-size: 10px; color: var(--text-muted); }
+.ticker-cell .tc-conf { font-size: 13px; font-weight: 700; margin-left: auto; }
+.ticker-cell .tc-state { font-size: 9px; font-weight: 600; padding: 1px 5px; border-radius: 5px; }
+
+/* Mid row: verdict, gate, regime */
+.ticker-cell .tc-mid { display: flex; align-items: center; gap: 8px; font-size: 10px; }
+.ticker-cell .tc-verdict { font-weight: 600; }
+.ticker-cell .tc-verdict.strong { color: var(--accent); }
+.ticker-cell .tc-verdict.action { color: var(--info); }
+.ticker-cell .tc-verdict.muted { color: var(--text-muted); }
+.ticker-cell .tc-gate { font-size: 9px; }
+.ticker-cell .tc-gate.passed { color: var(--accent); }
+.ticker-cell .tc-gate.rejected { color: var(--warning); }
+.ticker-cell .tc-regime { font-size: 9px; color: var(--text-muted); margin-left: auto; }
+
+/* Bot row: net score, strategy count, price */
+.ticker-cell .tc-bot { display: flex; align-items: center; gap: 8px; font-size: 10px; color: var(--text-muted); }
+.ticker-cell .tc-netscore { font-variant-numeric: tabular-nums; }
+.ticker-cell .tc-netscore.positive { color: var(--accent); }
+.ticker-cell .tc-netscore.negative { color: var(--danger); }
+.ticker-cell .tc-strats { }
+.ticker-cell .tc-price { font-variant-numeric: tabular-nums; margin-left: auto; }
 
 /* ── State-based cell colors ── */
 .ticker-cell.state-confirmed {

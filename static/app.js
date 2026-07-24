@@ -615,6 +615,7 @@ function _createTickerCell(ticker) {
         '<span class="ticker-name">' + ticker.replace('=F','').replace('_OPT','') + '</span>' +
         '<span class="instrument-badge">' + typeLabel + '</span>' +
         '<span class="state-badge none">none</span>' +
+        '<span class="thesis-age-badge" style="display:none"></span>' +
         '<span class="regime-badge">--</span>' +
       '</div>' +
       '<span class="direction-badge neutral">\u2013 NEUTRAL</span>' +
@@ -855,21 +856,32 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
     }
   }
 
-  // ── State badge with cycle count ──
+  // ── State badge (no cycle count — thesis-age-badge handles that) ──
   var se = cell.querySelector('.state-badge');
   var stateLabel = state || 'none';
   if (se) {
-    var cycleAge = '';
-    // Only show cycle count if thesis was actually entered (entry_cycle > 0).
-    // Avoids misleading "NONE x92" when entry_cycle defaults to 0.
-    if (st && st.entry_cycle > 0 && st.current_signal && st.current_signal.cycle_id != null) {
-      var age = st.current_signal.cycle_id - st.entry_cycle;
-      if (age > 0) cycleAge = ' x' + age;
-    } else if (st && st.total_cycles != null) {
-      cycleAge = ' ' + st.total_cycles + 'cyc';
-    }
-    se.textContent = stateLabel.toUpperCase() + cycleAge;
+    se.textContent = stateLabel.toUpperCase();
     se.className = 'state-badge ' + stateLabel;
+  }
+
+  // ── Thesis age badge (shown when thesis is active, uses cycle_id from status) ──
+  var ab = cell.querySelector('.thesis-age-badge');
+  if (ab) {
+    var thesisAge = 0;
+    if (st && st.has_thesis && st.entry_cycle > 0) {
+      var currentCycleId = _status.last_cycle ? _status.last_cycle.cycle_id : 0;
+      thesisAge = Math.max(0, currentCycleId - st.entry_cycle);
+    }
+    if (thesisAge > 0) {
+      var horizon = _status.last_cycle ? (_status.last_cycle.thesis_horizon || 30) : 30;
+      var staleAt = Math.max(horizon * 0.66, 10);
+      var agingAt = Math.max(horizon * 0.33, 5);
+      ab.style.display = 'inline';
+      ab.textContent = '⏱ ' + thesisAge + 'c';
+      ab.className = 'thesis-age-badge' + (thesisAge >= staleAt ? ' stale' : thesisAge >= agingAt ? ' aging' : ' fresh');
+    } else {
+      ab.style.display = 'none';
+    }
   }
 
   // ── Actionability indicator ──

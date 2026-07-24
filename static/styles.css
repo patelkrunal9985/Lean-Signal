@@ -295,6 +295,21 @@ header {
   50% { opacity: 0.5; }
 }
 
+/* ── Thesis Age Badge (cycle counter) ── */
+.thesis-age-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 7px;
+  font-size: 9px;
+  font-weight: 700;
+  margin-left: 4px;
+  letter-spacing: 0.3px;
+  vertical-align: middle;
+}
+.thesis-age-badge.fresh { background: rgba(0, 200, 100, 0.15); color: #00c864; }
+.thesis-age-badge.aging { background: var(--warning-dim); color: var(--warning); }
+.thesis-age-badge.stale { background: var(--danger-dim); color: var(--danger); }
+
 /* ── Signal Generation Badge (shows datetime + entry price) ── */
 .generated-badge {
   display: inline-block;

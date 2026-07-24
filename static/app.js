@@ -973,29 +973,31 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
       '<span>Strats: <strong>' + active + '/' + total + '</strong></span>';
   }
 
-  // ── Row 3: Entry, SL, TP, R:R (use cached sig when no current signal) ──
+  // ── Row 3: Entry, SL, TP, R:R, ATR — render each field independently (handles 0/null gracefully) ──
   var r3 = cell.querySelector('.grid-levels');
   if (r3) {
     var ratr = effectiveGate ? (effectiveGate.atr || 0) : 0;
-    var atrCtx = ratr > 0 ? ' ATR $' + ratr.toFixed(2) : '';
-    if (effectiveSig && effectiveSig.entry_price && effectiveSig.stop_loss && effectiveSig.take_profit) {
-      var ep = effectiveSig.entry_price;
-      var sl = effectiveSig.stop_loss;
-      var tp = effectiveSig.take_profit;
-      var rr = effectiveSig.risk_reward || (tp - ep) / (ep - sl);
+    var ep = effectiveSig ? (effectiveSig.entry_price || 0) : 0;
+    var sl = effectiveSig ? (effectiveSig.stop_loss || 0) : 0;
+    var tp = effectiveSig ? (effectiveSig.take_profit || 0) : 0;
+    var rr = effectiveSig ? (effectiveSig.risk_reward || 0) : 0;
+    // Fallback R:R computation if we have ep/sl/tp
+    if (rr <= 0 && ep > 0 && sl > 0 && tp > 0 && Math.abs(sl - ep) > 0.001) {
+      rr = Math.abs(tp - ep) / Math.abs(sl - ep);
       if (!isFinite(rr)) rr = 0;
-      r3.innerHTML = '<span class="level-pair"><span class="level-label">Entry</span><span class="level-val">$' + ep.toFixed(2) + '</span></span>' +
-        '<span class="level-pair"><span class="level-label">SL</span><span class="level-val sl" title="' + (ratr > 0 ? Math.abs(ep - sl) / ratr : '') + '\u00D7 ATR from entry">$' + sl.toFixed(2) + '</span></span>' +
-        '<span class="level-pair"><span class="level-label">TP</span><span class="level-val tp">$' + tp.toFixed(2) + '</span></span>' +
-        '<span class="level-pair"><span class="level-label">R:R</span><span class="level-val rr">' + rr.toFixed(1) + '</span></span>' +
-        '<span class="level-pair"><span class="level-label">ATR</span><span class="level-val">' + (ratr > 0 ? '$' + ratr.toFixed(2) : '$--') + '</span></span>';
-    } else {
-      r3.innerHTML = '<span class="level-pair"><span class="level-label">Entry</span><span class="level-val">$--</span></span>' +
-        '<span class="level-pair"><span class="level-label">SL</span><span class="level-val sl">$--</span></span>' +
-        '<span class="level-pair"><span class="level-label">TP</span><span class="level-val tp">$--</span></span>' +
-        '<span class="level-pair"><span class="level-label">R:R</span><span class="level-val rr">--</span></span>' +
-        '<span class="level-pair"><span class="level-label">ATR</span><span class="level-val">' + (atrCtx ? atrCtx.trim() : '$--') + '</span></span>';
     }
+    var epStr = ep > 0 ? '$' + ep.toFixed(2) : '$--';
+    var slStr = sl > 0 ? '$' + sl.toFixed(2) : '$--';
+    var slTitle = (ep > 0 && sl > 0 && ratr > 0) ? Math.abs(ep - sl) / ratr : '';
+    var tpStr = tp > 0 ? '$' + tp.toFixed(2) : '$--';
+    var rrStr = rr > 0 ? rr.toFixed(1) : '--';
+    var atrStr = ratr > 0 ? '$' + ratr.toFixed(2) : '$--';
+    r3.innerHTML =
+      '<span class="level-pair"><span class="level-label">Entry</span><span class="level-val">' + epStr + '</span></span>' +
+      '<span class="level-pair"><span class="level-label">SL</span><span class="level-val sl"' + (slTitle ? ' title="' + slTitle.toFixed(1) + '\u00D7 ATR"' : '') + '>' + slStr + '</span></span>' +
+      '<span class="level-pair"><span class="level-label">TP</span><span class="level-val tp">' + tpStr + '</span></span>' +
+      '<span class="level-pair"><span class="level-label">R:R</span><span class="level-val rr">' + rrStr + '</span></span>' +
+      '<span class="level-pair"><span class="level-label">ATR</span><span class="level-val">' + atrStr + '</span></span>';
   }
 
   // ── Row 4: Suggested Limit Entry (use cached sig) ──

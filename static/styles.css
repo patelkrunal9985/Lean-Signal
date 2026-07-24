@@ -204,7 +204,7 @@ header {
 }
 .signals-grid .ticker-row {
   display: flex;
-  gap: 10px;
+  gap: 14px;
 }
 /* Indices tab: 4 equal columns */
 #signals-grid-indices .ticker-cell { min-width: 0; flex: 1 1 0; }
@@ -221,20 +221,20 @@ header {
   .signals-grid .ticker-cell { flex: 1 1 100% !important; }
 }
 
-.ticker-name { font-size: 14px; font-weight: 600; }
+.ticker-name { font-size: 18px; font-weight: 700; }
 .instrument-badge {
-  font-size: 9px;
-  padding: 1px 5px;
+  font-size: 11px;
+  padding: 2px 7px;
   border-radius: 6px;
   background: var(--bg-hover);
   color: var(--text-muted);
-  margin-left: 4px;
+  margin-left: 6px;
 }
 .direction-badge {
-  padding: 2px 8px;
+  padding: 3px 10px;
   border-radius: 8px;
-  font-size: 11px;
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 700;
   white-space: nowrap;
 }
 .direction-badge.long { background: var(--accent-dim); color: var(--accent); }
@@ -278,10 +278,10 @@ header {
 /* ── Signal State Badges ── */
 .state-badge {
   display: inline-block;
-  padding: 2px 8px;
+  padding: 3px 10px;
   border-radius: 8px;
-  font-size: 10px;
-  font-weight: 600;
+  font-size: 12px;
+  font-weight: 700;
   margin-left: 4px;
 }
 .state-badge.confirmed { background: var(--accent-dim); color: var(--accent); }
@@ -298,11 +298,11 @@ header {
 /* ── Thesis Age Badge (cycle counter) ── */
 .thesis-age-badge {
   display: inline-block;
-  padding: 1px 6px;
+  padding: 2px 8px;
   border-radius: 7px;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
-  margin-left: 4px;
+  margin-left: 6px;
   letter-spacing: 0.3px;
   vertical-align: middle;
 }
@@ -621,9 +621,9 @@ header {
 .verdict-row { margin-bottom: 6px; }
 .verdict-badge {
   display: inline-block;
-  padding: 4px 14px;
+  padding: 5px 16px;
   border-radius: 8px;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 700;
   letter-spacing: 0.5px;
   text-transform: uppercase;
@@ -663,13 +663,13 @@ header {
 }
 
 /* ── Conviction Meter ── */
-.conviction-meter { display: flex; align-items: center; gap: 6px; padding: 3px 0; }
-.conviction-meter .meter-pct { font-size: 12px; font-weight: 700; min-width: 42px; }
+.conviction-meter { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+.conviction-meter .meter-pct { font-size: 14px; font-weight: 700; min-width: 48px; }
 .meter-pct.bronze { color: #8b7355; }
 .meter-pct.silver { color: #a0a0a0; }
 .meter-pct.gold { color: var(--warning); }
 .meter-pct.platinum { color: var(--info); }
-.meter-bar { height: 5px; min-width: 4px; border-radius: 3px; transition: width 0.5s ease; flex: 1; }
+.meter-bar { height: 6px; min-width: 4px; border-radius: 3px; transition: width 0.5s ease; flex: 1; }
 .meter-bar.bronze { background: #8b7355; }
 .meter-bar.silver { background: #a0a0a0; }
 .meter-bar.gold { background: var(--warning); }
@@ -678,9 +678,9 @@ header {
 /* ── Conviction Tier Badge ── */
 .tier-badge {
   display: inline-block;
-  padding: 2px 7px;
+  padding: 3px 9px;
   border-radius: 7px;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
 }
@@ -720,9 +720,9 @@ header {
 /* ── Support/Resistance Row (dedicated card row) ── */
 .row-sr {
   display: flex;
-  gap: 8px;
-  padding: 3px 0;
-  margin: 2px 0;
+  gap: 10px;
+  padding: 5px 0;
+  margin: 3px 0;
   border-top: 1px solid rgba(48, 54, 61, 0.5);
   border-bottom: 1px solid rgba(48, 54, 61, 0.5);
 }
@@ -730,13 +730,13 @@ header {
   flex: 1;
   display: flex;
   align-items: center;
-  gap: 4px;
-  font-size: 10px;
+  gap: 6px;
+  font-size: 12px;
 }
 .sr-col .sr-label {
   color: var(--text-muted);
-  font-weight: 500;
-  font-size: 9px;
+  font-weight: 600;
+  font-size: 11px;
   white-space: nowrap;
 }
 .sr-col .sr-val {
@@ -747,7 +747,7 @@ header {
 .sr-col .sr-val.sr-good { color: var(--accent); }
 .sr-col .sr-val.sr-bad { color: var(--danger); }
 .sr-col .sr-dist {
-  font-size: 8px;
+  font-size: 10px;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
@@ -939,42 +939,42 @@ header {
   gap: 10px;
 }
 
-/* ── Ticker Card (old signal-card style) ── */
+/* ── Ticker Card ── */
 .ticker-cell {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 10px 12px;
+  padding: 16px 18px;
   cursor: pointer;
   transition: all 0.15s ease;
   min-width: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
   flex: 1;
 }
 .ticker-cell:hover { border-color: var(--accent); box-shadow: var(--shadow); transform: translateY(-1px); }
 
 /* ── Card internal rows ── */
 .ticker-cell .tc-verdict-row {
-  margin-bottom: 2px;
+  margin-bottom: 4px;
 }
 .ticker-cell .row4 {
   display: flex;
-  gap: 4px;
-  font-size: 10px;
+  gap: 6px;
+  font-size: 12px;
   align-items: center;
-  padding: 2px 0;
-  margin-top: 1px;
+  padding: 3px 0;
+  margin-top: 2px;
   border-top: 1px dashed rgba(167, 139, 250, 0.3);
 }
 .ticker-cell .row4 .limit-label { color: #a78bfa; font-weight: 600; }
 .ticker-cell .limit-type {
-  font-size: 9px;
+  font-size: 11px;
   color: var(--text-muted);
   background: rgba(167, 139, 250, 0.12);
-  padding: 1px 5px;
+  padding: 2px 7px;
   border-radius: 4px;
   margin-left: 4px;
   white-space: nowrap;
@@ -983,44 +983,44 @@ header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 3px;
-  gap: 4px;
+  margin-bottom: 5px;
+  gap: 6px;
   flex-wrap: nowrap;
 }
 .ticker-cell .row2 {
   display: flex;
-  gap: 8px;
-  font-size: 11px;
+  gap: 12px;
+  font-size: 13px;
   color: var(--text-muted);
-  margin-bottom: 2px;
+  margin-bottom: 3px;
   flex-wrap: wrap;
 }
 .ticker-cell .row3 {
   display: flex;
-  gap: 6px;
-  font-size: 10px;
+  gap: 8px;
+  font-size: 12px;
   color: var(--text-muted);
   flex-wrap: wrap;
 }
 .ticker-cell .tc-bottom {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 10px;
+  gap: 10px;
+  font-size: 11px;
   color: var(--text-muted);
-  margin-top: 2px;
-  padding-top: 3px;
+  margin-top: 3px;
+  padding-top: 5px;
   border-top: 1px solid var(--border);
 }
 
 /* ── Regime badge (on card row1) ── */
 .regime-badge {
   display: inline-block;
-  padding: 1px 6px;
+  padding: 2px 8px;
   border-radius: 4px;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
-  margin-left: 4px;
+  margin-left: 6px;
   letter-spacing: 0.3px;
   background: var(--bg-hover);
   color: var(--text-muted);
@@ -1031,9 +1031,9 @@ header {
 
 /* ── Trend indicator (next to conviction meter) ── */
 .trend-indicator {
-  font-size: 14px;
+  font-size: 18px;
   font-weight: 700;
-  min-width: 16px;
+  min-width: 20px;
   text-align: center;
   color: var(--text-muted);
 }
@@ -1044,11 +1044,11 @@ header {
 /* ── Flip/TP badge on verdict row ── */
 .flip-tp-badge {
   display: inline-block;
-  padding: 1px 6px;
+  padding: 2px 8px;
   border-radius: 6px;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
-  margin-left: 4px;
+  margin-left: 6px;
   vertical-align: middle;
   animation: flipPulse 1.5s ease-in-out infinite;
 }
@@ -1069,11 +1069,11 @@ header {
 /* ── Actionability indicator ── */
 .actionability {
   display: inline-block;
-  padding: 1px 6px;
+  padding: 2px 8px;
   border-radius: 6px;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
-  margin-left: 4px;
+  margin-left: 6px;
   vertical-align: middle;
 }
 .actionability.high { background: var(--accent-dim); color: var(--accent); }

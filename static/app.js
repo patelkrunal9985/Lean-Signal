@@ -520,9 +520,16 @@ function _buildSyntheticSignal(gate) {
   var meta = gate.consensus_meta || {};
   var dir = gate.direction || 'neutral';
   var conf = gate.consensus_confidence || 0;
+  var tier = (meta && meta.consensus_conviction_tier) ? meta.consensus_conviction_tier : 'bronze';
   var verdict = 'NO ACTION';
   if (dir !== 'neutral' && conf > 0) {
-    verdict = (conf > 0.6 ? 'STRONG ' : '') + (dir === 'long' ? 'BUY' : 'SELL');
+    if (tier === 'platinum' || tier === 'gold') {
+      verdict = 'STRONG ' + (dir === 'long' ? 'BUY' : 'SELL');
+    } else if (tier === 'silver') {
+      verdict = dir === 'long' ? 'BUY' : 'SELL';
+    } else {
+      verdict = conf > 0.5 ? (dir === 'long' ? 'BUY' : 'SELL') : 'HOLD';
+    }
   }
   var strategies = (gate.strategy_votes || []).filter(function(v) { return v.confidence > 0; }).map(function(v) {
     return { name: v.name || v.strategy || '?', direction: v.direction || 'neutral', confidence: v.confidence || 0, reasoning: '' };
@@ -550,7 +557,11 @@ function _createTickerCell(ticker) {
 
   cell.innerHTML =
     // Verdict badge (full width, colored)
-    '<div class="tc-verdict-row"><span class="verdict-badge no-action">NO ACTION</span></div>' +
+    '<div class="tc-verdict-row">' +
+      '<span class="verdict-badge no-action">NO ACTION</span>' +
+      '<span class="flip-tp-badge"></span>' +
+      '<span class="actionability low">Act: --</span>' +
+    '</div>' +
     // Row 1: ticker name, instrument badge, state badge (with cycle count), regime badge, direction badge
     '<div class="row1">' +
       '<div>' +
@@ -654,6 +665,15 @@ function _verdictClass(verdict) {
   return 'no-action';
 }
 
+// ── Compute a unified actionability score (0-100) ──
+function _actionability(confidence, tier, aligned, state) {
+  var tierW = {bronze:1, silver:2, gold:3, platinum:4}[tier] || 1;
+  var stateW = {none:0, watching:1, pending:2, active:3, confirmed:4, weakening:2}[state] || 1;
+  var alignW = aligned ? 1.0 : 0.6;
+  var base = (confidence * 100) * (tierW / 4) * (stateW / 4) * alignW;
+  return Math.min(Math.round(base), 100);
+}
+
 // ── Update a single card in-place ──
 function _updateCell(ticker, state, direction, confidence, price, sig, gate, st) {
   var cache = _cellCache[ticker];
@@ -661,7 +681,24 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
   var cell = cache.element;
   if (!cell) return;
 
+  // ── Meta (computed first so regime badge can use it) ──
+  var meta = gate && gate.consensus_meta ? gate.consensus_meta : (sig && sig.consensus_meta ? sig.consensus_meta : null);
+  var tier = (meta && meta.consensus_conviction_tier) ? meta.consensus_conviction_tier : 'bronze';
+  var ns = meta ? meta.consensus_net_score : 0;
+
   cell.className = 'ticker-cell state-' + state;
+
+  // ── Visual heat: glow intensity based on conviction ──
+  var heatLevel = Math.min(Math.floor(confidence / 0.25), 4);
+  cell.style.boxShadow = confidence > 0.5 ? '0 0 ' + (6 + heatLevel * 3) + 'px rgba(0,200,100,' + (0.1 + heatLevel * 0.05) + ')' : '';
+
+  // ── Staleness indicator (if cycle data is old) ──
+  var fresh = _status.last_cycle && _status.last_cycle.timestamp ? dataFreshness(_status.last_cycle.timestamp) : null;
+  if (fresh && fresh.cls === 'stale') {
+    cell.style.opacity = '0.7';
+  } else {
+    cell.style.opacity = '1';
+  }
 
   // ── Verdict badge ──
   var ve = cell.querySelector('.verdict-badge');
@@ -669,6 +706,24 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
   if (ve) {
     ve.textContent = verdict;
     ve.className = 'verdict-badge ' + _verdictClass(verdict);
+  }
+
+  // ── Flip/TP badge area ──
+  var fe = cell.querySelector('.flip-tp-badge');
+  if (fe) {
+    var tp = _stickyTps[ticker];
+    var flip = _stickyFlips[ticker];
+    if (tp) {
+      fe.textContent = '\u26A0 TP';
+      fe.className = 'flip-tp-badge tp-event';
+    } else if (flip) {
+      var label = flip.potential ? '\u21BB WATCH' : '\u21BB FLIP';
+      fe.textContent = label + (flip.from ? ' ' + flip.from.toUpperCase().slice(0,3) + '\u2192' + flip.to.toUpperCase().slice(0,3) : '');
+      fe.className = 'flip-tp-badge ' + (flip.potential ? 'flip-potential' : 'flip-major');
+    } else {
+      fe.textContent = '';
+      fe.className = 'flip-tp-badge';
+    }
   }
 
   // ── Direction badge ──
@@ -679,7 +734,7 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
     de.className = 'direction-badge ' + _getDirClass(dirLabel);
   }
 
-  // ── Regime badge with alignment color ──
+  // ── Regime badge with alignment color (meta now available) ──
   var re = cell.querySelector('.regime-badge');
   if (re) {
     var regime = (sig && sig.regime) || (gate && gate.regime) || (meta && meta.consensus_regime) || '';
@@ -702,19 +757,34 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
   var se = cell.querySelector('.state-badge');
   var stateLabel = state || 'none';
   if (se) {
-    // Compute cycle count: how many cycles since entry
     var cycleAge = '';
     if (st && st.entry_cycle != null && st.current_signal && st.current_signal.cycle_id != null) {
       var age = st.current_signal.cycle_id - st.entry_cycle;
       if (age > 0) cycleAge = ' x' + age;
+    } else if (st && st.total_cycles != null) {
+      cycleAge = ' ' + st.total_cycles + 'cyc';
     }
     se.textContent = stateLabel.toUpperCase() + cycleAge;
     se.className = 'state-badge ' + stateLabel;
   }
 
+  // ── Actionability indicator ──
+  var ae = cell.querySelector('.actionability');
+  if (ae) {
+    var aligned = false;
+    var regime = (sig && sig.regime) || (gate && gate.regime) || (meta && meta.consensus_regime) || '';
+    if (regime && regime !== 'unknown') {
+      var isUptrend = regime.indexOf('uptrend') >= 0;
+      var isDowntrend = regime.indexOf('downtrend') >= 0;
+      var isLong = dirLabel === 'long';
+      aligned = (isLong && isUptrend) || (!isLong && isUptrend) && dirLabel === 'short';
+    }
+    var act = _actionability(confidence, tier, aligned, stateLabel);
+    ae.textContent = 'Act: ' + act;
+    ae.className = 'actionability ' + (act >= 70 ? 'high' : act >= 40 ? 'medium' : 'low');
+  }
+
   // ── Conviction meter ──
-  var meta = gate && gate.consensus_meta ? gate.consensus_meta : (sig && sig.consensus_meta ? sig.consensus_meta : null);
-  var tier = (meta && meta.consensus_conviction_tier) ? meta.consensus_conviction_tier : 'bronze';
   var convPct = confidence * 100;
 
   var te = cell.querySelector('.tier-badge');
@@ -751,7 +821,7 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
     var votes = gate ? gate.strategy_votes : (sig ? (sig.strategy_votes || []) : []);
     var total = votes ? votes.length : 0;
     var active = votes ? votes.filter(function(v) { return v.confidence > 0.3; }).length : 0;
-    var scoreStr = sig ? ((sig.composite_score || 0) * 100).toFixed(1) + '%' : '--';
+    var scoreStr = sig ? ((sig.composite_score || 0) * 100).toFixed(1) + '%' : (meta ? (Math.abs(ns) * 100).toFixed(1) + '%' : '--');
     var confStr = (confidence * 100).toFixed(1) + '%';
     r2.innerHTML =
       '<span>Score: <strong>' + scoreStr + '</strong></span>' +
@@ -763,6 +833,7 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
   var r3 = cell.querySelector('.row3');
   if (r3) {
     var atr = gate ? (gate.atr || 0) : 0;
+    var atrCtx = atr > 0 ? ' ATR $' + atr.toFixed(2) : '';
     if (sig && sig.entry_price && sig.stop_loss && sig.take_profit) {
       var ep = sig.entry_price;
       var sl = sig.stop_loss;
@@ -780,7 +851,8 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
         '<span class="level-label">Entry</span><span class="level-val">$--</span>' +
         '<span class="level-label">SL</span><span class="level-val sl">$--</span>' +
         '<span class="level-label">TP</span><span class="level-val tp">$--</span>' +
-        '<span class="level-label">R:R</span><span class="level-val rr">--</span>';
+        '<span class="level-label">R:R</span><span class="level-val rr">--</span>' +
+        (atrCtx ? '<span class="level-label">ATR</span><span class="level-val">' + atrCtx.trim() + '</span>' : '');
     }
   }
 
@@ -789,16 +861,23 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
   if (bot) {
     var atr = gate ? (gate.atr || 0) : 0;
     var atrStr = atr > 0 ? 'ATR $' + atr.toFixed(2) : '';
-    var ns = meta ? meta.consensus_net_score : 0;
     var nsStr = 'ns: ' + (ns >= 0 ? '+' : '') + ns.toFixed(2);
     var gateStr = 'gate: --';
+    var gateCls = '';
     if (gate) {
-      gateStr = gate.gate_passed ? 'gate: passed' : 'gate: ' + (gate.gate_reason || 'fail').replace(/_/g, ' ').slice(0, 20);
+      if (gate.gate_passed) {
+        gateStr = 'gate: passed';
+        gateCls = 'tc-gate-pass';
+      } else {
+        var reason = (gate.gate_reason || 'fail').replace(/_/g, ' ');
+        gateStr = 'gate: ' + reason.slice(0, 35);
+        gateCls = 'tc-gate-fail';
+      }
     }
     var pxStr = price > 0 ? '$' + price.toFixed(2) : '$--';
     bot.innerHTML =
       (atrStr ? '<span>' + atrStr + '</span>' : '') +
-      '<span class="' + (gate && gate.gate_passed ? 'tc-gate-pass' : '') + '">' + gateStr + '</span>' +
+      '<span class="' + gateCls + '" title="' + (gate && !gate.gate_passed ? (gate.gate_reason || 'fail').replace(/_/g, ' ') : '') + '">' + gateStr + '</span>' +
       '<span class="' + (ns > 0.1 ? 'tc-ns-pos' : ns < -0.1 ? 'tc-ns-neg' : '') + '">' + nsStr + '</span>' +
       '<span style="margin-left:auto;font-variant-numeric:tabular-nums">' + pxStr + '</span>';
   }
@@ -905,6 +984,13 @@ function renderSignals(cycle) {
   var gateEvals = cycle.gate_evaluations || [];
   var gateByTicker = {};
   gateEvals.forEach(function(g) { gateByTicker[g.ticker] = g; });
+
+  // Get flip data for sticky flip/TP badges
+  var flips = cycle.flips || {};
+  var flipsPotential = cycle.flips_potential || {};
+
+  // Update sticky events (flip/TP badges linger for N cycles)
+  _updateStickyEvents(allSigs, flips, flipsPotential);
 
   // Get live prices
   var prices = _livePrices || {};
@@ -1470,7 +1556,7 @@ function showValidatePopup(data) {
   var futureContainer = document.getElementById('validate-signals-future');
   var optionContainer = document.getElementById('validate-signals-option');
 
-  var renderValidateSignals = function(signals, container) {
+    var renderValidateSignals = function(signals, container) {
     if (!container) return;
     if (!signals || signals.length === 0) {
       container.innerHTML = '<div class="empty-state">No signals</div>';
@@ -1479,22 +1565,27 @@ function showValidatePopup(data) {
     container.innerHTML = '';
     signals.forEach(function(s) {
       var card = document.createElement('div');
-      card.className = 'signal-card';
-      var dirClass = s.direction === 'long' ? 'long' : s.direction === 'short' ? 'short' : 'neutral';
+      card.className = 'ticker-cell state-' + (s.state || 'none');
+      var dirCls = s.direction === 'long' ? 'long' : s.direction === 'short' ? 'short' : 'neutral';
+      var vCls = _verdictClass(s.verdict || '');
+      var dirArrow = s.direction === 'long' ? '\u25b2' : s.direction === 'short' ? '\u25bc' : '\u2013';
       card.innerHTML =
+        '<div class="tc-verdict-row"><span class="verdict-badge ' + vCls + '">' + (s.verdict || 'NO ACTION') + '</span></div>' +
         '<div class="row1">' +
-          '<span class="ticker-name">' + s.ticker + '</span>' +
-          '<span class="direction-badge ' + dirClass + '">' + s.direction.toUpperCase() + '</span>' +
+          '<div>' +
+            '<span class="ticker-name">' + s.ticker + '</span>' +
+            '<span class="state-badge ' + (s.state || 'none') + '">' + ((s.state || 'none').toUpperCase()) + '</span>' +
+          '</div>' +
+          '<span class="direction-badge ' + dirCls + '">' + dirArrow + ' ' + s.direction.toUpperCase() + '</span>' +
         '</div>' +
         '<div class="row2">' +
-          '<span>Confidence: <strong>' + (s.confidence * 100).toFixed(1) + '%</strong></span>' +
+          '<span>Conf: <strong>' + (s.confidence * 100).toFixed(1) + '%</strong></span>' +
           '<span>Score: <strong>' + (s.composite_score ? (s.composite_score * 100).toFixed(1) : '--') + '%</strong></span>' +
-          '<span>Strategies: <strong>' + (s.agreeing_count || 0) + '/' + (s.strategy_count || 0) + '</strong></span>' +
-          '<span>Regime: <strong>' + (s.regime || '?') + '</strong></span>' +
+          '<span>Strats: <strong>' + (s.agreeing_count || 0) + '/' + (s.strategy_count || 0) + '</strong></span>' +
         '</div>' +
-        '<div class="row3" style="color:var(--text-muted)">' +
-          '<span>Gate: ' + (s.gate_passed ? '✅' : '❌ ' + (s.gate_reason || '')) + '</span>' +
-          '<span>Price: $' + (s.current_price || 0).toFixed(2) + '</span>' +
+        '<div class="tc-bottom">' +
+          '<span>' + (s.gate_passed ? '\u2705 passed' : '\u274C ' + (s.gate_reason || 'fail').replace(/_/g, ' ').slice(0, 25)) + '</span>' +
+          '<span style="margin-left:auto">$' + (s.current_price || 0).toFixed(2) + '</span>' +
         '</div>';
       container.appendChild(card);
     });

@@ -30,8 +30,8 @@ logger = get_logger("engine.runner")
 DATA_DIR = Path(__file__).parent.parent / "data"
 CYCLE_HISTORY_FILE = DATA_DIR / "cycle_history.json"
 
-MAX_HISTORY = 50      # max cycles kept on disk
-HISTORY_SERVE_MAX = 30  # max cycles served to browser (prevents 35MB JSON freeze)
+MAX_HISTORY = 40      # max cycles kept on disk (older auto-deleted on save)
+HISTORY_SERVE_MAX = 40  # max cycles served to browser
 
 _cycle_in_progress = False
 _cycle_count = 0

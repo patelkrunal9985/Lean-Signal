@@ -133,15 +133,23 @@ def evaluate_tickers(
         sma_50 = data.get("indicators", {}).get("sma_50", 0)
         dte_val = data.get("dte", None)
 
-        # ── Previous cycle price for velocity-based counter-trend override ──
+        # ── Previous cycle price: use raw ohlcv for freshness, fallback to cached state ──
         _prev_price = 0.0
         try:
-            from engine.signal_persistence import get_ticker_state
-            _st = get_ticker_state(ticker)
-            _prev_snap = _st.get("current_signal") or {}
-            _prev_price = float(_prev_snap.get("price", 0) or 0)
+            _ohlcv = data.get("ohlcv", [])
+            if len(_ohlcv) >= 2:
+                _prev_bar = _ohlcv[-2]
+                _prev_price = float(_prev_bar.get("close", 0) or 0)
         except Exception:
             pass
+        if _prev_price <= 0:
+            try:
+                from engine.signal_persistence import get_ticker_state
+                _st = get_ticker_state(ticker)
+                _prev_snap = _st.get("current_signal") or {}
+                _prev_price = float(_prev_snap.get("price", 0) or 0)
+            except Exception:
+                pass
 
         direction, conf, consensus_meta = compute_consensus(
             v2_results, v3_results_raw,
@@ -154,6 +162,19 @@ def evaluate_tickers(
 
         all_strategy_votes = v2_results + v3_results_raw
         set_priority(ticker, instr_type, int(conf * 100))
+
+        # ── Level confluence boost: compute here with full data, store in consensus_meta ──
+        if direction != "neutral":
+            try:
+                from engine.level_engine import aggregate_key_levels, compute_level_confluence_boost
+                _kl = aggregate_key_levels(ticker, data, data.get("current_price", 0), direction, instr_type)
+                _lb, _ll = compute_level_confluence_boost(direction, data.get("current_price", 0), _kl)
+                consensus_meta["aggregated_level_boost"] = _lb
+                consensus_meta["aggregated_level_label"] = _ll
+                if _lb != 1.0:
+                    conf = min(conf * _lb, 0.95)
+            except Exception:
+                pass
 
         # ── Record strategy predictions for outcome-based EWMA evaluation ──
         # Predictions are evaluated in the NEXT cycle's evaluate_pending_predictions()
@@ -245,6 +266,18 @@ def evaluate_tickers(
                 "consensus_tod_window": consensus_meta.get("consensus_tod_window", "—"),
                 "consensus_action": consensus_meta.get("consensus_action", "—"),
                 "consensus_families": consensus_meta.get("consensus_families", {}),
+                "consensus_level_boost": consensus_meta.get("consensus_level_boost", 1.0),
+                "consensus_level_label": consensus_meta.get("consensus_level_label", "n/a"),
+                "consensus_vp_boost": consensus_meta.get("consensus_vp_boost", 1.0),
+                "consensus_vp_label": consensus_meta.get("consensus_vp_label", "n/a"),
+                "consensus_dampening": consensus_meta.get("consensus_dampening", None),
+                "consensus_quality_blocked": consensus_meta.get("consensus_quality_blocked", False),
+                "consensus_quality_reason": consensus_meta.get("consensus_quality_reason", None),
+                "consensus_conviction_tier": consensus_meta.get("consensus_conviction_tier", "bronze"),
+                "consensus_regime": consensus_meta.get("consensus_regime", "unknown"),
+                "consensus_family_count": consensus_meta.get("consensus_family_count", 0),
+                "consensus_dominant_share": consensus_meta.get("consensus_dominant_share", 0),
+                "consensus_diversity_penalty": consensus_meta.get("consensus_diversity_penalty", 1.0),
             },
         }
         gate_evaluations.append(gate_eval_entry)
@@ -260,33 +293,32 @@ def evaluate_tickers(
             except Exception:
                 logger.debug("Entry/exit levels failed for %s: %s", ticker, traceback.format_exc())
 
-        # ── Late-entry protection: if price has already moved most of the way to SL/TP, penalize ──
-        # This prevents entering when the trade is half-completed.
-        # Check: if distance-to-TP < 50% of distance-to-SL, the good move has already happened.
-        if levels and direction != "neutral":
-            ep = levels.get("entry_price", 0)
-            sl = levels.get("stop_loss", 0)
-            tp = levels.get("take_profit", 0)
-            if ep > 0 and sl > 0 and tp > 0 and abs(ep - sl) > 0.01:
-                dist_to_sl = abs(ep - sl)
-                dist_to_tp = abs(tp - ep)
-                # Check if most of the move has already happened (price near TP already)
-                current = data.get("current_price", 0)
-                if current > 0:
-                    remaining_to_tp = abs(tp - current)
-                    pct_complete = 1.0 - (remaining_to_tp / max(dist_to_tp, 0.001))
-                    if pct_complete > 0.50:
-                        # Signal is >50% completed — penalize confidence heavily
+        # ── Late-entry protection: check against key S/R levels, not SL/TP ──
+        # If price has already moved past the nearest S/R in the signal direction,
+        # the trade is too late — half the move has already happened.
+        if direction != "neutral":
+            current = data.get("current_price", 0)
+            ns = levels.get("nearest_support", 0)
+            nr = levels.get("nearest_resistance", 0)
+            if current > 0:
+                if direction == "long" and nr > 0:
+                    rem_pct = (nr - current) / max(abs(nr - current) + abs(current - ns) if ns > 0 else nr, 0.001)
+                    if rem_pct < 0.40:
                         logger.info(
-                            "%s: late entry — %.0f%% of move already complete (SL=%.2f, entry=%.2f, current=%.2f, TP=%.2f). Penalizing.",
-                            ticker, pct_complete * 100, sl, ep, current, tp,
+                            "%s: late entry long — only %.0f%% room to resistance (S=%.2f, cur=%.2f, R=%.2f). Blocking.",
+                            ticker, rem_pct * 100, ns, current, nr,
                         )
-                        conf *= (1.0 - pct_complete * 0.8)  # Aggressive decay
-                        # Add warning to gate result
-                        if levels.get("proximity_warning"):
-                            levels["proximity_warning"] = f"late_entry_{pct_complete:.0%}complete_" + levels["proximity_warning"]
-                        else:
-                            levels["proximity_warning"] = f"late_entry_{pct_complete:.0%}complete"
+                        conf *= 0.40
+                        levels["proximity_warning"] = f"late_entry_{rem_pct:.0%}_to_resistance"
+                elif direction == "short" and ns > 0:
+                    rem_pct = (current - ns) / max(abs(current - ns) + abs(nr - current) if nr > 0 else current, 0.001)
+                    if rem_pct < 0.40:
+                        logger.info(
+                            "%s: late entry short — only %.0f%% room to support (R=%.2f, cur=%.2f, S=%.2f). Blocking.",
+                            ticker, rem_pct * 100, nr, current, ns,
+                        )
+                        conf *= 0.40
+                        levels["proximity_warning"] = f"late_entry_{rem_pct:.0%}_to_support"
 
         # ── Strike selection (options only) ──
         strike_rec: dict = {}

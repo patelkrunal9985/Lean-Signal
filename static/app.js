@@ -640,7 +640,7 @@ function _createTickerCell(ticker) {
     '</div>' +
     // Grid area: stats (score, conf, strats)
     '<div class="grid-stats">' +
-      '<span>Score: <strong>--</strong></span>' +
+      '<span>Ns: <strong>--</strong></span>' +
       '<span>Conf: <strong>--</strong></span>' +
       '<span>Strats: <strong>0/0</strong></span>' +
     '</div>' +
@@ -968,7 +968,7 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
     var scoreStr = sig ? (Math.abs(ns) * 100).toFixed(1) + '%' : (meta ? (Math.abs(ns) * 100).toFixed(1) + '%' : (cachedSig ? (Math.abs((cachedSig.consensus_meta||{}).consensus_net_score||0) * 100).toFixed(1) + '%' : '--'));
     var confStr = (confidence * 100).toFixed(1) + '%';
     r2.innerHTML =
-      '<span>Score: <strong>' + scoreStr + '</strong></span>' +
+      '<span>Ns: <strong>' + scoreStr + '</strong></span>' +
       '<span>Conf: <strong>' + confStr + '</strong></span>' +
       '<span>Strats: <strong>' + active + '/' + total + '</strong></span>';
   }
@@ -1776,7 +1776,7 @@ function showValidatePopup(data) {
         '</div>' +
         '<div class="row2">' +
           '<span>Conf: <strong>' + (s.confidence * 100).toFixed(1) + '%</strong></span>' +
-          '<span>Score: <strong>' + (s.composite_score ? (s.composite_score * 100).toFixed(1) : '--') + '%</strong></span>' +
+          '<span>Ns: <strong>' + (s.composite_score ? (s.composite_score * 100).toFixed(1) : '--') + '%</strong></span>' +
           '<span>Strats: <strong>' + (s.agreeing_count || 0) + '/' + (s.strategy_count || 0) + '</strong></span>' +
         '</div>' +
         '<div class="tc-bottom">' +

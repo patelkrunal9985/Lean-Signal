@@ -37,13 +37,15 @@ _account_lock = threading.Lock()
 _account_daily_pnl: float = 0.0
 _account_starting_equity: float = 0.0
 _account_date: Optional[date] = None
+_consecutive_losses: int = 0
 
 
 def reset_daily_pnl():
-    """Reset daily P&L tracking at market open."""
-    global _account_daily_pnl, _account_date
+    """Reset daily P&L and loss streak tracking at market open."""
+    global _account_daily_pnl, _account_date, _consecutive_losses
     _account_date = date.today()
     _account_daily_pnl = 0.0
+    _consecutive_losses = 0
 
 
 def fetch_account_summary() -> dict:
@@ -95,6 +97,10 @@ def fetch_account_summary() -> dict:
                 # Daily P&L = change in equity from session start
                 if _account_starting_equity > 0:
                     _account_daily_pnl = equity - _account_starting_equity
+                    if _account_daily_pnl < 0 and abs(_account_daily_pnl) > abs(equity * 0.005):
+                        _consecutive_losses += 1
+                    elif _account_daily_pnl >= 0:
+                        _consecutive_losses = 0
 
                 result = {
                     "total_cash_value": total_cash,
@@ -249,6 +255,10 @@ def check_signal_blockers(
     """
     if not account:
         return False, "no_account_data"
+
+    # Rule 0: Consecutive losing cycles detection
+    if _consecutive_losses >= 3:
+        return True, f"consecutive_losses_{_consecutive_losses}"
 
     # Rule 1: Daily loss limit
     if account.get("daily_loss_limit_hit", False):

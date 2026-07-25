@@ -242,16 +242,9 @@ def can_enter_new_trade(
     """
     window = get_time_window()
 
-    # Block in closing_pin for 0DTE (configurable via settings)
-    # Quality-focused traders keep this ON; scalpers may turn it OFF.
-    if dte == 0:
-        try:
-            from utils.settings_manager import get as get_setting
-            block_closing = get_setting("block_entries_in_closing_pin", True)
-        except Exception:
-            block_closing = True
-        if block_closing and window == "closing_pin":
-            return False, "blocked_closing_pin_0dte"
+    # Quality gate: always block 0DTE entries in closing_pin
+    if dte == 0 and window == "closing_pin":
+        return False, "blocked_closing_pin_0dte"
 
     # Cash-session instruments: block within N minutes of close.
     # Globex futures (ES/NQ/RTY/YM/CL/GC/VX + micros) trade 24/5 → skip.

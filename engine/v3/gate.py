@@ -73,10 +73,10 @@ CONVICTION_GATE = {
 # Layer 4: Platinum Gate — 95% target filters
 # ═══════════════════════════════════════════════════════════════
 PLATINUM_GATE = {
-    "gate_require_platinum_tier": False,
-    "gate_require_mtf_alignment": False,
-    "gate_require_regime_alignment": False,
-    "gate_block_counter_trend": False,
+    "gate_require_platinum_tier": True,
+    "gate_require_mtf_alignment": True,
+    "gate_require_regime_alignment": True,
+    "gate_block_counter_trend": True,
 }
 
 # Macro economic calendar — high-impact events to avoid
@@ -126,7 +126,11 @@ def _is_macro_event_window(ticker: str, ticker_data: dict) -> tuple[bool, str]:
         headline = (item.get("headline", "") or "").lower()
         for event_type, keywords in MACRO_EVENTS.items():
             if any(kw in headline for kw in keywords):
-                # Could add timestamp parsing here to check if event is within 30 min
+                item_time = item.get("timestamp", 0) or item.get("time", 0)
+                if item_time and isinstance(item_time, (int, float)) and item_time > 0:
+                    age_seconds = (datetime.utcnow().timestamp() - item_time)
+                    if age_seconds > 1800:
+                        continue
                 return True, f"macro_event_{event_type}"
     return False, ""
 
@@ -163,11 +167,8 @@ def _check_correlation_conflict(ticker: str, signal_dir: str, ticker_data: dict)
                 opposite_count += 1
                 conflict_tickers.append(f"{ct}={ct_dir}")
 
-    if opposite_count >= 2:
-        return True, f"correlation_conflict_{opposite_count}_opposing_{','.join(conflict_tickers)}"
     if opposite_count >= 1:
-        # Single conflict: reduce confidence via correlation_info, don't block
-        return False, f"correlation_warning_{conflict_tickers[0]}"
+        return True, f"correlation_conflict_{opposite_count}_opposing_{','.join(conflict_tickers)}"
 
     return False, ""
 
@@ -239,8 +240,11 @@ def _check_news_sentiment(ticker_data: dict) -> tuple[bool, str]:
         return True, ""
     
     avg_sentiment = sentiment_score / count
-    # Strong negative news = potential short, strong positive = potential long
-    # This is a soft filter - just logging for now
+    # Soft block: strong sentiment opposing signal direction
+    if avg_sentiment > 0.6:
+        return False, f"news_overwhelmingly_bullish_{avg_sentiment:.2f}"
+    if avg_sentiment < -0.6:
+        return False, f"news_overwhelmingly_bearish_{avg_sentiment:.2f}"
     return True, f"news_sentiment_{avg_sentiment:.2f}"
 
 
@@ -383,10 +387,7 @@ class SignalQualityGate:
         # ── Correlation conflict check (futures: ES vs NQ, etc.) ──
         corr_blocked, corr_reason = _check_correlation_conflict(ticker, alignment["direction"], ticker_data)
         if corr_blocked:
-            confidence_mult *= 0.70  # Reduce confidence but don't block
-        # Surface single-conflict warnings: apply confidence discount for 1 opposing signal
-        if corr_reason and not corr_blocked and corr_reason.startswith("correlation_warning"):
-            confidence_mult *= 0.85  # Mild discount for single opposing signal
+            confidence_mult *= 0.50  # Stronger penalty for any correlation conflict
         # Store correlation info for transparency
         correlation_info = corr_reason if corr_reason else "none"
 

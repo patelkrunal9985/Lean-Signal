@@ -506,7 +506,7 @@ def compute_consensus(
         v2_w = V2_STRATEGY_WEIGHT.get(sname, 0.05)
         w *= v2_w
         if instr_type == "future":
-            w *= 0.5
+            w *= 0.75
         tod_mult = get_strategy_time_weight(sname)
         tod_weights[sname] = tod_mult
         w *= tod_mult
@@ -762,12 +762,10 @@ def compute_consensus(
     meta["consensus_vp_boost"] = round(vp_boost, 4)
     meta["consensus_vp_label"] = vp_label
 
-    # ── Level confluence boost (Fibonacci, prior HL, gamma, SMA, VP) ──
-    # Multiple key levels aligning with the signal direction increase conviction.
-    # Signals entering too close to a counter-directional level get penalized.
-    level_boost, level_label = _compute_level_confluence_boost(
-        ticker, current_price, direction, instr_type,
-    )
+    # ── Level confluence boost (PRECOMPUTED: computed in strategy_eval.py where full data exists) ──
+    # If not precomputed, default to 1.0 (no boost/penalty).
+    level_boost = meta.get("aggregated_level_boost", 1.0)
+    level_label = meta.get("aggregated_level_label", "no_data")
     if level_boost != 1.0:
         confidence = min(confidence * level_boost, 0.95)
     meta["consensus_level_boost"] = round(level_boost, 4)
@@ -854,8 +852,10 @@ def _compute_volume_profile_confluence(
     - 0.90 = outside value area (thin zone, less reliable)
     - 1.00 = no profile data available
     """
-    if instr_type != "future" or current_price <= 0:
+    if current_price <= 0:
         return 1.0, "n/a"
+    if instr_type not in ("future", "stock", "option"):
+        return 1.0, "unsupported_type"
 
     # Use the actual volume profile data passed from runner
     vp = volume_profile or {}
@@ -889,41 +889,19 @@ def _compute_volume_profile_confluence(
 
 
 # ── Level Confluence Boost (Phase 1: Fibonacci + Key Levels) ──
-# Full level analysis (Fibonacci, gamma, VP, SMA) is computed in
-# engine/entry_exit.py where the complete data dict is available.
-# The consensus coordinator only has current_price + direction, so
-# it performs a simplified proximity check to avoid being dead code.
+# Computed in strategy_eval.py where full OHLCV data exists.
+# The consensus coordinator reads the precomputed boost from meta.
+# This stub exists for backward compatibility.
 
 
 def _compute_level_confluence_boost(
     ticker: str, current_price: float, direction: str, instr_type: str,
 ) -> tuple[float, str]:
-    """Level awareness check for consensus scoring.
-
-    Uses the level engine to get support/resistance levels and applies
-    a confidence boost if the signal aligns with key levels:
-      - LONG signal with support below → +5-15%
-      - SHORT signal with resistance above → +5-15%
-      - LONG at resistance → -10-20% penalty
-      - SHORT at support → -10-20% penalty
-
-    Returns (multiplier, label).
-    """
+    """Level awareness check — DEPRECATED. Use level_engine.compute_level_confluence_boost instead.
+    Strategy_eval.py precomputes the boost and stores it in consensus_meta."""
     if current_price <= 0 or direction not in ("long", "short"):
         return 1.0, "no_data"
-    
-    boost = 1.0
-    reasons = []
-    
-    # Get level data from the cached key_levels if available,
-    # or compute on-demand (called from strategy_eval where full data exists)
-    try:
-        from engine.level_engine import aggregate_key_levels
-        # We need a data dict — this is called from strategy_eval which has it
-        # or from consensus_coordinator which doesn't. If no data, skip.
-        return 1.0, "no_ticker_data"
-    except Exception:
-        return 1.0, "level_engine_error"
+    return 1.0, "precomputed_in_strategy_eval"
 
 
 def _build_reasons(

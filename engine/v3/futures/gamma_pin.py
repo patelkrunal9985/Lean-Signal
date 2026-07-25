@@ -32,7 +32,7 @@ class GammaPin(BaseV3Strategy):
         flip_is_below = distance > 0
         flip_is_above = distance < 0
         if distance_pct < 0.01 and distance_atr > 0:
-            pin_strength = min(1.0 - (distance_pct / 0.01), 1.0)
+            pin_strength = max(0, min(1.0 - (distance_pct / 0.01), 1.0))
             if total_net_gex < 0 and flip_is_below:
                 short_conf = pin_strength * 0.50
             elif total_net_gex > 0 and flip_is_above:

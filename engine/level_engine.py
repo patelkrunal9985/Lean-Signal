@@ -79,7 +79,7 @@ def _find_recent_swing(ohlcv: list) -> tuple[float, float, str]:
     lookback = min(len(ohlcv), 20)
     recent = ohlcv[-lookback:]
 
-    # Extract highs and lows
+    # Extract highs and lows (zip to ensure equal lengths)
     highs = []
     lows = []
     closes = []
@@ -88,11 +88,9 @@ def _find_recent_swing(ohlcv: list) -> tuple[float, float, str]:
             h = bar.get("high", 0) or 0
             l = bar.get("low", 0) or 0
             c = bar.get("close", 0) or 0
-            if h > 0:
+            if h > 0 and l > 0:
                 highs.append(h)
-            if l > 0:
                 lows.append(l)
-            if c > 0:
                 closes.append(c)
 
     if len(highs) < 5 or len(lows) < 5:
@@ -151,9 +149,8 @@ def _find_extended_swing(ohlcv: list) -> tuple[float, float]:
         if isinstance(bar, dict):
             h = bar.get("high", 0) or 0
             l = bar.get("low", 0) or 0
-            if h > 0:
+            if h > 0 and l > 0:
                 highs.append(h)
-            if l > 0:
                 lows.append(l)
 
     return max(highs) if highs else 0.0, min(lows) if lows else 0.0

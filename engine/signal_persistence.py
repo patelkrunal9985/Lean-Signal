@@ -484,7 +484,7 @@ def _compute_conviction(
         # ── Active thesis: validate using edge, time, regime, PnL, velocity ──
         entry_strategies = _thesis_strategies.get(ticker, [])
         curr_votes = strategy_votes or []
-        entry_dir = _entry_direction.get(ticker, _active_direction.get(ticker, "long"))
+        entry_dir = _entry_direction.get(ticker) or _active_direction.get(ticker)
         elapsed = max(cycle_id - _entry_cycle.get(ticker, cycle_id), 0)
 
         # Edge remaining
@@ -529,7 +529,7 @@ def _compute_conviction(
         maturity = min((elapsed + 2) / 4.0, 1.0)
         horizon = max(_get_thesis_horizon(), 1)
         time_factor = max(0.3, 1.0 - (elapsed / horizon))
-        entry_reg = _entry_regime.get(ticker, "")
+        entry_reg = _entry_regime.get(ticker)
         regime_factor = _get_regime_invalidation_factor() if (entry_reg and regime and entry_reg != regime) else 1.0
 
         pnl_factor = 0.5
@@ -1582,6 +1582,7 @@ def reset():
         _entry_cycle.clear()
         _entry_regime.clear()
         _entry_direction.clear()
+        _direction_cycles.clear()
 
 
 def remove_ticker(ticker: str):
@@ -1603,6 +1604,7 @@ def remove_ticker(ticker: str):
         _entry_cycle.pop(ticker, None)
         _entry_regime.pop(ticker, None)
         _entry_direction.pop(ticker, None)
+        _direction_cycles.pop(ticker, None)
 
 
 # ── Restore state from disk on import ──

@@ -285,7 +285,7 @@ def init():
     _cycle_history.clear()
     _save_history()
 
-    # ── Clear stale signal persistence ──
+    # ── Clear stale signal persistence (disk + in-memory) ──
     try:
         state_file = DATA_DIR / "signal_state.json"
         if state_file.exists():
@@ -293,6 +293,9 @@ def init():
             logger.info("Cleared stale signal_state.json")
     except Exception as e:
         logger.debug("Could not clear signal_state.json: %s", e)
+    from engine.signal_persistence import reset as _reset_signal_persistence
+    _reset_signal_persistence()
+    logger.info("Cleared in-memory signal persistence state")
 
     from engine.ibkr_data_feed import clear_live_prices, get_streamer, IBKRStreamer
     from utils.config import IBKR_HOST, IBKR_PORT, IBKR_CLIENT_ID

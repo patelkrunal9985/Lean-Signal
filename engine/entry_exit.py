@@ -298,6 +298,8 @@ def compute_futures_levels(ticker: str, data: dict, direction: str,
                 tp_method_used = "level_first_support"
         # Recompute R:R with level-adjusted SL/TP
         rr = _clamp_rr(abs(tp - entry) / max(abs(sl - entry), 0.01))
+    except (SystemExit, KeyboardInterrupt):
+        raise
     except Exception as e:
         logger.debug("Level engine unavailable for %s: %s", ticker, e)
 
@@ -460,6 +462,8 @@ def compute_stock_levels(ticker: str, data: dict, direction: str,
                     tp_method_used = "level_first_support"
         # Recompute R:R with level-adjusted SL/TP
         rr = _clamp_rr(abs(tp - entry) / max(abs(sl - entry), 0.01))
+    except (SystemExit, KeyboardInterrupt):
+        raise
     except Exception as e:
         logger.debug("Level engine unavailable for %s: %s", ticker, e)
 
@@ -642,6 +646,8 @@ def compute_option_levels(ticker: str, data: dict, direction: str,
                 sl_method_used = "level_resistance"
         # Recompute R:R with level-adjusted SL
         rr = _clamp_rr(abs(tp - entry) / max(abs(sl - entry), 0.01))
+    except (SystemExit, KeyboardInterrupt):
+        raise
     except Exception as e:
         logger.debug("Level engine unavailable for %s: %s", ticker, e)
 

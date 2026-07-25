@@ -423,29 +423,40 @@ class V2StrategyRegistry:
 
     def run_all(self, context: dict) -> list[dict]:
         results = []
-        for name, cls, entry in self._strategies:
-            try:
-                strategy = cls()
-                import asyncio
-                result = asyncio.run(strategy.execute(context))
-                if isinstance(result, dict):
-                    direction = result.get("direction", "neutral")
-                    confidence = result.get("confidence", 0)
-                    reasons = result.get("reasons", [])
-                    if isinstance(reasons, list):
-                        reasoning = "; ".join(str(r) for r in reasons[:3])
-                    else:
-                        reasoning = str(reasons) if reasons else ""
-                    results.append({
-                        "name": name,
-                        "direction": direction if direction in ("long", "short") else "neutral",
-                        "confidence": float(confidence) if isinstance(confidence, (int, float)) else 0,
-                        "source": "v2",
-                        "reasoning": reasoning,
-                    })
-            except Exception as e:
-                logger.debug(
-                    "V2 strategy %s failed on %s: %s",
-                    name, context.get("ticker", "?"), e,
-                )
+        import asyncio
+        try:
+            _loop = asyncio.get_running_loop()
+            _created_loop = False
+        except RuntimeError:
+            _loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(_loop)
+            _created_loop = True
+        try:
+            for name, cls, entry in self._strategies:
+                try:
+                    strategy = cls()
+                    result = _loop.run_until_complete(strategy.execute(context))
+                    if isinstance(result, dict):
+                        direction = result.get("direction", "neutral")
+                        confidence = result.get("confidence", 0)
+                        reasons = result.get("reasons", [])
+                        if isinstance(reasons, list):
+                            reasoning = "; ".join(str(r) for r in reasons[:3])
+                        else:
+                            reasoning = str(reasons) if reasons else ""
+                        results.append({
+                            "name": name,
+                            "direction": direction if direction in ("long", "short") else "neutral",
+                            "confidence": float(confidence) if isinstance(confidence, (int, float)) else 0,
+                            "source": "v2",
+                            "reasoning": reasoning,
+                        })
+                except Exception as e:
+                    logger.debug(
+                        "V2 strategy %s failed on %s: %s",
+                        name, context.get("ticker", "?"), e,
+                    )
+        finally:
+            if _created_loop:
+                _loop.close()
         return results

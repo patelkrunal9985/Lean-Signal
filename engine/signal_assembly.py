@@ -422,18 +422,23 @@ def assemble_cycle_result(
             # ── Compute entry/exit levels for persistent slot using ATR from current cycle ──
             # This ensures the card shows Entry, SL, TP, R:R even when the ticker
             # doesn't generate a fresh signal this cycle (gap fix).
-            # ATR multipliers match entry_exit.py per instrument type.
+            # ATR multipliers imported from entry_exit.py to avoid divergence.
+            from engine.entry_exit import (
+                STOCK_SL_ATR_MULT, STOCK_TP_ATR_MULT,
+                FUTURE_SL_ATR_MULT, FUTURE_TP_ATR_MULT,
+                OPTION_SL_ATR_MULT, OPTION_TP_ATR_MULT,
+            )
             slot_entry_px = ts.get("state_entry_price", 0)
             slot_atr = gate_eval.get("atr", 0)
             slot_sl = 0.0
             slot_tp = 0.0
             slot_rr = 0.0
             if instr_type == "stock":
-                sl_mult, tp_mult = 1.0, 1.5
+                sl_mult, tp_mult = STOCK_SL_ATR_MULT, STOCK_TP_ATR_MULT
             elif instr_type == "option":
-                sl_mult, tp_mult = 0.5, 1.0
+                sl_mult, tp_mult = OPTION_SL_ATR_MULT, OPTION_TP_ATR_MULT
             else:  # future (default)
-                sl_mult, tp_mult = 0.75, 1.5
+                sl_mult, tp_mult = FUTURE_SL_ATR_MULT, FUTURE_TP_ATR_MULT
             if slot_atr > 0 and slot_entry_px > 0 and direction in ("long", "short"):
                 if direction == "long":
                     slot_sl = slot_entry_px - slot_atr * sl_mult

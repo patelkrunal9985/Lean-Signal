@@ -646,6 +646,10 @@ function _createTickerCell(ticker) {
       '<span>Conf: <strong>--</strong></span>' +
       '<span>Strats: <strong>0/0</strong></span>' +
     '</div>' +
+    // Grid area: live price (dedicated row above levels)
+    '<div class="grid-price">' +
+      '<span class="level-pair"><span class="level-label">Price</span><span class="level-val price">$--</span></span>' +
+    '</div>' +
     // Grid area: levels (entry, SL, TP, R:R + ATR) — each pair in a fixed container
     '<div class="grid-levels">' +
       '<span class="level-pair"><span class="level-label">Entry</span><span class="level-val">$--</span></span>' +
@@ -973,6 +977,13 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
       '<span>Ns: <strong>' + scoreStr + '</strong></span>' +
       '<span>Conf: <strong>' + confStr + '</strong></span>' +
       '<span>Strats: <strong>' + active + '/' + total + '</strong></span>';
+  }
+
+  // ── Price row (dedicated row above levels) ──
+  var priceRow = cell.querySelector('.grid-price');
+  if (priceRow) {
+    var pxStr = price > 0 ? '$' + price.toFixed(2) : (effectiveSig && effectiveSig.current_price > 0 ? '$' + effectiveSig.current_price.toFixed(2) : (effectiveGate && effectiveGate.current_price > 0 ? '$' + effectiveGate.current_price.toFixed(2) : '$--'));
+    priceRow.innerHTML = '<span class="level-pair"><span class="level-label">Price</span><span class="level-val price">' + pxStr + '</span></span>';
   }
 
   // ── Row 3: Entry, SL, TP, R:R, ATR — render each field independently (handles 0/null gracefully) ──

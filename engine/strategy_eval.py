@@ -118,7 +118,7 @@ def evaluate_tickers(
                             "diagnostics": diagnostics,
                         })
             except Exception:
-                logger.debug(
+                logger.warning(
                     "V3 strategy %s failed on %s: %s",
                     strategy.name, ticker, traceback.format_exc(),
                 )

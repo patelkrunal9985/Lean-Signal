@@ -26,7 +26,38 @@ For ANY development work (code changes, new features, refactors, bug fixes, etc.
 
 The default mode is analyze and plan — never implement without permission.
 
-# Session Summary (July 22, 2026)
+# Session Summary (July 24, 2026)
+
+## Round 3 — Quality & Safety Fixes (11 changes across 10 files)
+
+### Bug Fixes (4)
+- **ibkr_data_feed.py**: Bid/ask zero-overwrite guard (only update when >0); deterministic client ID offset via `random.Random(self.client_id).randint(0,31)` — prevents stale zero bid/ask overwriting real data.
+- **entry_exit.py**: Removed absolute $0.10 stop floor for futures — uses purely relative `entry * FUTURE_SL_FLOOR_PCT`, avoids phantom $0.10 stops on low-priced instruments.
+- **signal_persistence.py**: Autosave preserves all `MAX_MEMORY=10` snapshots (was `[-3:]`), fixing data loss on the 11th cycle.
+- **strategy_eval.py**: V3 strategy failures logged at WARNING (was DEBUG), so operational issues are visible in production logs.
+
+### Technical Debt (3)
+- **regime/detector.py**: Removed dead `REGIME_MULTIPLIERS` dict and `risk_multiplier` from output — unused since v3 migration.
+- **utils/settings_manager.py**: Removed 24 orphaned keys (old cycle-counting state machine: `neutral_cooldown_active`, `neutral_cooldown_confirmed`, `neutral_cooldown_max`, `sticky_counter_cycles`, etc.).
+- **templates/dashboard.html**: JS cache buster v14→v16.
+
+### Architecture (2)
+- **engine/v3/base.py**: Added `WEIGHT_BY_FAMILY` map — differentiates strategy weight per family (options_micro=0.08, flow/mtf=0.06, volume=0.05, technical=0.04, macro=0.03).
+- **engine/v3/registry.py**: Applies `s.default_weight = WEIGHT_BY_FAMILY.get(s.family, 0.05)` during strategy initialization, giving stronger families more influence in consensus.
+
+### Test Fixes (1)
+- **test_strategies.py**: Updated 3 SettingsManager tests (defaults, set_many, get_all, reset) to use existing keys after orphaned key removal.
+
+### Infrastructure (1)
+- Fixed terminal scroll freezing (PowerShell buffer overflow) — screen cleared, scrollback flushed, profile created.
+
+## Cumulative Summary (Rounds 1-3)
+- **37 changes across 16 files**: 26 Round 1+2 fixes + 11 Round 3 fixes
+- **224 tests all passing** (188 main + 36 integration)
+- **All 34 unaddressed deep-audit items resolved**: 4 signal-quality fixes, 30 code-hygiene items
+- Key patterns: shared event loop (19,200→~200 loops/day), dead code removal, orphaned key cleanup, relative pricing, data-feed guards, weight differentiation
+
+## Session Summary (July 22, 2026)
 
 ## Building Phase Fix — Signal Generation Unblocked
 - **Root cause**: `base = net_mag * 0.8 * building_factor` created a hard ceiling at `net_score * 0.8`. Net_scores ≤0.30 maxed out at 0.24 → stuck in "watching" forever. Thesis entry required `≥0.3125` to ever reach "pending". Tickers with common market net_scores (0.15–0.30) never generated signals.

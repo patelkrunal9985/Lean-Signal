@@ -15,6 +15,20 @@ STRATEGY_FAMILIES = {
     "mtf": "multi-timeframe alignment, session structure",
 }
 
+# Strategy weight multipliers by family.
+# Higher-weight families have proven reliability data axes.
+# Lower-weight families are noise-prone or confirmatory only.
+WEIGHT_BY_FAMILY = {
+    "options_micro": 0.08,   # gamma, delta, Greeks — most reliable for 0DTE
+    "options_macro": 0.06,   # whale flow, OI concentration
+    "flow": 0.06,            # order flow, cumulative delta
+    "mtf": 0.06,             # multi-timeframe alignment
+    "volume": 0.05,          # volume profile (default)
+    "technical": 0.04,       # RSI, MACD, BB — noisy for 0DTE
+    "volatility": 0.04,      # IV/RV, skew — useful but late
+    "macro": 0.03,           # COT, breadth — slow, confirmatory only
+}
+
 
 class BaseV3Strategy(ABC):
     name: str = ""

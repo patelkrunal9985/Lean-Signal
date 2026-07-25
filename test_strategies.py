@@ -387,10 +387,10 @@ from utils.settings_manager import ODTE_STRATEGY_WHITELIST, ODTE_STRATEGY_BLACKL
 
 try:
     # Default values
-    assert get("neutral_cooldown_active") == 6, f"default cooldown_active={get('neutral_cooldown_active')}"
-    assert get("neutral_cooldown_confirmed") == 8
-    assert get("neutral_cooldown_max") == 3
-    assert get("sticky_counter_cycles") == 2
+    assert get("block_entries_in_closing_pin") == True, f"default closing_pin={get('block_entries_in_closing_pin')}"
+    assert get("conviction_decay") == 0.97
+    assert get("min_conviction") == 0.25
+    assert get("signal_budget_max") == 6
     # odte_mode may be 1/True or 0/False depending on disk state
     assert get("odte_mode") in (False, True, 0, 1), f"odte_mode={get('odte_mode')}"
     assert get("signal_age_decay_start_min") == 15
@@ -407,7 +407,7 @@ try:
     # get_all returns all settings
     all_settings = get_all()
     assert isinstance(all_settings, dict)
-    assert "neutral_cooldown_active" in all_settings
+    assert "block_entries_in_closing_pin" in all_settings
     assert "odte_mode" in all_settings
     results['passed'] += 1
     print(f'   [OK] Settings get_all: {len(all_settings)} keys returned')
@@ -418,45 +418,45 @@ except Exception as e:
 
 try:
     # set_many with valid and invalid keys
-    original = get("neutral_cooldown_active")
-    result = set_many({"neutral_cooldown_active": 12, "nonexistent_key": 999})
-    assert get("neutral_cooldown_active") == 12, f"expected 12, got {get('neutral_cooldown_active')}"
+    original = get("signal_age_decay_start_min")
+    result = set_many({"signal_age_decay_start_min": 12, "nonexistent_key": 999})
+    assert get("signal_age_decay_start_min") == 12, f"expected 12, got {get('signal_age_decay_start_min')}"
     assert "nonexistent_key" not in result, "unknown key should not be stored"
     results['passed'] += 1
-    print(f'   [OK] Settings set_many: cooldown_active updated, unknown key rejected')
+    print(f'   [OK] Settings set_many: decay_start_min updated, unknown key rejected')
     # Restore
-    set_many({"neutral_cooldown_active": original})
+    set_many({"signal_age_decay_start_min": original})
 except Exception as e:
     results['failed'] += 1
     results['errors'].append({'strategy': 'SettingsManager.set_many', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
     print(f' [FAIL] Settings set_many FAILED: {str(e)[:80]}')
     # Best-effort restore
-    try: set_many({"neutral_cooldown_active": 6})
+    try: set_many({"signal_age_decay_start_min": 15})
     except: pass
 
 try:
     # Type coercion: strings coerced to int/float
-    set_many({"neutral_cooldown_active": "10", "signal_age_decay_floor": "0.75"})
-    assert isinstance(get("neutral_cooldown_active"), int), f"expected int, got {type(get('neutral_cooldown_active'))}"
-    assert get("neutral_cooldown_active") == 10
+    set_many({"signal_age_decay_start_min": "10", "signal_age_decay_floor": "0.75"})
+    assert isinstance(get("signal_age_decay_start_min"), int), f"expected int, got {type(get('signal_age_decay_start_min'))}"
+    assert get("signal_age_decay_start_min") == 10
     assert isinstance(get("signal_age_decay_floor"), float), f"expected float, got {type(get('signal_age_decay_floor'))}"
     assert get("signal_age_decay_floor") == 0.75
     results['passed'] += 1
-    print(f'   [OK] Settings type coercion: str→int and str→float work')
+    print(f'   [OK] Settings type coercion: str\u2192int and str\u2192float work')
     # Restore
-    set_many({"neutral_cooldown_active": 6, "signal_age_decay_floor": 0.50})
+    set_many({"signal_age_decay_start_min": 15, "signal_age_decay_floor": 0.50})
 except Exception as e:
     results['failed'] += 1
     results['errors'].append({'strategy': 'SettingsManager.type_coercion', 'type': '-', 'error': str(e)[:200], 'traceback': traceback.format_exc()})
     print(f' [FAIL] Settings type coercion FAILED: {str(e)[:80]}')
-    try: set_many({"neutral_cooldown_active": 6, "signal_age_decay_floor": 0.50})
+    try: set_many({"signal_age_decay_start_min": 15, "signal_age_decay_floor": 0.50})
     except: pass
 
 try:
     # reset to defaults
-    set_many({"neutral_cooldown_active": 99})
+    set_many({"signal_age_decay_start_min": 99})
     settings_reset()
-    assert get("neutral_cooldown_active") == 6, f"after reset expected 6, got {get('neutral_cooldown_active')}"
+    assert get("signal_age_decay_start_min") == 15, f"after reset expected 15, got {get('signal_age_decay_start_min')}"
     results['passed'] += 1
     print(f'   [OK] Settings reset: restored to defaults')
 except Exception as e:

@@ -19,13 +19,6 @@ class RegimeDetector:
     - Position sizing multipliers (Risk)
     """
     
-    REGIME_MULTIPLIERS = {
-        "strong_uptrend": 0.80,
-        "strong_downtrend": 0.70,
-        "ranging": 1.00,
-        "high_volatility": 0.50,
-    }
-    
     REGIME_RECOMMENDED_STRATEGIES = {
         "strong_uptrend": ["vw_momentum", "trend_momentum", "mtf_confluence"],
         "strong_downtrend": ["vw_momentum", "order_flow_delta", "mtf_confluence"],
@@ -76,7 +69,6 @@ class RegimeDetector:
         
         regime = result["primary_regime"]
         
-        result["risk_multiplier"] = self.REGIME_MULTIPLIERS.get(regime, 1.0)
         result["recommended_strategies"] = self.REGIME_RECOMMENDED_STRATEGIES.get(regime, [])
         
         return result

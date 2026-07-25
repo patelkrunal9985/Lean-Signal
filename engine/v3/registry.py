@@ -1,4 +1,4 @@
-from engine.v3.base import BaseV3Strategy, STRATEGY_FAMILIES
+from engine.v3.base import BaseV3Strategy, STRATEGY_FAMILIES, WEIGHT_BY_FAMILY
 from utils.logger import get_logger
 
 logger = get_logger("engine.v3.registry")
@@ -191,6 +191,7 @@ def _import_all():
     ]
     for s in all_strategies:
         s.family = STRATEGY_FAMILY_MAP.get(s.name, "technical")
+        s.default_weight = WEIGHT_BY_FAMILY.get(s.family, 0.05)
         for instr in s.applies_to:
             if instr in _INSTRUMENT_STRATEGIES:
                 _INSTRUMENT_STRATEGIES[instr].append(s)

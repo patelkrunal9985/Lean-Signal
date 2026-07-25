@@ -269,7 +269,7 @@ class IBKRStreamer:
         global _connected, _connected_at
         # Use a random client ID offset on each reconnect to avoid
         # conflicts with stale sessions in the Gateway.
-        effective_client_id = self.client_id + random.randint(0, 31)
+        effective_client_id = self.client_id + random.Random(self.client_id).randint(0, 31)
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
         try:
@@ -488,9 +488,12 @@ class IBKRStreamer:
                             }
                         else:
                             cur = _live_option_prices[key]
-                            cur["bid"] = float(t.bid or 0)
-                            cur["ask"] = float(t.ask or 0)
-                            cur["last"] = float(t.last or 0)
+                            if t.bid > 0:
+                                cur["bid"] = float(t.bid)
+                            if t.ask > 0:
+                                cur["ask"] = float(t.ask)
+                            if t.last > 0:
+                                cur["last"] = float(t.last)
                             if _opt_vol > 0:
                                 cur["volume"] = _opt_vol
                             if _opt_oi > 0:

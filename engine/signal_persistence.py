@@ -67,9 +67,9 @@ def _autosave():
                 "entry_regime": dict(_entry_regime),
                 "entry_direction": dict(_entry_direction),
                 "direction_cycles": dict(_direction_cycles),
-                # Save last 3 snapshots per ticker (health score momentum needs 3 cycles)
+                # Save all snapshots per ticker (health score momentum needs full history)
                 "signal_memory": {
-                    t: mem[-3:] if len(mem) >= 3 else mem
+                    t: mem[-MAX_MEMORY:] if len(mem) >= MAX_MEMORY else mem
                     for t, mem in _signal_memory.items()
                 },
                 "version": 4,

@@ -190,9 +190,9 @@ def compute_futures_levels(ticker: str, data: dict, direction: str,
 
     # 4. Floor
     if direction == "long":
-        sl_candidates.append(("floor", entry - max(entry * FUTURE_SL_FLOOR_PCT, 0.1)))
+        sl_candidates.append(("floor", entry - entry * FUTURE_SL_FLOOR_PCT))
     else:
-        sl_candidates.append(("floor", entry + max(entry * FUTURE_SL_FLOOR_PCT, 0.1)))
+        sl_candidates.append(("floor", entry + entry * FUTURE_SL_FLOOR_PCT))
 
     if direction == "long":
         sl = max(sl_candidates, key=lambda c: c[1])[1]

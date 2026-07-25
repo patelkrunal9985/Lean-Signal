@@ -16,6 +16,8 @@ let _notifyPermitted = false;
 let _lastFlipCount = -1;
 let _lastTpCount = -1;
 let _firstLoad = true;
+let _historyPages = [];   // paginated history data (merged with _status.history)
+let _historyPageLoaded = 0;  // how many cycles have been fetched so far
 
 // ── Sticky event persistence: TP banners and flip badges linger for N cycles ──
 var _stickyTps = {};   // { ticker: { cyclesLeft, direction, verdict, timestamp } }
@@ -1193,7 +1195,21 @@ function renderHistory() {
   var container = document.getElementById('history-list');
   if (!container) return;
 
-  var history = _status.history || [];
+  // Merge base history (from /api/status) with paginated pages (from /api/history)
+  var baseHistory = _status.history || [];
+  var fullHistory = baseHistory.concat(_historyPages);
+
+  // Deduplicate by cycle_id (status poll may return newer cycles than pages)
+  var seen = {};
+  var history = [];
+  fullHistory.forEach(function(c) {
+    var cid = String(c.cycle_id || '');
+    if (!seen[cid]) {
+      seen[cid] = true;
+      history.push(c);
+    }
+  });
+
   if (!history || history.length === 0) {
     container.innerHTML = '<div class="empty-state">📜 No cycle history yet. Run a cycle first.</div>';
     return;
@@ -1222,12 +1238,12 @@ function renderHistory() {
       '</div>';
   }
 
-  // Filter input
+  // Filter input + cycle count
   var filterDiv = document.createElement('div');
   filterDiv.style.cssText = 'margin-bottom:10px;display:flex;gap:8px;align-items:center';
   filterDiv.innerHTML =
     '<input id="history-filter-input" type="text" placeholder="Filter by ticker..." ' +
-    'value="' + (_historyFilter || '') + '" ' +
+    'value="' + (window._historyFilter || '') + '" ' +
     'oninput="window._historyFilter=this.value;renderHistory()" ' +
     'style="flex:1;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);font-size:13px">' +
     '<span style="font-size:12px;color:var(--text-muted)">' + history.length + ' cycles</span>';
@@ -1297,6 +1313,37 @@ function renderHistory() {
 
     container.appendChild(cycleDiv);
   });
+
+  // Load More button (fetch next page from /api/history)
+  var hasMore = history.length >= 40 || _historyPages.length > 0;
+  if (hasMore && history.length >= 10) {
+    var loadMoreBtn = document.createElement('button');
+    loadMoreBtn.className = 'btn btn-secondary';
+    loadMoreBtn.style.cssText = 'display:block;margin:16px auto;padding:8px 24px';
+    loadMoreBtn.textContent = 'Load More';
+    loadMoreBtn.onclick = function() {
+      var offset = _historyPageLoaded || 0;
+      if (offset <= 0 && baseHistory.length > 0) offset = baseHistory.length;
+      this.disabled = true;
+      this.textContent = 'Loading...';
+      var self = this;
+      fetch('/api/history?offset=' + offset + '&limit=20')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          var newCycles = data.cycles || [];
+          if (newCycles.length > 0) {
+            newCycles.forEach(function(c) { _historyPages.push(c); });
+            _historyPageLoaded = offset + newCycles.length;
+          }
+          renderHistory();
+        })
+        .catch(function() {
+          self.textContent = 'Error loading — try again';
+          self.disabled = false;
+        });
+    };
+    container.appendChild(loadMoreBtn);
+  }
 
   // Delegated click for history signals → popup
   container.onclick = function(e) {

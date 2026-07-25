@@ -31,7 +31,8 @@ DATA_DIR = Path(__file__).parent.parent / "data"
 CYCLE_HISTORY_FILE = DATA_DIR / "cycle_history.json"
 
 MAX_HISTORY = 40      # max cycles kept on disk (older auto-deleted on save)
-HISTORY_SERVE_MAX = 40  # max cycles served to browser
+HISTORY_SERVE_MAX = 10  # max cycles served in /api/status (keeps response < 1MB)
+HISTORY_PAGE_SIZE = 40  # max cycles per paginated /api/history request
 
 _cycle_in_progress = False
 _cycle_count = 0
@@ -94,6 +95,12 @@ def _is_new_trading_day(last_utc_iso: str, now_ny_dt: datetime) -> bool:
         return last_et.date() < now_ny_dt.date()
     except Exception:
         return False
+
+
+def get_history_page(offset: int = 0, limit: int = 20) -> list[dict]:
+    """Return a paginated slice of trimmed cycle history."""
+    cycles = _cycle_history[offset:offset + limit]
+    return _trim_history(cycles)
 
 
 def get_status() -> dict:

@@ -170,6 +170,15 @@ class LeanSignalsHandler(BaseHTTPRequestHandler):
                 self._send_static(path[8:])
             elif path == "/api/status":
                 self._send_json(get_status())
+            elif path == "/api/history":
+                try:
+                    from engine.runner import get_history_page
+                    offset = int(params.get("offset", [0])[0])
+                    limit = int(params.get("limit", [20])[0])
+                    limit = min(limit, 40)
+                    self._send_json({"cycles": get_history_page(offset, limit)})
+                except Exception:
+                    self._send_json({"cycles": []})
             elif path == "/api/run-cycle":
                 result = run_cycle()
                 self._send_json(result)

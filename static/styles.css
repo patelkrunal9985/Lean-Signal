@@ -952,13 +952,14 @@ header {
   overflow: hidden;
   display: grid;
   grid-template-columns: 1fr 1fr 1fr 1fr;
-  grid-template-rows: auto auto auto auto auto auto auto auto auto;
+  grid-template-rows: auto auto auto auto auto auto auto auto auto auto;
   grid-template-areas:
     "verdict verdict verdict verdict"
     "header  header  header  header"
     "conv    conv    conv    conv"
     "pnl     pnl     pnl     pnl"
     "stats   stats   stats   stats"
+    "price   price   price   price"
     "levels  levels  levels  levels"
     "limit   limit   limit   limit"
     "sr      sr      sr      sr"
@@ -985,6 +986,19 @@ header {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* ── Grid area: price (dedicated row above levels) ── */
+.ticker-cell .grid-price {
+  grid-area: price;
+  display: flex;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--text-muted);
+  min-height: 20px;
+}
+.ticker-cell .grid-price .level-pair { display: flex; gap: 4px; align-items: center; }
+.ticker-cell .grid-price .level-label { color: var(--text-muted); font-size: 11px; }
+.ticker-cell .grid-price .level-val.price { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+
 /* ── Grid area: levels (Entry, SL, TP, R:R, ATR) — vertical stack, full width ── */
 .ticker-cell .grid-levels {
   grid-area: levels;

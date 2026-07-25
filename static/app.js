@@ -1092,26 +1092,15 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
         }
     }
 
-    // ── Bottom: ATR, gate, ns, price ──
+    // ── Bottom: gate, ns, proximity ──
     var bot = cell.querySelector('.grid-bottom');
     if (bot) {
-        var atr = effectiveGate ? (effectiveGate.atr || 0) : 0;
-    var atrStr = atr > 0 ? 'ATR $' + atr.toFixed(2) : '';
-    var nsStr = 'ns: ' + (ns >= 0 ? '+' : '') + ns.toFixed(2);
-    var gateStr = 'gate: --';
     var gateCls = '';
     var eGate = effectiveGate;
     if (eGate) {
-      if (eGate.gate_passed) {
-        gateStr = 'gate: passed';
-        gateCls = 'tc-gate-pass';
-      } else {
-        var reason = (eGate.gate_reason || 'fail').replace(/_/g, ' ');
-        gateStr = 'gate: ' + reason.slice(0, 35);
-        gateCls = 'tc-gate-fail';
-      }
+      gateCls = eGate.gate_passed ? 'tc-gate-pass' : 'tc-gate-fail';
     }
-    //     ── Proximity warning (use cached sig) ──
+    // ── Proximity warning (use cached sig) ──
     var proxWarn = effectiveSig ? (effectiveSig.proximity_warning || '') : '';
     var proxHtml = '';
     if (proxWarn) {
@@ -1121,7 +1110,7 @@ function _updateCell(ticker, state, direction, confidence, price, sig, gate, st)
     }
 
     bot.innerHTML =
-      '<span class="level-pair"><span class="level-label">Gate</span><span class="level-val' + (gateCls ? ' ' + gateCls : '') + '" title="' + (gate && !gate.gate_passed ? (gate.gate_reason || 'fail').replace(/_/g, ' ') : '') + '">' + (eGate ? (eGate.gate_passed ? 'Passed' : 'Blocked') : '--') + '</span></span>' +
+      '<span class="level-pair"><span class="level-label">Gate</span><span class="level-val' + (gateCls ? ' ' + gateCls : '') + '" title="' + (!eGate.gate_passed ? (eGate.gate_reason || 'fail').replace(/_/g, ' ') : '') + '">' + (eGate ? (eGate.gate_passed ? 'Passed' : 'Blocked') : '--') + '</span></span>' +
       '<span class="level-pair"><span class="level-label">Ns</span><span class="level-val ' + (ns > 0.1 ? 'tc-ns-pos' : ns < -0.1 ? 'tc-ns-neg' : '') + '">' + (ns >= 0 ? '+' : '') + ns.toFixed(2) + '</span></span>' +
       proxHtml;
   }

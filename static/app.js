@@ -1219,25 +1219,6 @@ function renderHistory() {
   var filterText = (window._historyFilter || '').toLowerCase().trim();
   container.innerHTML = '';
 
-  // Aggregate flip stats across all visible cycles
-  var totalFlips = 0;
-  var totalPotential = 0;
-  var flippedTickers = {};
-  history.forEach(function(c) {
-    totalFlips += c.flip_count || 0;
-    totalPotential += c.flip_count_potential || 0;
-    if (c.flips) Object.keys(c.flips).forEach(function(t) { flippedTickers[t] = true; });
-    if (c.flips_potential) Object.keys(c.flips_potential).forEach(function(t) { flippedTickers[t] = true; });
-  });
-  var flipSummaryHtml = '';
-  if (totalFlips > 0 || totalPotential > 0) {
-    flipSummaryHtml = '<div style="margin-bottom:10px;font-size:12px;color:var(--text-muted);display:flex;gap:16px;flex-wrap:wrap">' +
-      '<span>🔴 ' + totalFlips + ' confirmed flip' + (totalFlips !== 1 ? 's' : '') + '</span>' +
-      '<span>🟡 ' + totalPotential + ' potential flip' + (totalPotential !== 1 ? 's' : '') + '</span>' +
-      '<span>📊 ' + Object.keys(flippedTickers).length + ' ticker' + (Object.keys(flippedTickers).length !== 1 ? 's' : '') + ' flipped</span>' +
-      '</div>';
-  }
-
   // Filter input + cycle count
   var filterDiv = document.createElement('div');
   filterDiv.style.cssText = 'margin-bottom:10px;display:flex;gap:8px;align-items:center';
@@ -1248,11 +1229,6 @@ function renderHistory() {
     'style="flex:1;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);font-size:13px">' +
     '<span style="font-size:12px;color:var(--text-muted)">' + history.length + ' cycles</span>';
   container.appendChild(filterDiv);
-  if (flipSummaryHtml) {
-    var flipInfo = document.createElement('div');
-    flipInfo.innerHTML = flipSummaryHtml;
-    container.appendChild(flipInfo.firstChild);
-  }
 
   history.forEach(function(cycle) {
     var cycleDiv = document.createElement('div');

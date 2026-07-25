@@ -30,7 +30,8 @@ logger = get_logger("engine.runner")
 DATA_DIR = Path(__file__).parent.parent / "data"
 CYCLE_HISTORY_FILE = DATA_DIR / "cycle_history.json"
 
-MAX_HISTORY = 200
+MAX_HISTORY = 50      # max cycles kept on disk
+HISTORY_SERVE_MAX = 30  # max cycles served to browser (prevents 35MB JSON freeze)
 
 _cycle_in_progress = False
 _cycle_count = 0
@@ -49,12 +50,33 @@ def _load_history():
         if CYCLE_HISTORY_FILE.exists():
             with open(CYCLE_HISTORY_FILE) as f:
                 _cycle_history = json.load(f)
+            if len(_cycle_history) > MAX_HISTORY:
+                _cycle_history = _cycle_history[:MAX_HISTORY]
     except Exception:
         _cycle_history = []
 
 
+def _trim_history(cycles: list[dict]) -> list[dict]:
+    """Strip bloat fields from history cycles before serving to browser.
+    
+    Removes fields not used by the frontend history tab to reduce bandwidth
+    from ~5MB to ~500KB for 30 cycles.
+    """
+    _BLOAT_FIELDS = {
+        "gate_evaluations", "gate_rejections", "gate_rejection_breakdown",
+        "daytype_prediction", "account_summary", "slot_refresh", "health_scores",
+    }
+    trimmed = []
+    for c in cycles:
+        trimmed.append({k: v for k, v in c.items() if k not in _BLOAT_FIELDS})
+    return trimmed
+
+
 def _save_history():
     try:
+        global _cycle_history
+        if len(_cycle_history) > MAX_HISTORY:
+            _cycle_history = _cycle_history[:MAX_HISTORY]
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         with open(CYCLE_HISTORY_FILE, "w") as f:
             json.dump(_cycle_history, f, indent=2, default=str)
@@ -91,7 +113,7 @@ def get_status() -> dict:
         "cycle_count": _cycle_count,
         "auto_run": _auto_run_enabled,
         "last_cycle": _last_cycle_result,
-        "history": _cycle_history[:MAX_HISTORY],
+        "history": _trim_history(_cycle_history[:HISTORY_SERVE_MAX]),
         "connection": get_connection_status(),
         "slot_usage": get_slot_summary(),
         "option_health": option_health,

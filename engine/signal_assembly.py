@@ -286,33 +286,34 @@ def assemble_cycle_result(
                 cycle_id, e.get("ticker", "?"), exc,
             )
 
-    # ── Flips ──
-    flip_data = get_significant_flips(min_score=0.0)
-    real_flips = flip_data.get("real", [])
-    potential_flips = flip_data.get("potential", [])
-    all_states = get_all_states()
-
-    result["flip_count"] = len(real_flips)
-    result["flip_count_potential"] = len(potential_flips)
+    # ── Flips (per-cycle only, min_score 0.40 to filter noise) ──
+    flip_data = get_significant_flips(min_score=0.40)
+    all_flips = flip_data.get("real", []) + flip_data.get("potential", [])
+    cycle_flips = [f for f in all_flips if f.get("cycle_id") == cycle_id]
+    result["flip_count"] = len([f for f in cycle_flips if f.get("is_real")])
+    result["flip_count_potential"] = len([f for f in cycle_flips if not f.get("is_real")])
     result["flips"] = {}
-    for f in real_flips:
-        t = f["ticker"]
-        result["flips"][t] = {
-            "from": f["from"],
-            "to": f["to"],
-            "score": f["score"],
-            "strength": f.get("streak", 1) * f["score"],
-            "is_real": True,
-        }
+    for f in cycle_flips:
+        if f.get("is_real"):
+            t = f["ticker"]
+            result["flips"][t] = {
+                "from": f["from"],
+                "to": f["to"],
+                "score": f["score"],
+                "strength": f.get("streak", 1) * f["score"],
+                "is_real": True,
+            }
     result["flips_potential"] = {}
-    for f in potential_flips:
-        t = f["ticker"]
-        result["flips_potential"][t] = {
-            "from": f["from"],
-            "to": f["to"],
-            "score": f["score"],
-            "needs_cycles": max(0, 3 - f.get("streak", 1)),
-        }
+    for f in cycle_flips:
+        if not f.get("is_real"):
+            t = f["ticker"]
+            result["flips_potential"][t] = {
+                "from": f["from"],
+                "to": f["to"],
+                "score": f["score"],
+                "needs_cycles": max(0, 3 - f.get("streak", 1)),
+            }
+    all_states = get_all_states()
     result["signal_states"] = all_states
 
     # ── Persist signal state to disk ──

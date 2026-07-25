@@ -1193,16 +1193,51 @@ function renderHistory() {
   var container = document.getElementById('history-list');
   if (!container) return;
 
-  // STATE: Loading
   var history = _status.history || [];
   if (!history || history.length === 0) {
     container.innerHTML = '<div class="empty-state">📜 No cycle history yet. Run a cycle first.</div>';
     return;
   }
 
-  // STATE: Data
   var sub = _currentSubTab || 'stock';
+  var filterText = (window._historyFilter || '').toLowerCase().trim();
   container.innerHTML = '';
+
+  // Aggregate flip stats across all visible cycles
+  var totalFlips = 0;
+  var totalPotential = 0;
+  var flippedTickers = {};
+  history.forEach(function(c) {
+    totalFlips += c.flip_count || 0;
+    totalPotential += c.flip_count_potential || 0;
+    if (c.flips) Object.keys(c.flips).forEach(function(t) { flippedTickers[t] = true; });
+    if (c.flips_potential) Object.keys(c.flips_potential).forEach(function(t) { flippedTickers[t] = true; });
+  });
+  var flipSummaryHtml = '';
+  if (totalFlips > 0 || totalPotential > 0) {
+    flipSummaryHtml = '<div style="margin-bottom:10px;font-size:12px;color:var(--text-muted);display:flex;gap:16px;flex-wrap:wrap">' +
+      '<span>🔴 ' + totalFlips + ' confirmed flip' + (totalFlips !== 1 ? 's' : '') + '</span>' +
+      '<span>🟡 ' + totalPotential + ' potential flip' + (totalPotential !== 1 ? 's' : '') + '</span>' +
+      '<span>📊 ' + Object.keys(flippedTickers).length + ' ticker' + (Object.keys(flippedTickers).length !== 1 ? 's' : '') + ' flipped</span>' +
+      '</div>';
+  }
+
+  // Filter input
+  var filterDiv = document.createElement('div');
+  filterDiv.style.cssText = 'margin-bottom:10px;display:flex;gap:8px;align-items:center';
+  filterDiv.innerHTML =
+    '<input id="history-filter-input" type="text" placeholder="Filter by ticker..." ' +
+    'value="' + (_historyFilter || '') + '" ' +
+    'oninput="window._historyFilter=this.value;renderHistory()" ' +
+    'style="flex:1;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);font-size:13px">' +
+    '<span style="font-size:12px;color:var(--text-muted)">' + history.length + ' cycles</span>';
+  container.appendChild(filterDiv);
+  if (flipSummaryHtml) {
+    var flipInfo = document.createElement('div');
+    flipInfo.innerHTML = flipSummaryHtml;
+    container.appendChild(flipInfo.firstChild);
+  }
+
   history.forEach(function(cycle) {
     var cycleDiv = document.createElement('div');
     cycleDiv.className = 'history-cycle';
@@ -1211,6 +1246,14 @@ function renderHistory() {
     var timeStr = ts ? new Date(ts).toLocaleTimeString() : '--';
     var signals = cycle.signals || {};
     var typeSignals = signals[sub] || [];
+
+    // Apply ticker filter
+    if (filterText) {
+      typeSignals = typeSignals.filter(function(s) {
+        return (s.ticker || '').toLowerCase().indexOf(filterText) !== -1;
+      });
+    }
+
     var sigCount = typeSignals.length;
     var flipCount = cycle.flip_count || 0;
     var wasError = cycle.status === 'error';
@@ -1228,17 +1271,25 @@ function renderHistory() {
     if (wasError) {
       cycleDiv.querySelector('.history-body').innerHTML = '<div class="error-state">Error: ' + (cycle.reason || 'unknown') + '</div>';
     } else if (typeSignals.length === 0) {
-      cycleDiv.querySelector('.history-body').innerHTML = '<em style="color:var(--text-muted)">No ' + sub + ' signals this cycle</em>';
+      if (filterText) {
+        cycleDiv.querySelector('.history-body').innerHTML = '<em style="color:var(--text-muted)">No matching signals this cycle</em>';
+      } else {
+        cycleDiv.querySelector('.history-body').innerHTML = '<em style="color:var(--text-muted)">No ' + sub + ' signals this cycle</em>';
+      }
     } else {
       var bodyHtml = '';
       typeSignals.forEach(function(s) {
         var dirArrow = s.direction === 'long' ? '▲' : s.direction === 'short' ? '▼' : '–';
+        var gateBadge = s.gate_passed === false
+          ? '<span class="gate-badge rejected" style="font-size:9px;margin-left:4px">BLOCKED</span>'
+          : '';
         bodyHtml +=
-          '<div class="history-signal">' +
+          '<div class="history-signal" data-ticker="' + (s.ticker || '') + '" data-cycle="' + (cycle.cycle_id || '') + '">' +
             '<span class="direction-badge ' + s.direction + '" style="padding:1px 6px;font-size:10px">' + dirArrow + '</span>' +
             '<strong>' + s.ticker + '</strong>' +
             '<span>' + (s.confidence * 100).toFixed(1) + '%</span>' +
-            '<span style="color:var(--text-muted)">' + (s.regime || '') + '</span>' +
+            '<span class="verdict-badge" style="font-size:9px;padding:0 4px">' + (s.verdict || '') + '</span>' +
+            (gateBadge) +
           '</div>';
       });
       cycleDiv.querySelector('.history-body').innerHTML = bodyHtml;
@@ -1246,6 +1297,31 @@ function renderHistory() {
 
     container.appendChild(cycleDiv);
   });
+
+  // Delegated click for history signals → popup
+  container.onclick = function(e) {
+    var el = e.target.closest('.history-signal');
+    if (!el) return;
+    var ticker = el.getAttribute('data-ticker');
+    var cycleId = el.getAttribute('data-cycle');
+    if (!ticker || !cycleId) return;
+    var cycle = null;
+    for (var i = 0; i < history.length; i++) {
+      if (String(history[i].cycle_id) === cycleId) {
+        cycle = history[i];
+        break;
+      }
+    }
+    if (!cycle) return;
+    var signals = cycle.signals || {};
+    var typeSignals = signals[sub] || [];
+    for (var j = 0; j < typeSignals.length; j++) {
+      if (typeSignals[j].ticker === ticker) {
+        showSignalPopup(typeSignals[j], cycle);
+        return;
+      }
+    }
+  };
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -1502,8 +1578,8 @@ function showSignalPopup(signal, cycle) {
     dashSec.style.display = 'none';
   }
 
-  // Strategies
-  var strategies = signal.strategies || [];
+  // Strategies (handle both strategies and strategy_votes field names)
+  var strategies = signal.strategies || signal.strategy_votes || [];
   var stratContainer = document.getElementById('popup-strategies');
   stratContainer.innerHTML = '';
   if (strategies.length > 0) {
